@@ -26,7 +26,7 @@ import { Tab, TABS } from "@/components/contratos/ContratoTabs";
 export default function ContratoDetalle() {
   const { id } = useParams<{ id: string }>();
   const [c, setC] = useState<Contrato | null>(null);
-  const [tab, setTab] = useState<Tab>("Alertas");
+  const [tab, setTab] = useState<Tab>("Resumen");
   const [page, setPage] = useState(1);
   const [docs, setDocs] = useState<Pagina<Documento> | null>(null);
   const [plataformas, setPlataformas] = useState<PlataformaContrato[]>([]);
@@ -165,7 +165,7 @@ export default function ContratoDetalle() {
       )}
 
       {tab === "Documentos" && c && (
-        <TabDocumentosContrato contrato={c} />
+        <TabDocumentosContrato contrato={c} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
       )}
 
       {tab === "Empresa" && c && (

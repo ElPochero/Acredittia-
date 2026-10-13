@@ -304,6 +304,10 @@ export const contratos = {
   equipos: (id: string, params?: Omit<ParamsEquipos, "contrato_id">) =>
     api<Pagina<Sujeto>>(`/contratos/${id}/equipos`, { query: q(params) }),
 
+  importarEquipos: (id: string, sujetos_ids: string[]) =>
+    api<{ importados: number; documentos_creados: number }>(
+      `/contratos/${id}/equipos/importar`, { body: { sujetos_ids } }),
+
   alertas: (id: string, params?: ParamsPagina & {
     severidad?: string; origen?: string; solo_activas?: boolean;
   }) => api<Pagina<Alerta>>(`/contratos/${id}/alertas`, { query: q(params) }),

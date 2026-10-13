@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import * as Api from "@/lib/cliente";
-import { Contrato, PlataformaContrato, Sujeto } from "@/lib/tipos";
-import { Paginador } from "@/components/ui";
+import { Contrato, PlataformaContrato, Sujeto, EquipoIn } from "@/lib/tipos";
+import { Paginador, Modal } from "@/components/ui";
+import { toast } from "sonner";
 
 interface TabEquiposContratoProps {
   contrato: Contrato;
@@ -14,6 +15,23 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
   const [equipos, setEquipos] = useState<Api.Pagina<Sujeto> | null>(null);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
+  const [showAddEquipo, setShowAddEquipo] = useState(false);
+  const [tipos, setTipos] = useState<string[]>([]);
+  const [newEquipo, setNewEquipo] = useState<EquipoIn>({
+    patente: "",
+    tipo_equipo: "",
+    marca: "",
+    modelo: "",
+    anio: null,
+    contrato_id: contrato.id,
+  });
+  const [creando, setCreando] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [qFlota, setQFlota] = useState("");
+  const [flota, setFlota] = useState<Sujeto[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [selIds, setSelIds] = useState<string[]>([]);
+  const [importando, setImportando] = useState(false);
 
   const cargar = async () => {
     try {
@@ -30,6 +48,74 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
   useEffect(() => {
     cargar();
   }, [page, contrato.id]);
+
+  const abrirAddEquipo = async () => {
+    setShowAddEquipo(true);
+    if (tipos.length === 0) {
+      try {
+        const res = await Api.catalogo.tiposEquipo();
+        setTipos(res.items || []);
+      } catch (e) {
+        toast.error(Api.mensajeError(e));
+      }
+    }
+  };
+
+  const handleAddEquipo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEquipo.patente.trim() || !newEquipo.tipo_equipo) {
+      toast.error("Patente y tipo son obligatorios");
+      return;
+    }
+    setCreando(true);
+    try {
+      await Api.equipos.crear({ ...newEquipo, patente: newEquipo.patente.trim().toUpperCase(), contrato_id: contrato.id });
+      toast.success("Equipo agregado correctamente");
+      setShowAddEquipo(false);
+      setNewEquipo({ patente: "", tipo_equipo: "", marca: "", modelo: "", anio: null, contrato_id: contrato.id });
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message || "Error al agregar equipo");
+    } finally {
+      setCreando(false);
+    }
+  };
+
+  const buscarFlota = async () => {
+    setBuscando(true);
+    try {
+      const res = await Api.equipos.listar({ search: qFlota.trim() || undefined, page_size: 50 });
+      setFlota(res.items || []);
+      setSelIds([]);
+    } catch (e: any) {
+      toast.error(e.message || "Error al buscar en la flota");
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  const patentesEnContrato = new Set(
+    (equipos?.items || []).filter((s) => s.estado !== "baja").map((s) => (s.patente || "").toUpperCase()),
+  );
+
+  const handleImportar = async () => {
+    if (selIds.length === 0) {
+      toast.error("Selecciona al menos un equipo");
+      return;
+    }
+    setImportando(true);
+    try {
+      const res = await Api.contratos.importarEquipos(contrato.id, selIds);
+      toast.success(`${res.importados} equipo(s) agregados al contrato`);
+      setShowPicker(false);
+      setSelIds([]);
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message || "Error al importar equipos");
+    } finally {
+      setImportando(false);
+    }
+  };
 
   const list = equipos ? equipos.items : [];
   
@@ -68,6 +154,12 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
             <p className="text-[0.78rem] text-slate-500 m-0 mt-0.5">Consulta y gestiona todos los equipos y vehículos asociados a este contrato.</p>
           </div>
           <div className="flex gap-2 shrink-0 items-center">
+            <button onClick={abrirAddEquipo} className="px-3 py-1.5 bg-blue-600 text-white rounded text-[0.78rem] font-medium hover:bg-blue-700 transition-colors shadow-sm">
+              + Agregar equipo
+            </button>
+            <button onClick={() => { setShowPicker(true); setFlota([]); setQFlota(""); setSelIds([]); }} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm">
+              ⧉ Desde flota
+            </button>
             <button className="px-3 py-1.5 bg-blue-600 text-white rounded text-[0.78rem] font-medium hover:bg-blue-700 transition-colors shadow-sm">
               ✨ Asignar con Sofía IA
             </button>
@@ -235,6 +327,142 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
           </div>
         </div>
       </div>
+
+      <Modal abierto={showAddEquipo} titulo="Agregar Equipo" onCerrar={() => setShowAddEquipo(false)} ancho="max-w-md">
+        <form onSubmit={handleAddEquipo} className="flex flex-col gap-4">
+          <div>
+            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Patente *</label>
+            <input
+              type="text"
+              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none uppercase"
+              placeholder="Ej. ABCD12"
+              value={newEquipo.patente}
+              onChange={e => setNewEquipo({...newEquipo, patente: e.target.value})}
+            />
+          </div>
+          <div>
+            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Tipo de equipo *</label>
+            <select
+              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none"
+              value={newEquipo.tipo_equipo}
+              onChange={e => setNewEquipo({...newEquipo, tipo_equipo: e.target.value})}
+            >
+              <option value="">Selecciona un tipo...</option>
+              {tipos.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Marca</label>
+              <input
+                type="text"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none"
+                placeholder="Ej. Volvo"
+                value={newEquipo.marca || ''}
+                onChange={e => setNewEquipo({...newEquipo, marca: e.target.value})}
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Modelo</label>
+              <input
+                type="text"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none"
+                placeholder="Ej. FH 540"
+                value={newEquipo.modelo || ''}
+                onChange={e => setNewEquipo({...newEquipo, modelo: e.target.value})}
+              />
+            </div>
+            <div className="w-[90px]">
+              <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Año</label>
+              <input
+                type="number"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none"
+                placeholder="2024"
+                value={newEquipo.anio ?? ''}
+                onChange={e => setNewEquipo({...newEquipo, anio: e.target.value ? Number(e.target.value) : null})}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              type="button"
+              onClick={() => setShowAddEquipo(false)}
+              className="px-4 py-2 border border-slate-200 text-slate-600 font-bold text-[0.85rem] rounded-lg hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={creando}
+              className="px-4 py-2 bg-blue-600 text-white font-bold text-[0.85rem] rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {creando ? "Guardando..." : "Agregar equipo"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal abierto={showPicker} titulo="Agregar desde la flota" onCerrar={() => setShowPicker(false)} ancho="max-w-lg">
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2">
+            <input
+              aria-label="Buscar en la flota"
+              className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none"
+              placeholder="Buscar por patente, marca o modelo..."
+              value={qFlota}
+              onChange={(e) => setQFlota(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") buscarFlota(); }}
+            />
+            <button
+              onClick={buscarFlota}
+              disabled={buscando}
+              className="px-4 py-2 bg-slate-800 text-white font-bold text-[0.85rem] rounded-lg hover:bg-slate-700 disabled:opacity-50"
+            >
+              {buscando ? "Buscando..." : "Buscar"}
+            </button>
+          </div>
+          {flota.length > 0 && (
+            <ul className="flex flex-col gap-1.5 m-0 p-0 list-none max-h-[300px] overflow-y-auto">
+              {flota.map((s) => {
+                const yaEsta = patentesEnContrato.has((s.patente || "").toUpperCase());
+                const marcado = selIds.includes(s.id);
+                return (
+                  <li key={s.id}>
+                    <label className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-[0.82rem] ${yaEsta ? "border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white cursor-pointer hover:bg-slate-50"}`}>
+                      <input
+                        type="checkbox"
+                        disabled={yaEsta}
+                        checked={marcado}
+                        onChange={() => setSelIds(prev => marcado ? prev.filter(id => id !== s.id) : [...prev, s.id])}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      <span className="font-bold">{s.patente}</span>
+                      <span className="text-slate-500 truncate">{s.tipo_equipo} {s.marca} {s.modelo}</span>
+                      {yaEsta && <span className="ml-auto text-[0.7rem] font-bold">En este contrato</span>}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex justify-end gap-2 mt-1">
+            <button
+              onClick={() => setShowPicker(false)}
+              className="px-4 py-2 border border-slate-200 text-slate-600 font-bold text-[0.85rem] rounded-lg hover:bg-slate-50"
+            >
+              Cerrar
+            </button>
+            <button
+              onClick={handleImportar}
+              disabled={importando || selIds.length === 0}
+              className="px-4 py-2 bg-blue-600 text-white font-bold text-[0.85rem] rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {importando ? "Agregando..." : `Agregar ${selIds.length} equipo(s)`}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
