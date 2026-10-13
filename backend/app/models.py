@@ -405,6 +405,8 @@ class Sujeto(Base):
     marca: Mapped[str | None] = mapped_column(Text)
     modelo: Mapped[str | None] = mapped_column(Text)
     anio: Mapped[int | None] = mapped_column(Integer)
+    telefono: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
@@ -1087,7 +1089,7 @@ class ChatHistorial(Base):
 
 
 class DocumentoChunk(Base):
-    """Chunk de texto con embedding para RAG (v10, script 10_rag_pgvector.sql).
+    """Chunk de texto con embedding para RAG (v11, script 11_rag_pgvector.sql).
 
     El embedding es `vector(2048)` de `nvidia/nemotron-3-embed-1b` (NIM).
     Aislamiento multi-tenant por `company_id` con RLS+FORCE (p_tenant).

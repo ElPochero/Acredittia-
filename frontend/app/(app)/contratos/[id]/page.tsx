@@ -12,20 +12,21 @@ import { TabRequisitosContrato } from "@/components/contratos/TabRequisitosContr
 import { TabPersonalContrato } from "@/components/contratos/TabPersonalContrato";
 import { TabEquiposContrato } from "@/components/contratos/TabEquiposContrato";
 import { TabDocumentosContrato } from "@/components/contratos/TabDocumentosContrato";
+import { TabDocumentosFaena } from "@/components/contratos/TabDocumentosFaena";
+import { TabCarpetaArranque } from "@/components/contratos/TabCarpetaArranque";
 import { TabEmpresaContrato } from "@/components/contratos/TabEmpresaContrato";
 import { TabLicenciaInternaContrato } from "@/components/contratos/TabLicenciaInternaContrato";
 import { ContratoLayout } from "@/components/contratos/ContratoLayout";
 import { TabResumen } from "@/components/contratos/TabResumen";
 import { TabChatContrato } from "@/components/contratos/TabChatContrato";
 
-const TABS = ["Resumen", "Chat", "Documentos", "Empresa", "Personal", "Vehículos / Equipos", "Licencia Interna", "Alertas IA", "Requisitos", "Historial"] as const;
-type Tab = (typeof TABS)[number];
+import { Tab, TABS } from "@/components/contratos/ContratoTabs";
 
 
 export default function ContratoDetalle() {
   const { id } = useParams<{ id: string }>();
   const [c, setC] = useState<Contrato | null>(null);
-  const [tab, setTab] = useState<Tab>("Resumen");
+  const [tab, setTab] = useState<Tab>("Alertas");
   const [page, setPage] = useState(1);
   const [docs, setDocs] = useState<Pagina<Documento> | null>(null);
   const [plataformas, setPlataformas] = useState<PlataformaContrato[]>([]);
@@ -174,27 +175,8 @@ export default function ContratoDetalle() {
       {tab === "Personal" && c && (
         <TabPersonalContrato contrato={c} plataformas={plataformas} />
       )}
-      {tab === "Equipos" && c && (
-        <TabEquiposContrato contrato={c} plataformas={plataformas} />
-      )}
       {tab === "Vehículos / Equipos" && c && (
         <TabEquiposContrato contrato={c} plataformas={plataformas} />
-      )}
-
-      {tab === "Matriz" && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <select className="input max-w-[200px]" value={tipoMatriz}
-              onChange={(e) => { setTipoMatriz(e.target.value as "personal" | "equipo"); setPage(1); }}>
-              <option value="personal">Personal</option>
-              <option value="equipo">Equipos</option>
-            </select>
-            <span className="text-xs text-slate-500">
-              «—» significa que el requisito no aplica a ese sujeto; no es un incumplimiento.
-            </span>
-          </div>
-          {matriz && <TablaMatriz matriz={matriz} onPagina={setPage} />}
-        </div>
       )}
 
       {tab === "Alertas" && (
@@ -276,6 +258,22 @@ export default function ContratoDetalle() {
           />
           {hist && <Paginador page={hist.page} totalPaginas={hist.total_pages} total={hist.total} etiqueta="movimientos" onPagina={setPage} />}
         </div>
+      )}
+
+      {tab === "Documentos Faena" && c && (
+        <TabDocumentosFaena
+          contrato={c}
+          onVerEquipo={() => cambiarTab("Vehículos / Equipos")}
+        />
+      )}
+
+      {tab === "Carpeta de Arranque" && c && (
+        <TabCarpetaArranque
+          contrato={c}
+          onSubir={subir}
+          subiendo={subiendo}
+          analizandoId={analizandoId}
+        />
       )}
 
       <Modal abierto={!!review} titulo="Revisión IA" onCerrar={() => setReview(null)} ancho="max-w-xl">

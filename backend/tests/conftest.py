@@ -77,7 +77,8 @@ SCRIPTS = [
     "07_migracion_v12.sql",
     "08_migracion_v13.sql",
     "09_certificacion_laboral.sql",
-    "10_rag_pgvector.sql",
+    "10_add_telefono_email.sql",
+    "11_rag_pgvector.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")

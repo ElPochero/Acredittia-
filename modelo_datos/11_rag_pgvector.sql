@@ -1,5 +1,5 @@
 -- ============================================================================
--- ACREDITTIA — 10_rag_pgvector.sql
+-- ACREDITTIA — 11_rag_pgvector.sql
 -- RAG con pgvector: chunks de documentos y requisitos con embeddings.
 --
 -- - `vector` está en la allow-list de Azure Database for PostgreSQL

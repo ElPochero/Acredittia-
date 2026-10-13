@@ -55,8 +55,8 @@ def _registrar_vector(dbapi_connection, connection_record) -> None:
     try:
         register_vector(dbapi_connection)
     except Exception:
-        # El tipo 'vector' de pgvector solo existe tras aplicar la migración 10
-        # (10_rag_pgvector.sql). Si el esquema aún no lo tiene, ignoramos el fallo
+        # El tipo 'vector' de pgvector solo existe tras aplicar la migración 11
+        # (11_rag_pgvector.sql). Si el esquema aún no lo tiene, ignoramos el fallo
         # para permitir que las migraciones o conexiones iniciales funcionen.
         pass
 
@@ -72,9 +72,10 @@ SCHEMA_SCRIPTS = [
     "07_migracion_v12.sql",
     "08_migracion_v13.sql",
     "09_certificacion_laboral.sql",
-    "10_rag_pgvector.sql",
+    "10_add_telefono_email.sql",
+    "11_rag_pgvector.sql",
 ]
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -220,13 +221,15 @@ def _columna_existe(conn, tabla: str, columna: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "documento_chunk"):
-            return 10
+            return 11
         if _tabla_existe(c, "periodos_laborales"):
+            if _columna_existe(c, "sujetos", "telefono"):
+                return 10
             return 9
         if _columna_existe(c, "contratos", "hereda_plataformas"):
             return 8
@@ -313,7 +316,8 @@ def apply_schema(schema_dir: str | None = None) -> int:
                     "07_migracion_v12.sql",
                     "08_migracion_v13.sql",
                     "09_certificacion_laboral.sql",
-                    "10_rag_pgvector.sql",
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
                 ]
             elif actual == 4:
                 pendientes = [
@@ -321,28 +325,37 @@ def apply_schema(schema_dir: str | None = None) -> int:
                     "07_migracion_v12.sql",
                     "08_migracion_v13.sql",
                     "09_certificacion_laboral.sql",
-                    "10_rag_pgvector.sql",
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
                 ]
             elif actual == 6:
                 pendientes = [
                     "07_migracion_v12.sql",
                     "08_migracion_v13.sql",
                     "09_certificacion_laboral.sql",
-                    "10_rag_pgvector.sql",
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
                 ]
             elif actual == 7:
                 pendientes = [
                     "08_migracion_v13.sql",
                     "09_certificacion_laboral.sql",
-                    "10_rag_pgvector.sql",
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
                 ]
             elif actual == 8:
                 pendientes = [
                     "09_certificacion_laboral.sql",
-                    "10_rag_pgvector.sql",
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
                 ]
             elif actual == 9:
-                pendientes = ["10_rag_pgvector.sql"]
+                pendientes = [
+                    "10_add_telefono_email.sql",
+                    "11_rag_pgvector.sql",
+                ]
+            elif actual == 10:
+                pendientes = ["11_rag_pgvector.sql"]
             else:
                 pendientes = []
 
