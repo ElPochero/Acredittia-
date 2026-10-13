@@ -528,6 +528,65 @@ def equipos_contrato(contrato_id: uuid.UUID,
                           estado=estado, tipo_equipo=tipo_equipo)
 
 
+@router.post("/{contrato_id}/equipos/importar")
+def importar_equipos(contrato_id: uuid.UUID, body: ImportarPersonalIn,
+                     db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Importa equipos de la flota u otro contrato copiando el sujeto."""
+    from ..services.checklist import instanciar_docs
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    sujetos = db.scalars(select(Sujeto).where(
+        Sujeto.company_id == cid,
+        Sujeto.id.in_(body.sujetos_ids),
+        Sujeto.tipo == "equipo"
+    )).all()
+
+    importados = 0
+    docs_creados = 0
+    for s_old in sujetos:
+        if not s_old.patente:
+            continue
+        existe = db.scalar(select(Sujeto.id).where(
+            Sujeto.company_id == cid,
+            Sujeto.contrato_id == c.id,
+            Sujeto.patente == s_old.patente.strip().upper(),
+            Sujeto.tipo == "equipo",
+            Sujeto.estado != "baja"
+        ))
+        if existe:
+            continue
+
+        s_new = Sujeto(
+            company_id=cid,
+            contrato_id=c.id,
+            tipo="equipo",
+            estado="proc",
+            nombre=s_old.nombre or s_old.patente,
+            patente=s_old.patente.strip().upper(),
+            tipo_equipo=s_old.tipo_equipo,
+            marca=s_old.marca,
+            modelo=s_old.modelo,
+            anio=s_old.anio
+        )
+        db.add(s_new)
+        db.flush()
+
+        n = instanciar_docs(db, cid, "equipo", sujeto_id=s_new.id,
+                            faena_id=c.faena_id,
+                            contrato_plantilla_id=c.id)
+        docs_creados += n
+        importados += 1
+
+    actividad.log(db, cid, "creacion", "equipos",
+                  f"Importados {importados} equipos al contrato '{c.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {"importados": importados, "documentos_creados": docs_creados}
+
+
 @router.get("/{contrato_id}/alertas")
 def alertas_contrato(contrato_id: uuid.UUID,
                      severidad: str | None = Query(None),

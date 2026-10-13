@@ -23,7 +23,7 @@ from app.database import worker_session
 from app.models import ContratoRequisito, RequisitoTemplate
 from app.services.checklist import normalizar
 
-from tests.conftest import API, patente_valida, rut_valido
+from tests.conftest import API, crear_contrato, patente_valida, rut_valido
 
 PLATAFORMAS_PELAMBRES = {"SIGA", "DIRECTIC", "SGES", "Academia MLP", "EMSIPOR"}
 
@@ -592,3 +592,27 @@ def test_stats_del_contrato(app_cliente, empresa_a, contrato_a,
     assert stats["docs_empresa"]["total"] > 0
     assert stats["cumplimiento_pct"] == 0
     assert stats["alertas_activas"] == 0
+
+
+# ============================================================================
+# Importación de equipos al contrato
+# ============================================================================
+def test_importar_equipos_copia_la_flota_y_es_idempotente(
+        app_cliente, empresa_a, contrato_a, faena_pelambres):
+    eq = app_cliente.post(f"{API}/equipos", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"], "patente": patente_valida(91),
+        "tipo_equipo": "Camión", "marca": "Volvo", "modelo": "FH"}).json()
+    otro = crear_contrato(app_cliente, empresa_a, faena_pelambres["id"],
+                          nombre="Contrato Flota", codigo="FLOTA-01")
+
+    r = app_cliente.post(f"{API}/contratos/{otro['id']}/equipos/importar",
+                         headers=empresa_a["headers"],
+                         json={"sujetos_ids": [eq["id"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["importados"] == 1
+    assert r.json()["documentos_creados"] > 0
+
+    r = app_cliente.post(f"{API}/contratos/{otro['id']}/equipos/importar",
+                         headers=empresa_a["headers"],
+                         json={"sujetos_ids": [eq["id"]]})
+    assert r.json()["importados"] == 0, "la patente ya activa no se duplica"
