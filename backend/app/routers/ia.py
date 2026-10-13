@@ -60,6 +60,7 @@ from ..models import (
     ContratoRequisito,
     Documento,
     DocumentoArchivo,
+    DocumentoChunk,
     IaHallazgo,
     IaReview,
     Sujeto,
@@ -610,10 +611,10 @@ def extraer_carpeta_arranque(
     cid: uuid.UUID = Depends(get_company_id),
     user: User = Depends(require_company),
 ):
-    """Lee una planilla o PDF de carpeta de arranque y propone requisitos por Ã¡mbito.
+    """Lee una planilla o PDF de carpeta de arranque y propone requisitos por ambito.
 
-    Alias canÃ³nico de `POST /contratos/{id}/carpeta-arranque` (Â§12.1). La
-    extracciÃ³n por sÃ­ sola no crea requisitos.
+    Alias canonico de `POST /contratos/{id}/carpeta-arranque` (Â§12.1). La
+    extraccion por si sola no crea requisitos.
     """
     return encolar_extraccion_arranque(
         db, cid, user, body.blob_path, body.filename, body.contrato_id
@@ -636,13 +637,13 @@ def upload_url_temporal(
     cid: uuid.UUID = Depends(get_company_id),
     user: User = Depends(get_current_user),
 ):
-    """SAS de escritura para un blob temporal de extracciÃ³n.
+    """SAS de escritura para un blob temporal de extraccion.
 
     Las tres extracciones de Â§12.1 y `POST /contratos/analizar` reciben un
     `blob_path` ya subido, pero el emisor de SAS de `/documentos/{id}/upload-url`
     exige un documento existente y estas extracciones son justo lo que ocurre
     ANTES de que exista la entidad: analizar el contrato para pre-llenar el
-    formulario de creaciÃ³n, o leer una cÃ©dula para dar de alta al trabajador.
+    formulario de creacion, o leer una cedula para dar de alta al trabajador.
 
     El blob cae en `tmp/{company_id}/â€¦` y la tarea `purgar_temporales` lo elimina
     a las 24 horas: contiene datos personales (cÃ©dulas) y no queda referenciado
@@ -690,7 +691,11 @@ class ChatIn(BaseModel):
 
 
 def _contexto_contrato(
-    db: Session, cid: uuid.UUID, user: User, contexto: str
+    db: Session,
+    cid: uuid.UUID,
+    user: User,
+    contexto: str,
+    mensaje: str | None = None,
 ) -> dict | None:
     """Datos reales del contrato para que el chat responda con contexto.
 
@@ -755,6 +760,43 @@ def _contexto_contrato(
             vistos.add(titulo.lower())
             todos.append(f"{titulo} [{ambito}]")
     reqs_txt = ", ".join(todos[:60]) or "ninguno"
+    # RAG (v10): si el contrato ya esta indexado, los requisitos salen de
+    # busqueda semantica top-K sobre la pregunta en vez del volcado completo.
+    # Sin chunks, sin mensaje de texto o si NIM falla, se usa el volcado.
+    frags_txt = None
+    if mensaje and isinstance(mensaje, str) and mensaje.strip():
+        try:
+            from ..services.embeddings import EmbeddingsError, embed_texts
+
+            n_chunks = db.scalar(
+                select(func.count())
+                .select_from(DocumentoChunk)
+                .where(
+                    DocumentoChunk.company_id == cid,
+                    DocumentoChunk.contrato_id == c.id,
+                )
+            )
+            if n_chunks:
+                _vec = embed_texts([mensaje.strip()[:2000]])[0]
+                _top = db.scalars(
+                    select(DocumentoChunk)
+                    .where(
+                        DocumentoChunk.company_id == cid,
+                        DocumentoChunk.contrato_id == c.id,
+                    )
+                    .order_by(DocumentoChunk.embedding.cosine_distance(_vec))
+                    .limit(8)
+                ).all()
+                if _top:
+                    frags_txt = "; ".join(
+                        f"{t.titulo} [{t.ambito or '?'}]: {t.texto}" for t in _top
+                    )
+        except EmbeddingsError as e:
+            logger.warning("RAG sin retrieval para %s: %s", c.id, e)
+        except Exception:
+            logger.exception("RAG: fallo inesperado en retrieval")
+    if frags_txt:
+        reqs_txt = "(busqueda semantica) " + frags_txt
     alertas = list(
         db.scalars(
             select(Alerta)
@@ -886,7 +928,7 @@ async def chat_ia(
     # Agregar el mensaje actual del usuario al historial para enviarlo al modelo
     historial_dict.append({"role": "user", "content": contenido_mensaje})
 
-    ctx = _contexto_contrato(db, cid, user, body.contexto)
+    ctx = _contexto_contrato(db, cid, user, body.contexto, body.mensaje)
     historial_ctx = [ctx] + historial_dict if ctx else historial_dict
     respuesta_json = await chat_with_ia(historial_ctx)
 
@@ -958,3 +1000,58 @@ def get_chat_historial(
         }
         for h in historial
     ]
+
+
+@router.get("/rag/buscar")
+def buscar_rag(
+    q: str = Query(..., min_length=1, max_length=2000),
+    contrato_id: uuid.UUID = Query(...),
+    k: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Búsqueda semántica sobre los chunks del contrato (RAG, v10).
+
+    El tenant se aísla dos veces: `require_contrato` para el rol
+    contract_admin y RLS (p_tenant) en la consulta. Los embeddings nunca
+    salen en la respuesta.
+    """
+    from sqlalchemy import select
+
+    from ..services.embeddings import EmbeddingsError, embed_texts
+
+    c = db.get(Contrato, contrato_id)
+    if not c or c.company_id != cid:
+        raise err(404, "NO_ENCONTRADO", "Contrato no existe")
+    require_contrato(contrato_id, user)
+
+    try:
+        vec = embed_texts([q])[0]
+    except EmbeddingsError as e:
+        raise err(502, "EMBEDDINGS_NO_DISPONIBLES", str(e))
+
+    dist = DocumentoChunk.embedding.cosine_distance(vec)
+    filas = db.execute(
+        select(DocumentoChunk, dist.label("distancia"))
+        .where(
+            DocumentoChunk.company_id == cid,
+            DocumentoChunk.contrato_id == contrato_id,
+        )
+        .order_by(dist)
+        .limit(k)
+    ).all()
+    return {
+        "items": [
+            {
+                "id": str(ch.id),
+                "titulo": ch.titulo,
+                "ambito": ch.ambito,
+                "texto": ch.texto,
+                "documento_id": str(ch.documento_id) if ch.documento_id else None,
+                "distancia": float(d),
+            }
+            for ch, d in filas
+        ],
+        "total": len(filas),
+    }

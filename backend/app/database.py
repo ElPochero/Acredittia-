@@ -14,6 +14,7 @@ endpoints síncronos que corren en el threadpool de anyio) tiene su propia
 copia. El listener `after_begin` lo materializa con `set_config(..., true)`,
 que es local a la transacción: al terminarla el ajuste desaparece solo.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -43,6 +44,24 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+# Registro del tipo `vector` de pgvector en cada conexión psycopg.
+# Sin esto, leer un embedding devuelve string y escribir una lista falla.
+# Fuente: https://github.com/pgvector/pgvector-python?tab=readme-ov-file#sqlalchemy
+from pgvector.psycopg import register_vector  # noqa: E402
+
+
+@event.listens_for(engine, "connect")
+def _registrar_vector(dbapi_connection, connection_record) -> None:
+    try:
+        register_vector(dbapi_connection)
+    except Exception:
+        # El tipo 'vector' de pgvector solo existe tras aplicar la migración 10
+        # (10_rag_pgvector.sql). Si el esquema aún no lo tiene, ignoramos el fallo
+        # para permitir que las migraciones o conexiones iniciales funcionen.
+        pass
+
+
+
 # Scripts del modelo de datos en orden y versión de esquema que representan.
 SCHEMA_SCRIPTS = [
     "01_esquema.sql",
@@ -53,9 +72,10 @@ SCHEMA_SCRIPTS = [
     "07_migracion_v12.sql",
     "08_migracion_v13.sql",
     "09_certificacion_laboral.sql",
+    "10_rag_pgvector.sql",
 ]
-SCHEMA_VERSION = 9
-MIGRATION_LOCK_ID = 918273        # clave del pg_advisory_lock de migración
+SCHEMA_VERSION = 10
+MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
 # ---------------------------------------------------------------- contexto
@@ -160,28 +180,43 @@ def worker_session(company_id=None, is_admin: bool = False, user_id=None):
 
 # ---------------------------------------------------------------- esquema
 def wait_for_db(retries: int = 30) -> None:
+    last_err = None
     for _ in range(retries):
         try:
             with engine.connect() as c:
                 c.execute(text("SELECT 1"))
             return
-        except Exception:
+        except Exception as e:
+            last_err = e
             time.sleep(1)
-    raise RuntimeError("Base de datos no disponible")
+    raise RuntimeError(f"Base de datos no disponible: {last_err}")
+
 
 
 def _tabla_existe(conn, nombre: str) -> bool:
-    return conn.execute(text(
-        "SELECT 1 FROM information_schema.tables "
-        "WHERE table_schema='public' AND table_name=:t"
-    ), {"t": nombre}).first() is not None
+    return (
+        conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name=:t"
+            ),
+            {"t": nombre},
+        ).first()
+        is not None
+    )
 
 
 def _columna_existe(conn, tabla: str, columna: str) -> bool:
-    return conn.execute(text(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
-    ), {"t": tabla, "c": columna}).first() is not None
+    return (
+        conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name=:t AND column_name=:c"
+            ),
+            {"t": tabla, "c": columna},
+        ).first()
+        is not None
+    )
 
 
 def schema_version() -> int:
@@ -189,17 +224,21 @@ def schema_version() -> int:
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
+        if _tabla_existe(c, "documento_chunk"):
+            return 10
         if _tabla_existe(c, "periodos_laborales"):
             return 9
         if _columna_existe(c, "contratos", "hereda_plataformas"):
             return 8
         if _columna_existe(c, "requisito_templates", "archivo_ejemplo"):
             return 7
-        if _tabla_existe(c, "plataforma_credenciales") and _tabla_existe(c, "cumplimiento_snapshots"):
+        if _tabla_existe(c, "plataforma_credenciales") and _tabla_existe(
+            c, "cumplimiento_snapshots"
+        ):
             return 6
-        rls = c.execute(text(
-            "SELECT relrowsecurity FROM pg_class WHERE relname='contratos'"
-        )).scalar()
+        rls = c.execute(
+            text("SELECT relrowsecurity FROM pg_class WHERE relname='contratos'")
+        ).scalar()
         return 4 if rls else 3
 
 
@@ -223,7 +262,7 @@ def _preparar_script(sql: str) -> tuple[list[str], str]:
     resto: list[str] = []
     for linea in sql.splitlines():
         if linea.strip().startswith("\\echo"):
-            continue          # metacomando de psql; psycopg no lo entiende
+            continue  # metacomando de psql; psycopg no lo entiende
         if _ADD_VALUE.match(linea):
             add_values.append(linea.strip())
         else:
@@ -236,6 +275,7 @@ def apply_schema(schema_dir: str | None = None) -> int:
     sdir = schema_dir or settings.schema_dir
     if not os.path.isdir(sdir):
         from .models import Base, _ENUM_VALUES
+
         raw = engine.raw_connection()
         try:
             raw.driver_connection.autocommit = True
@@ -267,15 +307,42 @@ def apply_schema(schema_dir: str | None = None) -> int:
             if actual == 0:
                 pendientes = SCHEMA_SCRIPTS
             elif actual == 3:
-                pendientes = ["04_rls.sql", "06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = [
+                    "04_rls.sql",
+                    "06_migracion_v11.sql",
+                    "07_migracion_v12.sql",
+                    "08_migracion_v13.sql",
+                    "09_certificacion_laboral.sql",
+                    "10_rag_pgvector.sql",
+                ]
             elif actual == 4:
-                pendientes = ["06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = [
+                    "06_migracion_v11.sql",
+                    "07_migracion_v12.sql",
+                    "08_migracion_v13.sql",
+                    "09_certificacion_laboral.sql",
+                    "10_rag_pgvector.sql",
+                ]
             elif actual == 6:
-                pendientes = ["07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = [
+                    "07_migracion_v12.sql",
+                    "08_migracion_v13.sql",
+                    "09_certificacion_laboral.sql",
+                    "10_rag_pgvector.sql",
+                ]
             elif actual == 7:
-                pendientes = ["08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = [
+                    "08_migracion_v13.sql",
+                    "09_certificacion_laboral.sql",
+                    "10_rag_pgvector.sql",
+                ]
             elif actual == 8:
-                pendientes = ["09_certificacion_laboral.sql"]
+                pendientes = [
+                    "09_certificacion_laboral.sql",
+                    "10_rag_pgvector.sql",
+                ]
+            elif actual == 9:
+                pendientes = ["10_rag_pgvector.sql"]
             else:
                 pendientes = []
 
@@ -286,7 +353,7 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 with open(ruta, encoding="utf-8") as f:
                     add_values, resto = _preparar_script(f.read())
                 for sentencia in add_values:
-                    cur.execute(sentencia)      # confirmada al instante
+                    cur.execute(sentencia)  # confirmada al instante
                 if resto.strip():
                     cur.execute(resto)
             return schema_version()

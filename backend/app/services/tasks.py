@@ -1349,3 +1349,28 @@ def purgar_chat_historial(meses: int = 3) -> int:
         result = db.execute(stmt)
         db.commit()
         return result.rowcount or 0
+
+
+# ============================================================================
+# RAG: indexacion de chunks con embeddings (v10)
+# ============================================================================
+@tarea("indexar_contrato")
+def indexar_contrato(contrato_id: str, company_id: str) -> None:
+    """Reconstruye los chunks con embeddings de un contrato (idempotente).
+
+    No propaga excepciones (regla de tareas): un fallo de NIM deja los
+    chunks anteriores intactos y queda en el log.
+    """
+    from .embeddings import EmbeddingsError
+    from .rag_index import indexar_contrato as _reconstruir
+
+    cid = uuid.UUID(company_id)
+    with worker_session(company_id=cid) as db:
+        try:
+            n = _reconstruir(db, cid, uuid.UUID(contrato_id))
+            db.commit()
+        except EmbeddingsError as e:
+            db.rollback()
+            logger.error("indexacion RAG de %s fallo: %s", contrato_id, e)
+            return
+        logger.info("indexacion RAG de %s: %s", contrato_id, n)

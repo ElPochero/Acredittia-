@@ -12,11 +12,15 @@ class Settings(BaseSettings):
     # --- Base de datos -----------------------------------------------------
     # En producción se conecta con el rol acredittia_app (NOBYPASSRLS) para que
     # las políticas de RLS del modelo de datos se apliquen de verdad.
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/acredittia"
+    database_url: str = (
+        "postgresql+psycopg://postgres:postgres@localhost:5432/acredittia"
+    )
     schema_dir: str = "/schema"
-    schema_version_esperada: int = 9        # scripts 01..04 + 06 + 07 + 08 + 09 aplicados
+    schema_version_esperada: int = (
+        10  # scripts 01..04 + 06 + 07 + 08 + 09 + 10 aplicados
+    )
     db_apply_schema_on_start: bool = False  # en Azure lo hace el job de migración
-    db_rls_enabled: bool = True             # fija app.company_id/is_admin/user_id por request
+    db_rls_enabled: bool = True  # fija app.company_id/is_admin/user_id por request
 
     # --- Autenticación -----------------------------------------------------
     jwt_secret: str = "dev-secret-cambiar-en-produccion"
@@ -28,12 +32,12 @@ class Settings(BaseSettings):
     # --- Almacenamiento: local | azure ------------------------------------
     storage_backend: str = "local"
     storage_dir: str = "/data/uploads"
-    azure_storage_account: str = ""        # identidad administrada (preferido)
-    azure_blob_conn: str = ""              # cadena de conexión (alternativa)
+    azure_storage_account: str = ""  # identidad administrada (preferido)
+    azure_blob_conn: str = ""  # cadena de conexión (alternativa)
     azure_blob_container: str = "docs"
     sas_upload_ttl_min: int = 15
     sas_download_ttl_min: int = 15
-    public_base_url: str = "http://localhost:8000"   # para URLs locales de subida
+    public_base_url: str = "http://localhost:8000"  # para URLs locales de subida
 
     # --- Cola de trabajos: celery | inproc --------------------------------
     queue_backend: str = "inproc"
@@ -43,13 +47,17 @@ class Settings(BaseSettings):
     jwe_backend: str = "local"
     azure_keyvault_url: str = ""
     keyvault_key_name: str = "plataforma-cred"
-    keys_dir: str = "/data/keys"           # solo jwe_backend=local
+    keys_dir: str = "/data/keys"  # solo jwe_backend=local
     credencial_ttl_meses: int = 12
 
     # --- Revisión IA: simulada | claude | nvidia --------------------------
     ia_backend: str = "simulada"
     anthropic_api_key: str = ""
     nvidia_nim_api_key: str = ""
+    # Embeddings para RAG (endpoint OpenAI-compatible de NIM).
+    # Verificado con la key actual: nemotron-3-embed-1b → 2048 dims.
+    nvidia_embedding_model: str = "nvidia/nemotron-3-embed-1b"
+    nvidia_embedding_dims: int = 2048
 
     # --- Notificaciones ----------------------------------------------------
     smtp_host: str = ""
@@ -83,10 +91,27 @@ ALLOWED_EXTENSIONS_CONTRATO = ALLOWED_EXTENSIONS | {".doc", ".docx"}
 ALLOWED_EXTENSIONS_ARRANQUE = ALLOWED_EXTENSIONS_CONTRATO | {".xlsx", ".xls", ".csv"}
 
 TIPOS_EQUIPO = [
-    "Tracto-Camión", "Camión", "Camión Pluma", "Camión Aljibe", "Cama Baja",
-    "Semirremolque", "Rampla Plana", "Camioneta", "JEEP", "Bus", "MINIBUS",
-    "Furgón", "Automóvil", "Alzahombre", "Grúa", "Grúa Horquilla",
-    "Retroexcavadora", "Motoniveladora", "Equipo de levante", "Equipo de producción", "Otro",
+    "Tracto-Camión",
+    "Camión",
+    "Camión Pluma",
+    "Camión Aljibe",
+    "Cama Baja",
+    "Semirremolque",
+    "Rampla Plana",
+    "Camioneta",
+    "JEEP",
+    "Bus",
+    "MINIBUS",
+    "Furgón",
+    "Automóvil",
+    "Alzahombre",
+    "Grúa",
+    "Grúa Horquilla",
+    "Retroexcavadora",
+    "Motoniveladora",
+    "Equipo de levante",
+    "Equipo de producción",
+    "Otro",
 ]
 
 # Umbrales de vencimiento y acreditación
@@ -95,10 +120,21 @@ UMBRAL_ACREDITADO_PCT = 70
 
 # Tipos de reporte y de exportación
 REPORTE_TIPOS = (
-    "estado_acreditacion", "cumplimiento_requisitos", "personal_acreditado",
-    "equipos_vehiculos", "vencimientos", "matriz_cumplimiento",
+    "estado_acreditacion",
+    "cumplimiento_requisitos",
+    "personal_acreditado",
+    "equipos_vehiculos",
+    "vencimientos",
+    "matriz_cumplimiento",
 )
 EXPORT_RECURSOS = (
-    "personal", "equipos", "personas", "flota", "documentos",
-    "requisitos", "alertas", "contratos", "matriz",
+    "personal",
+    "equipos",
+    "personas",
+    "flota",
+    "documentos",
+    "requisitos",
+    "alertas",
+    "contratos",
+    "matriz",
 )

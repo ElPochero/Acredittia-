@@ -32,6 +32,11 @@ azure-keyvault-secrets>=4.8
 # --- Generación de reportes --------------------------------------------
 openpyxl>=3.1
 
+# --- RAG (pgvector + embeddings) -----------------------------------------
+# Pin exacto a propósito: el tipo VECTOR(N) queda grabado en el esquema y un
+# cambio de versión del driver podría alterar la adaptación de tipos.
+pgvector==0.5.1
+
 # --- Pruebas -----------------------------------------------------------
 pytest>=8.2
 httpx>=0.27
