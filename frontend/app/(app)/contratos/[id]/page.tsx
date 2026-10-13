@@ -12,12 +12,13 @@ import { TabRequisitosContrato } from "@/components/contratos/TabRequisitosContr
 import { TabPersonalContrato } from "@/components/contratos/TabPersonalContrato";
 import { TabEquiposContrato } from "@/components/contratos/TabEquiposContrato";
 import { TabDocumentosContrato } from "@/components/contratos/TabDocumentosContrato";
+import { TabDocumentosFaena } from "@/components/contratos/TabDocumentosFaena";
+import { TabCarpetaArranque } from "@/components/contratos/TabCarpetaArranque";
 import { TabEmpresaContrato } from "@/components/contratos/TabEmpresaContrato";
 import { ContratoLayout } from "@/components/contratos/ContratoLayout";
 import { TabResumen } from "@/components/contratos/TabResumen";
 
-const TABS = ["Alertas", "Documentos", "Documentos Faenas", "Carpeta arranque", "Personal", "empresa", "vehiculos"] as const;
-type Tab = (typeof TABS)[number];
+import { Tab, TABS } from "@/components/contratos/ContratoTabs";
 
 
 export default function ContratoDetalle() {
@@ -163,29 +164,31 @@ export default function ContratoDetalle() {
         <TabDocumentosContrato contrato={c} />
       )}
 
-      {tab === "Documentos Faenas" && c && (
-        <div className="p-8 text-center text-slate-500 border border-slate-200 border-dashed rounded-xl bg-slate-50">
-          <p className="font-semibold text-slate-700 mb-1">Documentos Faenas</p>
-          <p className="text-sm">Módulo en construcción. Aquí irán los documentos específicos de la faena.</p>
-        </div>
+      {tab === "Documentos Faena" && c && (
+        <TabDocumentosFaena
+          contrato={c}
+          onVerEquipo={() => cambiarTab("Vehículos / Equipos")}
+        />
       )}
 
-      {tab === "Carpeta arranque" && c && (
-        <div className="p-8 text-center text-slate-500 border border-slate-200 border-dashed rounded-xl bg-slate-50">
-          <p className="font-semibold text-slate-700 mb-1">Carpeta de Arranque</p>
-          <p className="text-sm">Módulo en construcción. Aquí irá la funcionalidad de la carpeta de arranque.</p>
-        </div>
+      {tab === "Carpeta de Arranque" && c && (
+        <TabCarpetaArranque
+          contrato={c}
+          onSubir={subir}
+          subiendo={subiendo}
+          analizandoId={analizandoId}
+        />
       )}
 
       {tab === "Personal" && c && (
         <TabPersonalContrato contrato={c} plataformas={plataformas} />
       )}
 
-      {tab === "empresa" && c && (
+      {tab === "Empresa" && c && (
         <TabEmpresaContrato contrato={c} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
       )}
 
-      {tab === "vehiculos" && c && (
+      {tab === "Vehículos / Equipos" && c && (
         <TabEquiposContrato contrato={c} plataformas={plataformas} />
       )}
 

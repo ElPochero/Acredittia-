@@ -53,8 +53,9 @@ SCHEMA_SCRIPTS = [
     "07_migracion_v12.sql",
     "08_migracion_v13.sql",
     "09_certificacion_laboral.sql",
+    "10_add_telefono_email.sql",
 ]
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 MIGRATION_LOCK_ID = 918273        # clave del pg_advisory_lock de migración
 
 
@@ -185,11 +186,13 @@ def _columna_existe(conn, tabla: str, columna: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "periodos_laborales"):
+            if _columna_existe(c, "sujetos", "telefono"):
+                return 10
             return 9
         if _columna_existe(c, "contratos", "hereda_plataformas"):
             return 8
@@ -267,15 +270,17 @@ def apply_schema(schema_dir: str | None = None) -> int:
             if actual == 0:
                 pendientes = SCHEMA_SCRIPTS
             elif actual == 3:
-                pendientes = ["04_rls.sql", "06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = ["04_rls.sql", "06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql", "10_add_telefono_email.sql"]
             elif actual == 4:
-                pendientes = ["06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = ["06_migracion_v11.sql", "07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql", "10_add_telefono_email.sql"]
             elif actual == 6:
-                pendientes = ["07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = ["07_migracion_v12.sql", "08_migracion_v13.sql", "09_certificacion_laboral.sql", "10_add_telefono_email.sql"]
             elif actual == 7:
-                pendientes = ["08_migracion_v13.sql", "09_certificacion_laboral.sql"]
+                pendientes = ["08_migracion_v13.sql", "09_certificacion_laboral.sql", "10_add_telefono_email.sql"]
             elif actual == 8:
-                pendientes = ["09_certificacion_laboral.sql"]
+                pendientes = ["09_certificacion_laboral.sql", "10_add_telefono_email.sql"]
+            elif actual == 9:
+                pendientes = ["10_add_telefono_email.sql"]
             else:
                 pendientes = []
 

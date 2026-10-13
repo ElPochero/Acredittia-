@@ -517,6 +517,9 @@ export type TrabajadorIn = {
   cargo?: string | null;
   es_conductor?: boolean;
   estado?: string | null;
+  /** Añadido en migración v10. */
+  telefono?: string | null;
+  email?: string | null;
 };
 
 /** `PATCH /personal/{id}`: solo estos campos (§5 de RUPTURAS). */
@@ -526,6 +529,8 @@ export type TrabajadorPatch = {
   cargo?: string | null;
   es_conductor?: boolean;
   estado?: string | null;
+  telefono?: string | null;
+  email?: string | null;
 };
 
 export type EquipoIn = {

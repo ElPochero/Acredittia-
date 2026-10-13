@@ -74,7 +74,17 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento) -> None:
             else:
                 evento = "vencimiento_30"
                 
-        despachar_alerta_email(db, doc.company_id, evento, titulo, desc)
+        sujeto_email = doc.sujeto.email if doc.sujeto_id and doc.sujeto else None
+        contrato_nombre = ""
+        if doc.contrato_id and doc.sujeto and doc.sujeto.contrato:
+            contrato_nombre = doc.sujeto.contrato.nombre
+        despachar_alerta_email(
+            db, doc.company_id, evento, titulo, desc,
+            contrato_id=doc.contrato_id,
+            sujeto_email=sujeto_email,
+            severidad="critica" if doc.estado_calc == "venc" else "advertencia",
+            contrato_nombre=contrato_nombre,
+        )
 
 
 def recalcular_documentos(db: Session, company_id: uuid.UUID | None = None) -> int:
@@ -140,7 +150,12 @@ def alertar_vencimiento_contratos(db: Session, dias_aviso: int = 30) -> int:
             ))
             cambios += 1
             evento = "alerta_critica" if sev == "critica" else "vencimiento_30"
-            despachar_alerta_email(db, c.company_id, evento, titulo, desc)
+            despachar_alerta_email(
+                db, c.company_id, evento, titulo, desc,
+                contrato_id=c.id,
+                severidad=sev,
+                contrato_nombre=c.nombre,
+            )
             
     db.commit()
     return cambios

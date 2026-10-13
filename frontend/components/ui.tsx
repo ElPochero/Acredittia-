@@ -126,7 +126,7 @@ export function Modal({
   ancho = "max-w-lg",
 }: {
   abierto: boolean;
-  titulo: string;
+  titulo: React.ReactNode;
   onCerrar: () => void;
   children: ReactNode;
   ancho?: string;

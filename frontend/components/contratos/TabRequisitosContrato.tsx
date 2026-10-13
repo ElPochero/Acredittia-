@@ -46,7 +46,7 @@ export function TabRequisitosContrato({ contrato, plataformas }: TabRequisitosCo
   const cargarReqs = async () => {
     try {
       setCargando(true);
-      const res = await Api.contratos.requisitos(contrato.id, { page_size: 100 });
+      const res = await Api.contratos.requisitos(contrato.id, { page_size: 100 }) as any;
       setReqs(res.items || []);
       if (res.kpis) setKpis(res.kpis as any);
     } catch (e) {
