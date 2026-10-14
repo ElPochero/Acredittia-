@@ -79,6 +79,8 @@ SCRIPTS = [
     "09_certificacion_laboral.sql",
     "10_add_telefono_email.sql",
     "11_rag_pgvector.sql",
+    "12_vinculo_faena.sql",
+    "13_rol_visor.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")
@@ -534,7 +536,8 @@ def primer_documento(cliente, empresa, **filtros) -> dict:
 
 
 def crear_contract_admin(
-    cliente, empresa, contrato_id: str, *, email="jefe.contrato@empresa.cl"
+    cliente, empresa, contrato_id: str, *, email="jefe.contrato@empresa.cl",
+    role="contract_admin", nombre="Jefe de Contrato",
 ) -> dict:
     """Usuario acotado a un contrato, creado por la API de la empresa."""
     r = cliente.post(
@@ -542,8 +545,8 @@ def crear_contract_admin(
         headers=empresa["headers"],
         json={
             "email": email,
-            "nombre": "Jefe de Contrato",
-            "role": "contract_admin",
+            "nombre": nombre,
+            "role": role,
             "contrato_id": contrato_id,
         },
     )

@@ -562,6 +562,32 @@ def solicitar_acceso(contrato_id: uuid.UUID, pid: uuid.UUID,
     return out
 
 
+@router.post("/plataformas/{pid}/subida")
+def marcar_subida(contrato_id: uuid.UUID, pid: uuid.UUID,
+                  db: Session = Depends(get_db),
+                  cid: uuid.UUID = Depends(get_company_id),
+                  user: User = Depends(get_current_user)):
+    """Marca los documentos como subidos a la plataforma (C21, `psMarkExported`).
+
+    No hay columna de estado: la marca es la última fila de `actividad` con
+    este módulo y plataforma, que el historial del contrato ya sabe filtrar.
+    Acepta tanto la plataforma propia como la heredada aún sin materializar.
+    """
+    c = contrato_de_empresa(db, cid, contrato_id, user)
+    p, _ = resolver_plataforma(db, cid, c, pid, materializar=True)
+    ahora = datetime.now(timezone.utc)
+    # entidad_tipo="contrato": _filtro_contrato solo atribuye contrato,
+    # sujetos y documentos; con "contrato_plataforma" la marca quedaría
+    # invisible en el historial del contrato. La plataforma va en `plataforma`.
+    actividad.log(db, cid, "actualizacion", "plataformas",
+                  f"Documentos subidos a '{p.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato",
+                  entidad_id=c.id, plataforma=p.nombre)
+    db.commit()
+    return {"ok": True, "plataforma": p.nombre,
+            "subida_at": ahora.isoformat()}
+
+
 # =============================================================================
 # §8.2 — Vault de credenciales
 # =============================================================================

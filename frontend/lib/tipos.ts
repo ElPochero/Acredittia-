@@ -39,7 +39,7 @@ export type ParamsPagina = {
 // ============================================================================
 // Vocabularios cerrados
 // ============================================================================
-export type Rol = "admin" | "company" | "contract_admin";
+export type Rol = "admin" | "company" | "contract_admin" | "visor";
 export type EstadoEmpresa = "pending" | "approved" | "rejected";
 export type EstadoDoc = "ok" | "falta";
 export type EstadoCalc = "ok" | "porvenc" | "venc" | "falta";
@@ -103,7 +103,7 @@ export type Usuario = {
   nombre: string | null;
   activo: boolean;
   contrato_id: string | null;
-  /** Solo viene poblado para `role = contract_admin`. */
+  /** Solo viene poblado para roles acotados (`contract_admin`, `visor`). */
   contrato: ContratoResumen | null;
   last_login_at: string | null;
   company: EmpresaResumen | null;

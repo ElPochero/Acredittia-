@@ -856,12 +856,12 @@ def contar_de_recurso(db: Session, cid: uuid.UUID, recurso: str, filtros: dict,
 def _solo_empresa(user: User) -> None:
     """Reportes y exportaciones son de alcance empresa (§7.1).
 
-    El administrador de contrato no accede a este módulo: su vista es un contrato
-    y un reporte agregado de la empresa le mostraría datos de los demás.
+    Ni el administrador de contrato ni el visor acceden a este módulo: su
+    vista es un contrato y un reporte agregado les mostraría datos de más.
     """
-    if user.role == "contract_admin":
+    if user.role in ("contract_admin", "visor"):
         raise err(403, "ROL_INSUFICIENTE",
-                  "El administrador de contrato no accede a reportes")
+                  "Tu rol no accede a reportes")
 
 
 def _valida_tipo(tipo: str) -> str:

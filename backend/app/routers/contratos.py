@@ -16,6 +16,7 @@ mismo que «falta».
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, timezone
 
@@ -617,6 +618,124 @@ def alertas_contrato(contrato_id: uuid.UUID,
     filas = list(db.scalars(q.order_by(Alerta.created_at.desc())
                             .offset(p.offset).limit(p.page_size)))
     return sobre([alerta_out(a) for a in filas], total, p)
+
+
+class MailIn(BaseModel):
+    plantilla: str
+    para: str | None = None
+    asunto: str | None = None
+
+
+PLANTILLAS_MAIL: tuple[str, ...] = ("resumen", "porvencer", "observado",
+                                    "semanal", "invitacion")
+_EVENTO_PLANTILLA = {
+    "resumen": "vencimiento_documento",
+    "porvencer": "vencimiento_documento",
+    "observado": "alerta_bloqueante",
+    "semanal": "reporte_programado",
+}
+_SEVERIDAD_PLANTILLA = {
+    "resumen": "advertencia",
+    "porvencer": "advertencia",
+    "observado": "advertencia",
+    "semanal": "info",
+    "invitacion": "info",
+}
+_CORREO_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _contenido_mail(db: Session, c: Contrato, plantilla: str
+                    ) -> tuple[str | None, str, str, str]:
+    """(evento, titulo, descripcion, severidad) con datos reales del contrato."""
+    stats = _stats(db, c)
+    pct = stats.get("cumplimiento_pct", 0)
+    n_alertas = stats.get("alertas_activas", 0)
+    top = list(db.scalars(
+        select(Alerta)
+        .where(Alerta.company_id == c.company_id, Alerta.contrato_id == c.id,
+               Alerta.resuelta_at.is_(None))
+        .order_by(Alerta.created_at.desc()).limit(5)))
+
+    if plantilla == "resumen":
+        return (_EVENTO_PLANTILLA[plantilla],
+                f"Resumen de vencimientos — {c.nombre}",
+                f"El contrato tiene {n_alertas} alertas activas "
+                f"y un cumplimiento documental del {pct}%.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "porvencer":
+        if top:
+            return (_EVENTO_PLANTILLA[plantilla], top[0].titulo,
+                    top[0].descripcion or "", _SEVERIDAD_PLANTILLA[plantilla])
+        return (_EVENTO_PLANTILLA[plantilla], "Sin vencimientos activos",
+                f"El contrato {c.nombre} no tiene alertas activas.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "observado":
+        return (_EVENTO_PLANTILLA[plantilla],
+                "Documento observado por la IA",
+                f"La IA observó un documento del contrato {c.nombre}: "
+                "requiere corrección antes de exportarlo.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "semanal":
+        return (_EVENTO_PLANTILLA[plantilla],
+                f"Estado semanal — {c.nombre}",
+                f"Cumplimiento documental del {pct}% "
+                f"con {n_alertas} alertas activas.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    return (None, f"Te dieron acceso al contrato {c.nombre} en ACREDITTIA",
+            "Te invitaron a colaborar en ACREDITTIA con permiso "
+            "de colaborador del contrato.",
+            _SEVERIDAD_PLANTILLA[plantilla])
+
+
+@router.post("/{contrato_id}/mails")
+def enviar_mail(contrato_id: uuid.UUID, body: MailIn,
+                db: Session = Depends(get_db),
+                cid: uuid.UUID = Depends(get_company_id),
+                user: User = Depends(get_current_user)):
+    """Despacha una plantilla de correo del contrato.
+
+    Con `para` el envío es directo a esa dirección (acción explícita del
+    usuario, no pasa por preferencias). Sin `para` se difunde a los
+    responsables del contrato respetando `notificacion_preferencias`.
+    La plantilla `invitacion` siempre exige destinatario.
+    """
+    from ..services.email import _html_alerta, despachar_alerta_email
+    from ..services.jobs import enqueue
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    if body.plantilla not in PLANTILLAS_MAIL:
+        raise err(400, "PLANTILLA_INVALIDA",
+                  f"Plantilla debe ser una de: {', '.join(PLANTILLAS_MAIL)}")
+    para = (body.para or "").strip() or None
+    if para is not None and not _CORREO_OK.match(para):
+        raise err(400, "CORREO_INVALIDO", "El correo destinatario no es válido")
+    if body.plantilla == "invitacion" and para is None:
+        raise err(400, "FALTA_DESTINATARIO",
+                  "La invitación necesita un correo destinatario")
+
+    evento, titulo, descripcion, severidad = _contenido_mail(
+        db, c, body.plantilla)
+    asunto = (body.asunto or "").strip() or titulo
+
+    if para is not None:
+        enqueue("enviar_email", to_email=para, subject=asunto,
+                html_body=_html_alerta(
+                    titulo=titulo, descripcion=descripcion,
+                    severidad=severidad, contrato_nombre=c.nombre))
+        enviados, modo = 1, "directo"
+    else:
+        enviados = despachar_alerta_email(
+            db, cid, evento or "vencimiento_documento", titulo, descripcion,
+            contrato_id=c.id, severidad=severidad, contrato_nombre=c.nombre)
+        modo = "difusion"
+
+    actividad.log(db, cid, "actualizacion", "contratos",
+                  f"Correo '{body.plantilla}' enviado ({modo}, {enviados}) "
+                  f"en el contrato '{c.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {"plantilla": body.plantilla, "asunto": asunto,
+            "modo": modo, "enviados": enviados}
 
 
 @router.get("/{contrato_id}/historial")

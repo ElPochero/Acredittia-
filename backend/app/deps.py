@@ -77,7 +77,7 @@ def get_company_id(
     x_company_id: str | None = Header(default=None, alias="X-Company-Id"),
 ) -> uuid.UUID:
     """company_id efectivo. Para el admin proviene del header X-Company-Id o fallback a su empresa/empresa demo."""
-    if user.role in ("company", "contract_admin") and user.company_id:
+    if user.role in ("company", "contract_admin", "visor") and user.company_id:
         return user.company_id
     if x_company_id:
         try:
@@ -110,17 +110,17 @@ def get_company_id(
 
 
 def require_contrato(contrato_id: uuid.UUID, user: User) -> None:
-    """Un contract_admin solo puede tocar el contrato que tiene asignado.
+    """Un usuario acotado (contract_admin, visor) solo toca su contrato.
 
     Devuelve 404 y no 403 para no filtrar la existencia del recurso (§3.3).
     """
-    if user.role == "contract_admin" and user.contrato_id != contrato_id:
+    if user.role in ("contract_admin", "visor") and user.contrato_id != contrato_id:
         raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
 
 
 def contrato_scope(user: User) -> uuid.UUID | None:
     """Contrato al que está acotado el usuario, o None si ve todos."""
-    return user.contrato_id if user.role == "contract_admin" else None
+    return user.contrato_id if user.role in ("contract_admin", "visor") else None
 
 
 # --------------------------------------------------------------- paginación

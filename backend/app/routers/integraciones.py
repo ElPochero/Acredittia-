@@ -84,12 +84,13 @@ def _iso(v: datetime | None) -> str | None:
 def _solo_empresa(user: User) -> None:
     """Las integraciones son de alcance empresa (§16: roles company y admin).
 
-    El administrador de contrato no las administra: una integración habla por
-    toda la empresa y su configuración afectaría a contratos que no ve.
+    El administrador de contrato y el visor no las administran: una
+    integración habla por toda la empresa y su configuración afectaría a
+    contratos que no ven.
     """
-    if user.role == "contract_admin":
+    if user.role in ("contract_admin", "visor"):
         raise err(403, "ROL_INSUFICIENTE",
-                  "El administrador de contrato no accede a integraciones")
+                  "Tu rol no accede a integraciones")
 
 
 def _config_publica(config: dict | None) -> dict:

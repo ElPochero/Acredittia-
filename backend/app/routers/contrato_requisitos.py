@@ -49,12 +49,13 @@ logger = logging.getLogger("acredittia.requisitos")
 router = APIRouter(prefix="/contratos/{contrato_id}", tags=["requisitos"])
 
 Ambito = Literal["empresa", "personal", "equipo", "emsipor"]
-VinculoTipo = Literal["plataforma", "arranque", "otro"]
+VinculoTipo = Literal["plataforma", "arranque", "faena", "otro"]
 AMBITOS: tuple[str, ...] = ("empresa", "personal", "equipo", "emsipor")
 
 # Vínculos que no cuelgan de una plataforma (vinculo_ref siempre nulo).
 VINCULOS_FIJOS = (
     ("arranque", "Carpeta de Arranque"),
+    ("faena", "Documentos de Faena"),
     ("otro", "Otros requisitos"),
 )
 

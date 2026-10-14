@@ -233,7 +233,7 @@ def test_los_vinculos_incluyen_plataformas_y_los_fijos(app_cliente, empresa_a,
     assert r.status_code == 200, r.text
     items = r.json()["items"]
     tipos = {i["tipo"] for i in items}
-    assert tipos == {"plataforma", "arranque", "otro"}
+    assert tipos == {"plataforma", "arranque", "faena", "otro"}
     plataformas = {i["nombre"] for i in items if i["tipo"] == "plataforma"}
     assert plataformas == PLATAFORMAS_PELAMBRES
     # Los conteos incluyen los base proyectados: EMSIPOR tiene requisitos.
@@ -616,3 +616,118 @@ def test_importar_equipos_copia_la_flota_y_es_idempotente(
                          headers=empresa_a["headers"],
                          json={"sujetos_ids": [eq["id"]]})
     assert r.json()["importados"] == 0, "la patente ya activa no se duplica"
+
+
+# ============================================================================
+# Vínculo 'faena' (Documentos de Faena, C8)
+# ============================================================================
+def test_requisito_faena_se_crea_filtra_y_aparece_en_vinculos(
+        app_cliente, empresa_a, contrato_a):
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/requisitos",
+                         headers=empresa_a["headers"],
+                         params={"aplicar_retroactivo": "true"},
+                         json={"vinculo_tipo": "faena", "ambito": "empresa",
+                               "titulo": "Estándar de vehículos livianos",
+                               "obligatorio": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["vinculo_tipo"] == "faena"
+    assert r.json()["documentos_creados"] >= 1
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/requisitos",
+                        headers=empresa_a["headers"],
+                        params={"vinculo_tipo": "faena", "page_size": 100})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert len(items) == 1 and items[0]["titulo"] == "Estándar de vehículos livianos"
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/vinculos",
+                        headers=empresa_a["headers"])
+    tipos = {v["tipo"] for v in r.json()["items"]}
+    assert "faena" in tipos, "el selector debe ofrecer Documentos de Faena"
+
+
+# ============================================================================
+# Correos del contrato (C22)
+# ============================================================================
+def _espiar_envios(monkeypatch):
+    import app.services.jobs as jobs
+    envios = []
+    monkeypatch.setattr(
+        jobs, "enqueue", lambda nombre, **kw: envios.append((nombre, kw)))
+    return envios
+
+
+def test_mails_envio_directo_y_valida_entradas(
+        app_cliente, empresa_a, contrato_a, monkeypatch):
+    envios = _espiar_envios(monkeypatch)
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/mails",
+                         headers=empresa_a["headers"],
+                         json={"plantilla": "resumen", "para": "jefe@faena.cl"})
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["modo"] == "directo" and cuerpo["enviados"] == 1
+    assert contrato_a["nombre"] in cuerpo["asunto"]
+    assert envios == [("enviar_email", {"to_email": "jefe@faena.cl",
+                                       "subject": cuerpo["asunto"],
+                                       "html_body": envios[0][1]["html_body"]})]
+
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/mails",
+                         headers=empresa_a["headers"],
+                         json={"plantilla": "inexistente", "para": "jefe@faena.cl"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "PLANTILLA_INVALIDA"
+
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/mails",
+                         headers=empresa_a["headers"],
+                         json={"plantilla": "resumen", "para": "no-es-correo"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "CORREO_INVALIDO"
+
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/mails",
+                         headers=empresa_a["headers"],
+                         json={"plantilla": "invitacion"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "FALTA_DESTINATARIO"
+
+
+def test_mails_difusion_llega_a_responsables(
+        app_cliente, empresa_a, contrato_a, monkeypatch):
+    envios = _espiar_envios(monkeypatch)
+    r = app_cliente.post(f"{API}/contratos/{contrato_a['id']}/mails",
+                         headers=empresa_a["headers"],
+                         json={"plantilla": "semanal"})
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["modo"] == "difusion" and cuerpo["enviados"] >= 1
+    destinos = {kw["to_email"] for _, kw in envios}
+    assert "alfa@empresa.cl" in destinos
+
+
+# ============================================================================
+# Marcar documentos como subidos a la plataforma (C21)
+# ============================================================================
+def test_marcar_subida_registra_en_historial(app_cliente, empresa_a, contrato_a):
+    plat = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/plataformas",
+                           headers=empresa_a["headers"]).json()["items"][0]
+    # Sin materializar el id propio es nulo: se usa la ref de faena.
+    pid = plat["faena_plataforma_id"] or plat["id"]
+
+    r = app_cliente.post(
+        f"{API}/contratos/{contrato_a['id']}/plataformas/{pid}/subida",
+        headers=empresa_a["headers"], json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["plataforma"] == plat["nombre"]
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/historial",
+                        headers=empresa_a["headers"],
+                        params={"modulo": "plataformas", "page_size": 5})
+    assert r.status_code == 200, r.text
+    descripciones = [h["descripcion"] for h in r.json()["items"]]
+    assert any(plat["nombre"] in d and "ubido" in d for d in descripciones)
+
+    r = app_cliente.post(
+        f"{API}/contratos/{contrato_a['id']}/plataformas/"
+        "00000000-0000-0000-0000-000000000000/subida",
+        headers=empresa_a["headers"], json={})
+    assert r.status_code == 404

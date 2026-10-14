@@ -74,8 +74,10 @@ SCHEMA_SCRIPTS = [
     "09_certificacion_laboral.sql",
     "10_add_telefono_email.sql",
     "11_rag_pgvector.sql",
+    "12_vinculo_faena.sql",
+    "13_rol_visor.sql",
 ]
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 13
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -220,12 +222,29 @@ def _columna_existe(conn, tabla: str, columna: str) -> bool:
     )
 
 
+def _enum_tiene(conn, tipo: str, valor: str) -> bool:
+    return (
+        conn.execute(
+            text(
+                "SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
+                "WHERE t.typname = :t AND e.enumlabel = :v"
+            ),
+            {"t": tipo, "v": valor},
+        ).first()
+        is not None
+    )
+
+
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor'."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "documento_chunk"):
+            if _enum_tiene(c, "user_role", "visor"):
+                return 13
+            if _enum_tiene(c, "vinculo_tipo", "faena"):
+                return 12
             return 11
         if _tabla_existe(c, "periodos_laborales"):
             if _columna_existe(c, "sujetos", "telefono"):
@@ -355,7 +374,11 @@ def apply_schema(schema_dir: str | None = None) -> int:
                     "11_rag_pgvector.sql",
                 ]
             elif actual == 10:
-                pendientes = ["11_rag_pgvector.sql"]
+                pendientes = ["11_rag_pgvector.sql", "12_vinculo_faena.sql"]
+            elif actual == 11:
+                pendientes = ["12_vinculo_faena.sql", "13_rol_visor.sql"]
+            elif actual == 12:
+                pendientes = ["13_rol_visor.sql"]
             else:
                 pendientes = []
 

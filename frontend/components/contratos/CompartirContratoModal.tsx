@@ -9,10 +9,13 @@ interface CompartirContratoModalProps {
   abierto: boolean;
   onCerrar: () => void;
   contrato: Contrato | null;
+  /** Falso para rol visor: oculta el formulario y los controles de gestión. */
+  puedeGestionar?: boolean;
 }
 
 const ROLES = {
   contract_admin: { nombre: "Este contrato", desc: "Ve y gestiona solo este contrato.", fondo: "bg-blue-100 text-blue-800" },
+  visor: { nombre: "Solo lectura", desc: "Ve este contrato sin poder modificar nada.", fondo: "bg-slate-100 text-slate-600" },
   company: { nombre: "Toda la empresa", desc: "Acceso total a contratos y configuración.", fondo: "bg-slate-200 text-slate-700" },
 } as const;
 
@@ -21,7 +24,7 @@ type Rol = keyof typeof ROLES;
 const iniciales = (n: string | null) =>
   (n || "?").split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
-export function CompartirContratoModal({ abierto, onCerrar, contrato }: CompartirContratoModalProps) {
+export function CompartirContratoModal({ abierto, onCerrar, contrato, puedeGestionar = true }: CompartirContratoModalProps) {
   const [usuarios, setUsuarios] = useState<UsuarioEmpresa[]>([]);
   const [cargando, setCargando] = useState(false);
   const [nombre, setNombre] = useState("");
@@ -69,7 +72,7 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
         nombre: nombre.trim(),
         email: email.trim(),
         role: rol,
-        contrato_id: rol === "contract_admin" ? contrato.id : null,
+        contrato_id: rol === "company" ? null : contrato.id,
       });
       setNombre("");
       setEmail("");
@@ -85,7 +88,7 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
     try {
       await Api.empresa.editarUsuario(u.id, {
         role: nuevo,
-        contrato_id: nuevo === "contract_admin" ? contrato.id : null,
+        contrato_id: nuevo === "company" ? null : contrato.id,
       });
       await cargar();
     } catch (e) {
@@ -136,6 +139,8 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
         </div>
       )}
 
+      {puedeGestionar && (
+      <>
       <div className="text-[0.72rem] font-bold uppercase tracking-wider text-slate-500 mb-2">Dar acceso a una persona</div>
       <div className="gap-2.5" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
         <div>
@@ -168,6 +173,7 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
             className="w-full h-10 px-2 border border-slate-300 rounded-lg text-[0.88rem] outline-none bg-white focus:border-blue-500"
           >
             <option value="contract_admin">Solo este contrato</option>
+            <option value="visor">Solo lectura</option>
             <option value="company">Toda la empresa</option>
           </select>
         </div>
@@ -181,6 +187,8 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
           {guardando ? "Creando..." : "Crear usuario y compartir"}
         </button>
       </div>
+      </>
+      )}
 
       <div className="text-[0.72rem] font-bold uppercase tracking-wider text-slate-500 mt-5 mb-2">
         Personas con acceso ({usuarios.length})
@@ -200,15 +208,23 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
                 <div className="text-[0.88rem] font-bold text-slate-800 truncate">{u.nombre || "Sin nombre"}</div>
                 <div className="text-[0.75rem] text-slate-500 truncate">{u.email}</div>
               </div>
+              {puedeGestionar ? (
               <select
                 aria-label={`Permiso de ${u.nombre || u.email}`}
-                value={u.role === "company" ? "company" : "contract_admin"}
+                value={u.role}
                 onChange={(e) => cambiarRol(u, e.target.value as Rol)}
                 className="h-8 px-2 border border-slate-200 rounded-lg text-[0.78rem] font-semibold text-slate-600 bg-white outline-none"
               >
                 <option value="contract_admin">Este contrato</option>
+                <option value="visor">Solo lectura</option>
                 <option value="company">Toda la empresa</option>
               </select>
+              ) : (
+                <span className="text-[0.75rem] font-semibold text-slate-500">
+                  {u.role === "company" ? "Toda la empresa" : u.role === "visor" ? "Solo lectura" : "Este contrato"}
+                </span>
+              )}
+              {puedeGestionar && (
               <button
                 onClick={() => quitar(u)}
                 aria-label={quitarId === u.id ? `Confirmar quitar acceso a ${u.nombre || u.email}` : `Quitar acceso a ${u.nombre || u.email}`}
@@ -221,6 +237,7 @@ export function CompartirContratoModal({ abierto, onCerrar, contrato }: Comparti
               >
                 {quitarId === u.id ? "¿Quitar?" : "✕"}
               </button>
+              )}
             </li>
           ))}
         </ul>

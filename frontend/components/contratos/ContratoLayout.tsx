@@ -8,6 +8,7 @@ import { ReporteContratoModal } from "./ReporteContratoModal";
 import { CompartirContratoModal } from "./CompartirContratoModal";
 import { ExportarContratoModal } from "./ExportarContratoModal";
 import { CorreosContratoModal } from "./CorreosContratoModal";
+import { DetallePlataformaModal } from "../PlataformaModals";
 
 interface ContratoLayoutProps {
   contrato: Contrato;
@@ -81,6 +82,10 @@ export function ContratoLayout({
   const [modalCompartir, setModalCompartir] = React.useState(false);
   const [modalExportar, setModalExportar] = React.useState(false);
   const [modalCorreos, setModalCorreos] = React.useState(false);
+  const [detallePlat, setDetallePlat] = React.useState<PlataformaContrato | null>(null);
+  // UX solamente: el control real es el middleware del backend. Sin sesión
+  // conocida se muestra todo para no romper a usuarios normales.
+  const [soloLectura] = React.useState(() => Api.esVisor(Api.currentUser()));
   const [solicitando, setSolicitando] = React.useState<string | null>(null);
 
   const solicitarAcceso = async (pid: string) => {
@@ -136,24 +141,35 @@ export function ContratoLayout({
             <span className={`px-2 py-0.5 text-[0.78rem] font-bold rounded ${vigente ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
               {vigente ? 'Vigente' : 'En evaluación'}
             </span>
+            {soloLectura && (
+              <span className="px-2 py-0.5 text-[0.78rem] font-bold rounded bg-slate-200 text-slate-600" title="Tu rol solo permite ver este contrato">
+                👁 Solo lectura
+              </span>
+            )}
             <span className="text-slate-500 text-[0.95rem] font-medium">{c.nombre}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button className="h-[34px] px-3.5 border border-slate-300 rounded-[8px] bg-white text-slate-700 font-semibold text-[0.85rem] hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-sm cursor-pointer" onClick={() => setModalCompartir(true)}>
-              👥 Compartir
-            </button>
+            {!soloLectura && (
+              <button className="h-[34px] px-3.5 border border-slate-300 rounded-[8px] bg-white text-slate-700 font-semibold text-[0.85rem] hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-sm cursor-pointer" onClick={() => setModalCompartir(true)}>
+                👥 Compartir
+              </button>
+            )}
             <button className="h-[34px] px-3.5 border-none rounded-[8px] bg-[#0F172A] text-white font-semibold text-[0.85rem] hover:bg-slate-800 transition-colors shadow-sm cursor-pointer" onClick={() => setModalExportar(true)}>
               📦 Exportar
             </button>
             <button className="h-[34px] px-3.5 border border-slate-300 rounded-[8px] bg-white text-slate-700 font-semibold text-[0.85rem] hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-sm cursor-pointer" onClick={() => setModalReporte(true)}>
               <span className="text-[0.9rem] mr-1">↓</span> Descargar reporte
             </button>
-            <button className={`h-[34px] px-3.5 border-none rounded-[8px] ${btnClass} text-white font-semibold text-[0.85rem] transition-colors shadow-sm cursor-pointer`} onClick={() => alert('Editar contrato — demo')}>
-              ✎ Editar contrato
-            </button>
-            <button className="h-[34px] px-2.5 border border-slate-300 rounded-[8px] bg-white text-slate-700 font-semibold text-[0.85rem] hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-sm flex items-center justify-center cursor-pointer" title="Correos de notificación" onClick={() => setModalCorreos(true)}>
-              ✉ Correos
-            </button>
+            {!soloLectura && (
+              <button className={`h-[34px] px-3.5 border-none rounded-[8px] ${btnClass} text-white font-semibold text-[0.85rem] transition-colors shadow-sm cursor-pointer`} onClick={() => alert('Editar contrato — demo')}>
+                ✎ Editar contrato
+              </button>
+            )}
+            {!soloLectura && (
+              <button className="h-[34px] px-2.5 border border-slate-300 rounded-[8px] bg-white text-slate-700 font-semibold text-[0.85rem] hover:bg-slate-50 hover:border-slate-400 transition-colors shadow-sm flex items-center justify-center cursor-pointer" title="Correos de notificación" onClick={() => setModalCorreos(true)}>
+                ✉ Correos
+              </button>
+            )}
           </div>
         </div>
 
@@ -184,9 +200,11 @@ export function ContratoLayout({
              <span className="text-[0.88rem] font-bold text-slate-800">Plataformas — {c.faena?.mandante}</span>
              <div className="text-[0.75rem] text-slate-500 mt-0.5">Plataformas requeridas para acreditar en <strong>{c.faena?.nombre}</strong>, con sus propios requisitos por plataforma.</div>
            </div>
+           {!soloLectura && (
            <button className={`h-[34px] px-3.5 border-none rounded-[8px] ${btnClass} text-white font-semibold text-[0.75rem] transition-colors shadow-sm cursor-pointer`} onClick={onAddPlataforma}>
              + Agregar plataforma
            </button>
+           )}
          </div>
          
          <div className="flex gap-0 border border-slate-200 rounded-[12px] overflow-x-auto overflow-y-hidden snap-x">
@@ -226,7 +244,7 @@ export function ContratoLayout({
                           }`}></span>
                           {pl.estado.charAt(0).toUpperCase() + pl.estado.slice(1)}
                         </span>
-                        {pl.es_custom && (
+                        {pl.es_custom && !soloLectura && (
                           <button
                             onClick={() => onDeletePlataforma(pl.id)}
                             className="text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50 flex items-center justify-center"
@@ -249,7 +267,7 @@ export function ContratoLayout({
                   
                   <div className="text-[0.7rem] text-slate-500 mt-2.5">Usuarios activos</div>
                   <div className="text-[1.15rem] font-bold text-slate-800 leading-tight">{pl.credenciales || 0}</div>
-                  {pl.estado === "sin_acceso" && pl.id && (
+                  {pl.estado === "sin_acceso" && pl.id && !soloLectura && (
                     <button
                       onClick={() => solicitarAcceso(pl.id)}
                       disabled={solicitando === pl.id}
@@ -260,7 +278,7 @@ export function ContratoLayout({
                   )}
                   {pl.nota && <div className="text-[0.65rem] text-emerald-600 mt-0.5 font-semibold">{pl.nota}</div>}
                   {(!pl.nota || pl.credenciales === 0) && <div className="text-[0.65rem] text-slate-500 mt-0.5">Sin cuentas registradas</div>}
-                  <div className="mt-2.5"><span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => onManagePlataforma(pl)}>Gestionar usuarios →</span></div>
+                  <div className="mt-2.5 flex gap-3">{!soloLectura && <span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => onManagePlataforma(pl)}>Gestionar usuarios →</span>}<span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => setDetallePlat(pl)}>Ver requisitos →</span></div>
                 </div>
                 );
              })
@@ -302,6 +320,12 @@ export function ContratoLayout({
         abierto={modalCompartir}
         onCerrar={() => setModalCompartir(false)}
         contrato={c}
+        puedeGestionar={!soloLectura}
+      />
+      <DetallePlataformaModal
+        plataforma={detallePlat}
+        contratoId={c.id}
+        onCerrar={() => setDetallePlat(null)}
       />
     </div>
   );

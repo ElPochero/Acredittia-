@@ -1,264 +1,198 @@
 "use client";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import * as Api from "@/lib/cliente";
-import type {
-  Contrato,
-  PlantillaRequisito,
-  RequisitoTerreno,
-  FaenaDetalle,
-  Sujeto,
-} from "@/lib/tipos";
+import type { Contrato, Documento, Sujeto } from "@/lib/tipos";
 import { toast } from "sonner";
 import { Modal } from "@/components/ui";
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Tipos y datos demo basados en el screenshot de Los Pelambres
-// ──────────────────────────────────────────────────────────────────────────────
-interface DocumentoFaenaItem {
+type ReqFaena = {
   id: string;
   titulo: string;
-  subidoPor: string;
-  tipo: "Estándar" | "Manual" | "Reglamento" | "Protocolo";
-  version: string;
-  fecha: string;
-  requisitosTerrenoCount: number;
-  archivoUrl?: string;
-  descripcion?: string;
-}
+  ambito: string;
+  obligatorio: boolean;
+  editable: boolean;
+  doc?: Documento;
+};
 
-interface AlertaTerrenoItem {
-  id: string;
+type AlertaTerreno = {
+  equipoId: string;
   equipoNombre: string;
   patente: string;
   anio: number;
   antiguedadAnios: number;
   maxAnios: number;
   fuente: string;
+};
+
+// ponytail: convención — la antigüedad máxima se lee del texto de la regla
+// ("...máximo 10 años"); una regla sin número no genera alertas.
+function maxAniosDe(titulo: string): number | null {
+  const m = titulo.match(/(\d+)\s*años?/i);
+  return m ? Number(m[1]) : null;
 }
-
-interface GrupoRequisitoIADato {
-  tituloDocumento: string;
-  requisitos: {
-    id: string;
-    texto: string;
-    resaltado?: string;
-    esCritico?: boolean;
-  }[];
-}
-
-const DOCUMENTOS_DEFAULT: DocumentoFaenaItem[] = [
-  {
-    id: "doc-1",
-    titulo: "Estándar de Vehículos Livianos y Buses — Transporte de Personal",
-    subidoPor: "Subido por Mandante",
-    tipo: "Estándar",
-    version: "Rev. 5",
-    fecha: "01 mar 2026",
-    requisitosTerrenoCount: 6,
-    descripcion:
-      "Normativa técnica de seguridad para el transporte de personal dentro del recinto Los Pelambres. Exige límites de antigüedad, equipamiento activo y pasivo.",
-  },
-  {
-    id: "doc-2",
-    titulo: "Estándar de Acreditación de Contratistas — Los Pelambres",
-    subidoPor: "Subido por Mandante",
-    tipo: "Estándar",
-    version: "Rev. 7",
-    fecha: "15 ene 2026",
-    requisitosTerrenoCount: 2,
-    descripcion:
-      "Procedimiento formal de acreditación laboral, contractual y de seguridad previo al ingreso a faena.",
-  },
-  {
-    id: "doc-3",
-    titulo: "Manual de Emergencias y Evacuación",
-    subidoPor: "Subido por Mandante",
-    tipo: "Manual",
-    version: "Rev. 3",
-    fecha: "02 mar 2026",
-    requisitosTerrenoCount: 1,
-    descripcion:
-      "Protocolos de respuesta inmediata ante incidentes viales, ambientales o climáticos en faena Los Pelambres.",
-  },
-];
-
-const ALERTAS_DEFAULT: AlertaTerrenoItem[] = [
-  {
-    id: "alerta-1",
-    equipoNombre: "Bus Marcopolo Paradiso 1050 (46 pasajeros)",
-    patente: "SBXC-34",
-    anio: 2014,
-    antiguedadAnios: 12,
-    maxAnios: 10,
-    fuente: "Estándar de Vehículos Livianos y Buses — Transporte de Personal",
-  },
-  {
-    id: "alerta-2",
-    equipoNombre: "Minibús Mercedes-Benz Sprinter 515 (20 pas.)",
-    patente: "SKLW-73",
-    anio: 2015,
-    antiguedadAnios: 11,
-    maxAnios: 10,
-    fuente: "Estándar de Vehículos Livianos y Buses — Transporte de Personal",
-  },
-];
-
-const REQUISITOS_IA_DEFAULT: GrupoRequisitoIADato[] = [
-  {
-    tituloDocumento: "Estándar de Vehículos Livianos y Buses — Transporte de Personal",
-    requisitos: [
-      {
-        id: "req-1",
-        texto: "Antigüedad máxima de vehículos y equipos: ",
-        resaltado: "10 años.",
-      },
-      {
-        id: "req-2",
-        texto:
-          "Todo bus y minibús deberá contar con GPS operativo integrado a la plataforma de monitoreo del mandante.",
-      },
-      {
-        id: "req-3",
-        texto: "Todos los asientos deberán contar con cinturón de seguridad de tres puntas.",
-      },
-      {
-        id: "req-4",
-        texto:
-          "Los vehículos deberán portar extintor vigente, botiquín, dos cuñas y martillos rompevidrios.",
-      },
-      {
-        id: "req-5",
-        texto: "La alarma de retroceso y la cámara de retroceso son obligatorias.",
-      },
-      {
-        id: "req-6",
-        texto:
-          "Las mantenciones deberán realizarse en talleres calificados, anticipándose al 50% del kilometraje indicado por el fabricante.",
-      },
-    ],
-  },
-  {
-    tituloDocumento: "Estándar de Acreditación de Contratistas — Los Pelambres",
-    requisitos: [
-      {
-        id: "req-7",
-        texto: "Todo trabajador debe contar con Inducción Hombre Nuevo antes de ingresar a faena.",
-      },
-      {
-        id: "req-8",
-        texto:
-          "Los documentos de acreditación se renuevan con al menos 15 días de anticipación a su vencimiento.",
-      },
-    ],
-  },
-  {
-    tituloDocumento: "Manual de Emergencias y Evacuación",
-    requisitos: [
-      {
-        id: "req-9",
-        texto: "Todo vehículo debe portar extintor vigente y botiquín.",
-      },
-    ],
-  },
-];
 
 export function TabDocumentosFaena({
   contrato,
   onVerEquipo,
+  onSubir,
+  subiendo,
+  analizandoId,
 }: {
   contrato: Contrato;
   onVerEquipo?: (patente: string) => void;
+  onSubir: (docId: string, file: File) => void;
+  subiendo: { docId: string; pct: number; texto: string } | null;
+  analizandoId: string | null;
 }) {
-  const [documentos, setDocumentos] = useState<DocumentoFaenaItem[]>(DOCUMENTOS_DEFAULT);
-  const [alertas, setAlertas] = useState<AlertaTerrenoItem[]>(ALERTAS_DEFAULT);
-  const [requisitosIA, setRequisitosIA] = useState<GrupoRequisitoIADato[]>(REQUISITOS_IA_DEFAULT);
+  const [reqs, setReqs] = useState<ReqFaena[]>([]);
+  const [equipos, setEquipos] = useState<Sujeto[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
 
-  // Modales
-  const [docVer, setDocVer] = useState<DocumentoFaenaItem | null>(null);
-  const [equipoModal, setEquipoModal] = useState<AlertaTerrenoItem | null>(null);
+  const [docVer, setDocVer] = useState<ReqFaena | null>(null);
+  const [equipoModal, setEquipoModal] = useState<AlertaTerreno | null>(null);
   const [modalSubir, setModalSubir] = useState(false);
 
-  // Formulario nuevo documento
   const [nuevoTitulo, setNuevoTitulo] = useState("");
-  const [nuevoTipo, setNuevoTipo] = useState<"Estándar" | "Manual" | "Reglamento" | "Protocolo">("Estándar");
-  const [nuevaVersion, setNuevaVersion] = useState("Rev. 1");
-  const [archivoSeleccionado, setArchivoSeleccionado] = useState<File | null>(null);
-  const [analizandoNuevo, setAnalizandoNuevo] = useState(false);
+  const [nuevoAmbito, setNuevoAmbito] = useState("empresa");
+  const [guardando, setGuardando] = useState(false);
 
-  // Nombre de faena dinámico
-  const faenaNombre = contrato.faena?.nombre || "Los Pelambres";
+  const faenaNombre = contrato.faena?.nombre || "la faena";
   const mandanteNombre = contrato.faena?.mandante || faenaNombre;
 
-  // Totales calculados
-  const totalDocs = documentos.length;
-  const totalRequisitos = useMemo(() => {
-    return requisitosIA.reduce((acc, g) => acc + g.requisitos.length, 0);
-  }, [requisitosIA]);
-  const totalAlertas = alertas.length;
-
-  const handleQuitarDoc = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const doc = documentos.find((d) => d.id === id);
-    if (!doc) return;
-    if (confirm(`¿Quitar "${doc.titulo}" de los documentos de faena?`)) {
-      setDocumentos((prev) => prev.filter((d) => d.id !== id));
-      setRequisitosIA((prev) => prev.filter((g) => g.tituloDocumento !== doc.titulo));
-      toast.success("Documento removido", {
-        description: `Se quitó "${doc.titulo}".`,
-      });
+  const cargar = useCallback(async () => {
+    setCargando(true);
+    setError("");
+    try {
+      const [reqRes, docRes, eqRes] = await Promise.all([
+        Api.contratos.requisitos(contrato.id, { vinculo_tipo: "faena", page_size: 100 }),
+        Api.contratos.documentos(contrato.id, { page_size: 100 }),
+        Api.contratos.equipos(contrato.id, { page_size: 100 }),
+      ]);
+      const porTitulo = new Map<string, Documento>();
+      for (const d of docRes.items || []) porTitulo.set(d.titulo.trim().toLowerCase(), d);
+      setReqs(((reqRes.items || []) as any[]).map((r) => ({
+        id: r.id,
+        titulo: r.titulo,
+        ambito: r.ambito,
+        obligatorio: r.obligatorio,
+        editable: r.editable ?? r.origen !== "base",
+        doc: porTitulo.get((r.titulo || "").trim().toLowerCase()),
+      })));
+      setEquipos(eqRes.items || []);
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    } finally {
+      setCargando(false);
     }
-  };
+  }, [contrato.id]);
 
-  const handleSubirSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  // Recarga cuando termina la revisión IA de una subida hecha desde este tab.
+  const analizandoPrevio = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (analizandoPrevio.current && !analizandoId) cargar();
+    analizandoPrevio.current = analizandoId;
+  }, [analizandoId, cargar]);
+
+  // Alertas derivadas de reglas persistidas + flota real: se recalculan solas
+  // al recargar, por eso persisten aunque nunca se guarden como filas.
+  const alertas: AlertaTerreno[] = [];
+  {
+    const anioActual = new Date().getFullYear();
+    const vistos = new Map<string, AlertaTerreno>();
+    for (const r of reqs) {
+      const max = maxAniosDe(r.titulo);
+      if (max === null) continue;
+      for (const s of equipos) {
+        if (s.anio == null || s.estado === "baja") continue;
+        const antiguedad = anioActual - s.anio;
+        if (antiguedad > max) {
+          const prev = vistos.get(s.id);
+          if (!prev || max < prev.maxAnios) {
+            vistos.set(s.id, {
+              equipoId: s.id,
+              equipoNombre: s.nombre || s.patente || "Equipo",
+              patente: s.patente || "—",
+              anio: s.anio,
+              antiguedadAnios: antiguedad,
+              maxAnios: max,
+              fuente: r.titulo,
+            });
+          }
+        }
+      }
+    }
+    alertas.push(...Array.from(vistos.values()));
+  }
+
+  const conArchivo = reqs.filter((r) => (r.doc?.archivos_count || 0) > 0);
+
+  const handleAgregar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoTitulo.trim()) {
-      toast.error("Ingresa el título del documento");
+      toast.error("Ingresa el título del documento o regla");
       return;
     }
-    setAnalizandoNuevo(true);
-
-    setTimeout(() => {
-      const hoy = new Date().toLocaleDateString("es-CL", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      });
-
-      const nuevoDoc: DocumentoFaenaItem = {
-        id: `doc-${Date.now()}`,
-        titulo: nuevoTitulo.trim(),
-        subidoPor: "Subido por Contratista",
-        tipo: nuevoTipo,
-        version: nuevaVersion.trim() || "Rev. 1",
-        fecha: hoy,
-        requisitosTerrenoCount: 1,
-        descripcion: "Documento procesado por IA de Acredittia. Requisitos extraídos automáticamente.",
-      };
-
-      setDocumentos((prev) => [nuevoDoc, ...prev]);
-      setRequisitosIA((prev) => [
-        {
-          tituloDocumento: nuevoDoc.titulo,
-          requisitos: [
-            {
-              id: `req-${Date.now()}`,
-              texto: "Cumplimiento obligatorio de las medidas indicadas en el documento.",
-              resaltado: "Revisado por IA",
-            },
-          ],
-        },
-        ...prev,
-      ]);
-
-      setAnalizandoNuevo(false);
-      setModalSubir(false);
+    setGuardando(true);
+    try {
+      await Api.contratos.crearRequisitos(
+        contrato.id,
+        { vinculo_tipo: "faena", ambito: nuevoAmbito, titulo: nuevoTitulo.trim(), obligatorio: true, origen: "custom" },
+        { aplicar_retroactivo: true },
+      );
       setNuevoTitulo("");
-      setArchivoSeleccionado(null);
-      toast.success("Documento analizado e incorporado", {
-        description: `Se detectaron nuevos requisitos de terreno para ${faenaNombre}.`,
-      });
-    }, 1200);
+      setModalSubir(false);
+      await cargar();
+      toast.success("Documento de faena registrado");
+    } catch (e) {
+      toast.error(Api.mensajeError(e));
+    } finally {
+      setGuardando(false);
+    }
   };
+
+  const handleQuitar = async (r: ReqFaena) => {
+    if (!confirm(`¿Quitar "${r.titulo}" de los documentos de faena?`)) return;
+    try {
+      await Api.contratos.eliminarRequisito(contrato.id, r.id);
+      await cargar();
+      toast.success("Documento removido");
+    } catch (e) {
+      toast.error(Api.mensajeError(e));
+    }
+  };
+
+  const handleDescargar = async (docId: string, archivoId: string) => {
+    try {
+      const res = await Api.documentos.urlDescarga(docId, archivoId);
+      window.open(res.download_url, "_blank");
+    } catch (e) {
+      toast.error(Api.mensajeError(e));
+    }
+  };
+
+  const handleQuitarArchivo = async (docId: string, archivoId: string) => {
+    if (!confirm("¿Eliminar este archivo?")) return;
+    try {
+      await Api.documentos.eliminarArchivo(docId, archivoId);
+      await cargar();
+      setDocVer(null);
+    } catch (e) {
+      toast.error(Api.mensajeError(e));
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        {error}
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex flex-col gap-6 text-slate-800">
@@ -267,7 +201,7 @@ export function TabDocumentosFaena({
         <p className="text-[0.84rem] text-slate-600 max-w-3xl leading-relaxed m-0">
           Estándares, manuales y reglamentos de{" "}
           <span className="font-semibold text-slate-800">{mandanteNombre}</span>.
-          Quedan disponibles para todo el contrato y la IA extrae sus requisitos de terreno para generar alertas.
+          Quedan disponibles para todo el contrato y sus reglas de terreno generan alertas sobre la flota.
         </p>
 
         <button
@@ -280,75 +214,36 @@ export function TabDocumentosFaena({
 
       {/* ── 3 CONTADORES (CARDS) ────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: Documentos de faena */}
         <div className="bg-white border border-slate-200/90 rounded-[14px] px-5 py-4 shadow-xs">
           <div className="flex items-center gap-2 text-[0.74rem] text-slate-500 font-medium mb-1">
-            <svg
-              className="w-4 h-4 text-slate-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
             <span>Documentos de faena</span>
           </div>
           <div className="text-[1.85rem] font-bold text-slate-900 leading-none">
-            {totalDocs}
+            {cargando ? "—" : reqs.length}
           </div>
         </div>
 
-        {/* Card 2: Requisitos de terreno */}
         <div className="bg-white border border-slate-200/90 rounded-[14px] px-5 py-4 shadow-xs">
           <div className="flex items-center gap-2 text-[0.74rem] text-slate-500 font-medium mb-1">
-            <svg
-              className="w-4 h-4 text-slate-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
-              />
-            </svg>
-            <span>Requisitos de terreno</span>
+            <span>Con archivo subido</span>
           </div>
           <div className="text-[1.85rem] font-bold text-slate-900 leading-none">
-            {totalRequisitos}
+            {cargando ? "—" : conArchivo.length}
           </div>
         </div>
 
-        {/* Card 3: Alertas generadas (Borde y número rojo como en screenshot) */}
         <div className="bg-white border border-red-300 rounded-[14px] px-5 py-4 shadow-xs">
           <div className="flex items-center gap-2 text-[0.74rem] text-slate-500 font-medium mb-1">
-            <svg
-              className="w-4 h-4 text-red-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-            </svg>
             <span>Alertas generadas</span>
           </div>
           <div className="text-[1.85rem] font-bold text-red-600 leading-none">
-            {totalAlertas}
+            {cargando ? "—" : alertas.length}
           </div>
         </div>
       </div>
 
       {/* ── CAJA DE ALERTAS POR REQUISITOS DE TERRENO ──────────────────────── */}
-      {alertas.length > 0 && (
+      {!cargando && alertas.length > 0 && (
         <div className="bg-[#FFF5F5] border border-[#FED7D7] rounded-[14px] p-5 shadow-xs">
           <div className="text-[0.68rem] font-black uppercase tracking-wider text-red-600 mb-3.5">
             ALERTAS POR REQUISITOS DE TERRENO
@@ -357,7 +252,7 @@ export function TabDocumentosFaena({
           <div className="flex flex-col divide-y divide-red-200/70">
             {alertas.map((a) => (
               <div
-                key={a.id}
+                key={a.equipoId}
                 className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
               >
                 <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -381,11 +276,8 @@ export function TabDocumentosFaena({
 
                 <button
                   onClick={() => {
-                    if (onVerEquipo) {
-                      onVerEquipo(a.patente);
-                    } else {
-                      setEquipoModal(a);
-                    }
+                    if (onVerEquipo) onVerEquipo(a.patente);
+                    else setEquipoModal(a);
                   }}
                   className="shrink-0 self-end sm:self-center px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-blue-600 text-[0.74rem] font-semibold rounded-[7px] transition-colors shadow-2xs whitespace-nowrap"
                 >
@@ -404,149 +296,124 @@ export function TabDocumentosFaena({
             <thead>
               <tr className="border-b border-slate-200 bg-white text-[0.68rem] font-bold uppercase tracking-wider text-slate-400">
                 <th className="py-3.5 px-5">DOCUMENTO</th>
-                <th className="py-3.5 px-4">TIPO</th>
-                <th className="py-3.5 px-4">VERSIÓN</th>
-                <th className="py-3.5 px-4">FECHA</th>
-                <th className="py-3.5 px-4">REQUISITOS DE TERRENO</th>
+                <th className="py-3.5 px-4">ESTADO</th>
+                <th className="py-3.5 px-4">VENCIMIENTO</th>
+                <th className="py-3.5 px-4">ARCHIVOS</th>
                 <th className="py-3.5 px-5 text-right">ACCIONES</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-[0.82rem]">
-              {documentos.map((doc) => (
-                <tr
-                  key={doc.id}
-                  className="hover:bg-slate-50/60 transition-colors group"
-                >
-                  {/* DOCUMENTO */}
-                  <td className="py-4 px-5 align-middle">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0">
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                      </div>
-                      <div>
-                        <div className="font-semibold text-slate-900 leading-snug">
-                          {doc.titulo}
+              {cargando ? (
+                <tr><td colSpan={5} className="p-8 text-center text-slate-400">Cargando documentos de faena...</td></tr>
+              ) : reqs.length === 0 ? (
+                <tr><td colSpan={5} className="p-8 text-center text-slate-400">Sin documentos de faena. Sube el primero con el botón superior.</td></tr>
+              ) : (
+                reqs.map((r) => {
+                  const est = r.doc?.estado_calc || "falta";
+                  const isSubiendo = subiendo?.docId === r.doc?.id;
+                  const isAnalizando = analizandoId === r.doc?.id;
+                  return (
+                    <tr key={r.id} className="hover:bg-slate-50/60 transition-colors group">
+                      <td className="py-4 px-5 align-middle">
+                        <div className="font-semibold text-slate-900 leading-snug">{r.titulo}</div>
+                        <div className="text-[0.72rem] text-slate-500 mt-0.5 capitalize">
+                          {r.ambito}{r.obligatorio ? " · Obligatorio" : ""}
                         </div>
-                        <div className="text-[0.72rem] text-slate-500 mt-0.5">
-                          {doc.subidoPor}
+                        {(isSubiendo || isAnalizando) && (
+                          <div className="text-[0.7rem] font-medium text-indigo-700 animate-pulse mt-1">
+                            {isSubiendo ? `Subiendo… ${subiendo!.pct}%` : "🤖 Analizando con IA..."}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-4 px-4 align-middle">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-semibold ${
+                          est === "ok" ? "bg-emerald-100 text-emerald-700" :
+                          est === "porvenc" ? "bg-amber-100 text-amber-700" :
+                          est === "venc" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {est === "ok" ? "Vigente" : est === "porvenc" ? "Por vencer" : est === "venc" ? "Vencido" : "Pendiente"}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 align-middle text-slate-600 font-normal">
+                        {r.doc?.vence || "—"}
+                      </td>
+                      <td className="py-4 px-4 align-middle font-bold text-slate-800">
+                        {r.doc?.archivos_count || 0}
+                      </td>
+                      <td className="py-4 px-5 align-middle text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {r.doc && (
+                            <label className="px-3 py-1 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[0.72rem] font-semibold rounded-[6px] transition-colors cursor-pointer">
+                              Subir
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                onChange={(e) => {
+                                  if (e.target.files?.[0]) onSubir(r.doc!.id, e.target.files[0]);
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          )}
+                          <button
+                            onClick={() => setDocVer(r)}
+                            className="px-3 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-[0.72rem] font-semibold rounded-[6px] transition-colors"
+                          >
+                            Ver
+                          </button>
+                          {r.editable && (
+                            <button
+                              onClick={() => handleQuitar(r)}
+                              className="px-2.5 py-1 bg-red-50/80 hover:bg-red-100 border border-red-200 text-red-600 text-[0.72rem] font-semibold rounded-[6px] transition-colors"
+                            >
+                              Quitar
+                            </button>
+                          )}
                         </div>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* TIPO */}
-                  <td className="py-4 px-4 align-middle">
-                    {doc.tipo === "Manual" ? (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[0.7rem] font-semibold bg-indigo-100 text-indigo-700">
-                        Manual
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[0.7rem] font-semibold bg-blue-100 text-blue-700">
-                        Estándar
-                      </span>
-                    )}
-                  </td>
-
-                  {/* VERSIÓN */}
-                  <td className="py-4 px-4 align-middle text-slate-600 font-normal">
-                    {doc.version}
-                  </td>
-
-                  {/* FECHA */}
-                  <td className="py-4 px-4 align-middle text-slate-600 font-normal">
-                    {doc.fecha}
-                  </td>
-
-                  {/* REQUISITOS DE TERRENO */}
-                  <td className="py-4 px-4 align-middle font-bold text-slate-800">
-                    {doc.requisitosTerrenoCount}
-                  </td>
-
-                  {/* ACCIONES */}
-                  <td className="py-4 px-5 align-middle text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => setDocVer(doc)}
-                        className="px-3 py-1 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[0.72rem] font-semibold rounded-[6px] transition-colors"
-                      >
-                        Ver documento
-                      </button>
-                      <button
-                        onClick={(e) => handleQuitarDoc(doc.id, e)}
-                        className="px-2.5 py-1 bg-red-50/80 hover:bg-red-100 border border-red-200 text-red-600 text-[0.72rem] font-semibold rounded-[6px] transition-colors"
-                      >
-                        Quitar
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ── REQUISITOS DE TERRENO DETECTADOS POR LA IA ─────────────────────── */}
+      {/* ── REGLAS DE TERRENO ──────────────────────────────────────────────── */}
       <div className="bg-white border border-slate-200 rounded-[14px] p-6 shadow-xs">
-        <div className="text-[0.68rem] font-black uppercase tracking-wider text-slate-700 mb-5">
-          REQUISITOS DE TERRENO DETECTADOS POR LA IA
+        <div className="text-[0.68rem] font-black uppercase tracking-wider text-slate-700 mb-1">
+          REGLAS DE TERRENO
         </div>
+        <p className="text-[0.75rem] text-slate-500 m-0 mb-4">
+          Se guardan en el contrato: siguen aquí al recargar. Si una regla indica
+          una antigüedad máxima en años, la flota que la supere genera alerta.
+        </p>
 
-        <div className="flex flex-col gap-6">
-          {requisitosIA.map((grupo) => (
-            <div key={grupo.tituloDocumento} className="flex flex-col gap-2.5">
-              <h4 className="text-[0.83rem] font-bold text-blue-700 hover:underline cursor-pointer m-0">
-                {grupo.tituloDocumento}
-              </h4>
-
-              <ul className="space-y-1.5 pl-3 m-0 list-none">
-                {grupo.requisitos.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex items-start gap-2.5 text-[0.79rem] text-slate-700 leading-snug"
+        {cargando ? (
+          <p className="text-sm text-slate-400">Cargando reglas...</p>
+        ) : reqs.length === 0 ? (
+          <p className="text-sm text-slate-400">Sin reglas. Agrega documentos o reglas con el botón superior.</p>
+        ) : (
+          <ul className="space-y-1.5 pl-3 m-0 list-none">
+            {reqs.map((r) => (
+              <li key={r.id} className="flex items-start gap-2.5 text-[0.79rem] text-slate-700 leading-snug group">
+                <span className="text-slate-400 select-none mt-1 text-[0.65rem] shrink-0">•</span>
+                <span className="flex-1">{r.titulo}</span>
+                {r.editable && (
+                  <button
+                    onClick={() => handleQuitar(r)}
+                    className="text-slate-300 hover:text-red-500 text-[0.7rem] font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Quitar regla"
                   >
-                    <span className="text-slate-400 select-none mt-1 text-[0.65rem] shrink-0">
-                      •
-                    </span>
-                    <div>
-                      <span>{r.texto}</span>
-                      {r.resaltado && (
-                        <span className="font-bold text-slate-900">
-                          {r.resaltado}
-                        </span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── FOOTER VOLVER ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 text-[0.78rem]">
-        <button
-          onClick={() => history.back()}
-          className="text-blue-600 hover:underline font-semibold flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
-        >
-          ← Volver al listado de contratos
-        </button>
-        <span className="text-slate-400 text-[0.74rem]">
-          Creado el 01/01/2024 por Administrador
-        </span>
+                    ✕
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* ── MODAL VER DOCUMENTO ────────────────────────────────────────────── */}
@@ -559,47 +426,40 @@ export function TabDocumentosFaena({
         {docVer && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-100">
-              <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">
-                {docVer.tipo}
+              <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 capitalize">
+                {docVer.ambito}
               </span>
-              <span className="px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                {docVer.version}
-              </span>
-              <span className="text-xs text-slate-500">
-                Emitido el {docVer.fecha}
-              </span>
-              <span className="text-xs text-slate-400 ml-auto">
-                {docVer.subidoPor}
+              {docVer.obligatorio && (
+                <span className="px-2.5 py-0.5 rounded text-xs font-semibold bg-red-50 text-red-600">
+                  Obligatorio
+                </span>
+              )}
+              <span className="text-xs text-slate-500 ml-auto">
+                {docVer.doc ? `Estado: ${docVer.doc.estado_calc}` : "Sin documento asociado"}
               </span>
             </div>
 
-            <p className="text-sm text-slate-600 leading-relaxed">
-              {docVer.descripcion ||
-                "Este documento rige para todas las operaciones contratadas bajo la faena correspondiente."}
-            </p>
-
-            <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-              <h5 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2">
-                Requisitos extraídos por IA ({docVer.requisitosTerrenoCount})
-              </h5>
-              <p className="text-xs text-slate-600 mb-2">
-                El motor de análisis de documentos inspecciona cláusulas mandatorias,
-                vigencias y estándares aplicables a vehículos y colaboradores.
+            {(docVer.doc?.archivos || []).length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Sin archivos subidos. Usa «Subir» en la tabla para agregar uno.
               </p>
-            </div>
+            ) : (
+              <ul className="flex flex-col gap-2 m-0 p-0 list-none">
+                {docVer.doc!.archivos!.map((a) => (
+                  <li key={a.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                    <span className="flex-1 truncate font-medium">{a.filename}</span>
+                    <button onClick={() => handleDescargar(docVer.doc!.id, a.id)} className="text-blue-700 font-semibold hover:underline">
+                      Descargar
+                    </button>
+                    <button onClick={() => handleQuitarArchivo(docVer.doc!.id, a.id)} className="text-red-600 font-semibold hover:underline">
+                      Quitar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  toast.info("Descarga iniciada", {
-                    description: `Descargando copia de ${docVer.titulo}`,
-                  });
-                }}
-                className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                Descargar PDF
-              </button>
               <button
                 type="button"
                 onClick={() => setDocVer(null)}
@@ -629,8 +489,8 @@ export function TabDocumentosFaena({
                 El vehículo con patente <span className="font-bold">{equipoModal.patente}</span> fue
                 fabricado en <span className="font-bold">{equipoModal.anio}</span> y tiene{" "}
                 <span className="font-bold">{equipoModal.antiguedadAnios} años</span> de antigüedad.
-                El estándar de faena exige un límite de{" "}
-                <span className="font-bold">{equipoModal.maxAnios} años</span> para el transporte de personal.
+                La regla de faena exige un límite de{" "}
+                <span className="font-bold">{equipoModal.maxAnios} años</span>.
               </p>
             </div>
 
@@ -643,9 +503,9 @@ export function TabDocumentosFaena({
                 <span className="text-slate-500">Año de fabricación:</span>
                 <span className="font-bold text-slate-800">{equipoModal.anio}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Norma aplicable:</span>
-                <span className="font-medium text-slate-700">{equipoModal.fuente}</span>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500 shrink-0">Regla aplicable:</span>
+                <span className="font-medium text-slate-700 text-right">{equipoModal.fuente}</span>
               </div>
             </div>
 
@@ -662,105 +522,54 @@ export function TabDocumentosFaena({
         )}
       </Modal>
 
-      {/* ── MODAL SUBIR DOCUMENTO DE FAENA ─────────────────────────────────── */}
+      {/* ── MODAL NUEVO DOCUMENTO DE FAENA ─────────────────────────────────── */}
       <Modal
         abierto={modalSubir}
-        titulo={`Subir documento de faena para ${faenaNombre}`}
+        titulo={`Nuevo documento de faena — ${faenaNombre}`}
         onCerrar={() => {
-          if (!analizandoNuevo) setModalSubir(false);
+          if (!guardando) setModalSubir(false);
         }}
         ancho="max-w-xl"
       >
-        <form onSubmit={handleSubirSubmit} className="space-y-4">
+        <form onSubmit={handleAgregar} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-              Nombre o Título del Documento
+              Nombre o Título del Documento *
             </label>
             <input
               type="text"
               required
-              placeholder="Ej: Estándar Operacional de Transporte Escoltado"
+              placeholder="Ej: Estándar de vehículos livianos y buses"
               value={nuevoTitulo}
               onChange={(e) => setNuevoTitulo(e.target.value)}
               className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-600"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                Tipo
-              </label>
-              <select
-                value={nuevoTipo}
-                onChange={(e) => setNuevoTipo(e.target.value as any)}
-                className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-600 bg-white"
-              >
-                <option value="Estándar">Estándar</option>
-                <option value="Manual">Manual</option>
-                <option value="Reglamento">Reglamento</option>
-                <option value="Protocolo">Protocolo</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                Versión / Revisión
-              </label>
-              <input
-                type="text"
-                placeholder="Rev. 1"
-                value={nuevaVersion}
-                onChange={(e) => setNuevaVersion(e.target.value)}
-                className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-600"
-              />
-            </div>
-          </div>
-
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-              Archivo PDF
+              Ámbito
             </label>
-            <div className="border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-5 text-center cursor-pointer transition-colors bg-slate-50/50">
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx"
-                id="docFaenaInput"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setArchivoSeleccionado(f);
-                }}
-              />
-              <label htmlFor="docFaenaInput" className="cursor-pointer block">
-                <svg
-                  className="w-8 h-8 mx-auto text-slate-400 mb-2"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
-                <span className="text-xs font-semibold text-blue-600 hover:underline">
-                  {archivoSeleccionado
-                    ? archivoSeleccionado.name
-                    : "Haz clic para seleccionar o arrastra un PDF"}
-                </span>
-                <p className="text-[0.72rem] text-slate-400 mt-1">
-                  Formatos soportados: PDF, DOCX (Máx. 25MB)
-                </p>
-              </label>
-            </div>
+            <select
+              value={nuevoAmbito}
+              onChange={(e) => setNuevoAmbito(e.target.value)}
+              className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-600 bg-white"
+            >
+              <option value="empresa">Empresa</option>
+              <option value="personal">Personal</option>
+              <option value="equipo">Equipos</option>
+            </select>
           </div>
+
+          <p className="text-[0.75rem] text-slate-500 m-0">
+            Se crea el requisito y su documento en estado pendiente; después usa
+            «Subir» en la fila para cargar el archivo, que se revisa con IA.
+          </p>
 
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              disabled={analizandoNuevo}
+              disabled={guardando}
               onClick={() => setModalSubir(false)}
               className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors"
             >
@@ -768,17 +577,10 @@ export function TabDocumentosFaena({
             </button>
             <button
               type="submit"
-              disabled={analizandoNuevo}
-              className="btn-primary text-sm px-5 py-2 flex items-center gap-2"
+              disabled={guardando}
+              className="btn-primary text-sm px-5 py-2"
             >
-              {analizandoNuevo ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Analizando con IA…
-                </>
-              ) : (
-                "Subir y analizar con IA"
-              )}
+              {guardando ? "Guardando..." : "Crear documento"}
             </button>
           </div>
         </form>

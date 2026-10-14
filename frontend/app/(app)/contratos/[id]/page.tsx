@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import * as Api from "@/lib/cliente";
 import type {
@@ -16,6 +16,7 @@ import { TabDocumentosFaena } from "@/components/contratos/TabDocumentosFaena";
 import { TabCarpetaArranque } from "@/components/contratos/TabCarpetaArranque";
 import { TabEmpresaContrato } from "@/components/contratos/TabEmpresaContrato";
 import { TabLicenciaInternaContrato } from "@/components/contratos/TabLicenciaInternaContrato";
+import { CorreosContratoModal } from "@/components/contratos/CorreosContratoModal";
 import { ContratoLayout } from "@/components/contratos/ContratoLayout";
 import { TabResumen } from "@/components/contratos/TabResumen";
 import { TabChatContrato } from "@/components/contratos/TabChatContrato";
@@ -25,6 +26,7 @@ import { Tab, TABS } from "@/components/contratos/ContratoTabs";
 
 export default function ContratoDetalle() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [c, setC] = useState<Contrato | null>(null);
   const [tab, setTab] = useState<Tab>("Resumen");
   const [page, setPage] = useState(1);
@@ -37,6 +39,8 @@ export default function ContratoDetalle() {
   const [review, setReview] = useState<Revision | null>(null);
   const [subiendo, setSubiendo] = useState<{ docId: string; pct: number; texto: string } | null>(null);
   const [analizandoId, setAnalizandoId] = useState<string | null>(null);
+  const [showCorreosAlertas, setShowCorreosAlertas] = useState(false);
+  const [recordando, setRecordando] = useState<string | null>(null);
 
   const [showAddPlataforma, setShowAddPlataforma] = useState(false);
   const [plataformaToManage, setPlataformaToManage] = useState<PlataformaContrato | null>(null);
@@ -130,6 +134,47 @@ export default function ContratoDetalle() {
     catch (e) { setError(Api.mensajeError(e)); }
   };
 
+  const cargarAlertas = useCallback(() => {
+    Api.contratos.alertas(id, { page, page_size: 50 })
+      .then(setAlertas).catch((e) => setError(Api.mensajeError(e)));
+  }, [id, page]);
+
+  /** Navega al sujeto: resuelve su tipo a demanda (personal o equipo). */
+  const verSujeto = async (sujetoId: string) => {
+    setError("");
+    try {
+      await Api.personal.detalle(sujetoId);
+      router.push(`/personal/${sujetoId}`);
+      return;
+    } catch { /* no es trabajador, probar equipo */ }
+    try {
+      await Api.equipos.detalle(sujetoId);
+      router.push(`/equipos/${sujetoId}`);
+    } catch (e) { setError(Api.mensajeError(e)); }
+  };
+
+  const recordar = async (a: Alerta) => {
+    setRecordando(a.id);
+    try {
+      const res = await Api.contratos.enviarMail(id as string, { plantilla: "porvencer" });
+      toast.success("Recordatorio enviado", {
+        description: `${res.enviados} destinatario(s) · ${a.titulo}`,
+      });
+    } catch (e) {
+      setError(Api.mensajeError(e));
+      toast.error("No se pudo enviar", { description: Api.mensajeError(e) });
+    } finally {
+      setRecordando(null);
+    }
+  };
+
+  const marcarLeida = async (a: Alerta) => {
+    try {
+      await Api.alertas.editar(a.id, { leida: true });
+      cargarAlertas();
+    } catch (e) { setError(Api.mensajeError(e)); }
+  };
+
   const handleDeletePlataforma = async (pid: string) => {
     if (!confirm('¿Estás seguro de que deseas desvincular esta plataforma de este contrato?')) return;
     try {
@@ -181,15 +226,50 @@ export default function ContratoDetalle() {
 
       {tab === "Alertas" && (
         <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="m-0 text-[0.78rem] text-slate-500">Alertas activas del contrato con acciones directas.</p>
+            <button
+              onClick={() => setShowCorreosAlertas(true)}
+              className="h-8 px-3 rounded-lg border border-slate-300 bg-white text-[0.78rem] font-bold text-slate-600 hover:bg-slate-50"
+            >
+              ✉ Ver correos de notificación
+            </button>
+          </div>
           {Api.items(alertas).length === 0 && <p className="text-sm text-slate-500">Sin alertas para este contrato.</p>}
           {Api.items(alertas).map((a) => (
-            <div key={a.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div key={a.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm flex-wrap">
               <Chip estado={a.severidad} texto={SEVERIDAD_LABEL[a.severidad]} />
-              <div className="text-sm"><b>{a.titulo}</b><div className="text-slate-500">{a.descripcion}</div></div>
+              <div className="text-sm flex-1 min-w-[200px]"><b>{a.titulo}</b><div className="text-slate-500">{a.descripcion}</div></div>
               <Chip estado={a.estado} />
+              <div className="flex items-center gap-1.5 ml-auto">
+                {a.documento_id && (
+                  <button onClick={() => cambiarTab("Documentos")} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Ver el documento en el tab Documentos">
+                    📄 Documento
+                  </button>
+                )}
+                {a.sujeto_id && (
+                  <button onClick={() => verSujeto(a.sujeto_id!)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Abrir la ficha del trabajador o equipo">
+                    👤 Sujeto
+                  </button>
+                )}
+                <button
+                  onClick={() => recordar(a)}
+                  disabled={recordando === a.id}
+                  className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  title="Enviar recordatorio por correo a los responsables"
+                >
+                  {recordando === a.id ? "Enviando..." : "⏰ Recordar"}
+                </button>
+                {!a.leida && (
+                  <button onClick={() => marcarLeida(a)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50" title="Marcar como leída">
+                    ✓ Leída
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {alertas && <Paginador page={alertas.page} totalPaginas={alertas.total_pages} total={alertas.total} etiqueta="alertas" onPagina={setPage} />}
+          <CorreosContratoModal abierto={showCorreosAlertas} onCerrar={() => setShowCorreosAlertas(false)} contrato={c} />
         </section>
       )}
       {tab === "Requisitos" && c && (
@@ -264,6 +344,9 @@ export default function ContratoDetalle() {
         <TabDocumentosFaena
           contrato={c}
           onVerEquipo={() => cambiarTab("Vehículos / Equipos")}
+          onSubir={subir}
+          subiendo={subiendo}
+          analizandoId={analizandoId}
         />
       )}
 

@@ -156,7 +156,7 @@ export const empresa = {
     api<Pagina<UsuarioEmpresa>>("/company/usuarios", { query: q(params) }),
 
   invitar: (body: {
-    nombre: string; email: string; role?: "company" | "contract_admin";
+    nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
     contrato_id?: string | null;
   }) => api<UsuarioEmpresa & { activacion?: Record<string, unknown> }>(
     "/company/usuarios", { body }),
@@ -315,6 +315,11 @@ export const contratos = {
   historial: (id: string, params?: ParamsPagina & { modulo?: string; tipo?: string }) =>
     api<Pagina<ActividadFila>>(`/contratos/${id}/historial`, { query: q(params) }),
 
+  /** Despacha una plantilla de correo del contrato (C22). */
+  enviarMail: (id: string, body: { plantilla: string; para?: string; asunto?: string }) =>
+    api<{ plantilla: string; asunto: string; modo: string; enviados: number }>(
+      `/contratos/${id}/mails`, { body }),
+
   /**
    * Encola la extracción IA de un contrato ya subido. **No crea el contrato**:
    * el `job_id` se pasa después como `ia_review_id` en `crear()`.
@@ -345,6 +350,13 @@ export const contratos = {
                     opciones?: { bulk?: boolean; aplicar_retroactivo?: boolean }) =>
     api<Record<string, unknown>>(`/contratos/${id}/requisitos`,
       { body, query: q(opciones) }),
+
+  /** Requisito anclado a una plataforma (`contrato_requisitos.py:509`). */
+  crearRequisitoPlataforma: (id: string, platId: string, body: {
+    ambito: string; titulo: string; obligatorio?: boolean;
+    vigencia_meses?: number | null;
+  }) => api<Record<string, unknown>>(
+    `/contratos/${id}/plataformas/${platId}/requisitos`, { body }),
 
   editarRequisito: (id: string, rid: string, cambios: object) =>
     patch<Record<string, unknown>>(`/contratos/${id}/requisitos/${rid}`, cambios),
@@ -390,6 +402,11 @@ export const plataformas = {
     api<PlataformaContrato>(
       `/contratos/${contratoId}/plataformas/${pid}/solicitar-acceso`,
       { body: { nota: nota ?? null } }),
+
+  /** Marca los documentos como subidos a la plataforma (C21). */
+  marcarSubida: (contratoId: string, pid: string) =>
+    api<{ ok: boolean; plataforma: string; subida_at: string }>(
+      `/contratos/${contratoId}/plataformas/${pid}/subida`, { body: {} }),
 };
 
 /** Cuentas de acceso a una plataforma. El secreto nunca vuelve del backend. */

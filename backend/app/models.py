@@ -20,7 +20,7 @@ from pgvector.sqlalchemy import VECTOR
 
 
 _ENUM_VALUES = {
-    "user_role": ("admin", "company", "contract_admin"),
+    "user_role": ("admin", "company", "contract_admin", "visor"),
     "account_status": ("pending", "approved", "rejected"),
     "subject_type": ("trabajador", "equipo"),
     "subject_status": ("ok", "falta", "venc", "proc", "baja"),
@@ -50,7 +50,7 @@ _ENUM_VALUES = {
     ),
     # --- v1.1 ---
     "plataforma_estado": ("activa", "solicitada", "sin_acceso"),
-    "vinculo_tipo": ("plataforma", "arranque", "otro"),
+    "vinculo_tipo": ("plataforma", "arranque", "faena", "otro"),
     "requisito_origen": ("base", "custom", "arranque"),
     "cargo_categoria": (
         "conduccion",
@@ -169,7 +169,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(pg_enum("user_role"), default="company")
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id"))
-    # Solo para role=contract_admin: acota el acceso a un único contrato.
+    # Solo para role=contract_admin/visor: acota el acceso a un único contrato.
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contratos.id"))
     nombre: Mapped[str | None] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)

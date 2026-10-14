@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { Modal, Spinner } from "@/components/ui";
+import { toast } from "sonner";
 import * as Api from "@/lib/cliente";
 import type { Alerta, Contrato } from "@/lib/tipos";
 import { numeroContrato } from "./ContratoLayout";
@@ -26,6 +27,7 @@ export function CorreosContratoModal({ abierto, onCerrar, contrato }: CorreosCon
   const [para, setPara] = useState("");
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [cargando, setCargando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
 
   useEffect(() => {
@@ -151,12 +153,26 @@ export function CorreosContratoModal({ abierto, onCerrar, contrato }: CorreosCon
     ),
   };
 
-  const enviar = () => {
+  const enviar = async () => {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(para.trim())) {
       setAviso("Ingresa un correo válido.");
       return;
     }
-    setAviso("El envío automático aún no está conectado en este ambiente (demo): revisa la vista previa arriba.");
+    setEnviando(true);
+    setAviso(null);
+    try {
+      const res = await Api.contratos.enviarMail(contrato.id, { plantilla: sel, para: para.trim() });
+      toast.success("Correo enviado", {
+        description: `${res.enviados} destinatario(s) · ${res.asunto}`,
+      });
+      setPara("");
+    } catch (e) {
+      const msg = Api.mensajeError(e);
+      setAviso(msg);
+      toast.error("No se pudo enviar", { description: msg });
+    } finally {
+      setEnviando(false);
+    }
   };
 
   return (
@@ -205,9 +221,10 @@ export function CorreosContratoModal({ abierto, onCerrar, contrato }: CorreosCon
             />
             <button
               onClick={enviar}
-              className="h-10 px-4 rounded-lg border border-slate-300 bg-white text-[0.82rem] font-bold text-slate-600 hover:bg-slate-50"
+              disabled={enviando}
+              className="h-10 px-4 rounded-lg border border-slate-300 bg-white text-[0.82rem] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
             >
-              Enviar este correo
+              {enviando ? "Enviando..." : "Enviar este correo"}
             </button>
             <button
               onClick={onCerrar}

@@ -118,6 +118,16 @@ export function guardarUsuario(user: Usuario) {
   localStorage.setItem(CLAVE_USER, JSON.stringify(user));
 }
 
+/** Política de lectura del contrato: el rol visor no edita nada.
+ *
+ * Solo afecta a la interfaz (ocultar/deshabilitar); el control real es el
+ * middleware `negar_mutaciones_visor` del backend. Ante duda (sin sesión)
+ * devuelve falso para no romper a usuarios normales.
+ */
+export function esVisor(u: Pick<Usuario, "role"> | null | undefined): boolean {
+  return u?.role === "visor";
+}
+
 async function tryRefresh(): Promise<boolean> {
   const r = refreshToken();
   if (!r) return false;

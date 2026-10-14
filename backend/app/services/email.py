@@ -189,7 +189,7 @@ def despachar_alerta_email(
     severidad: str = "advertencia",
     nombre_empresa: str = "",
     contrato_nombre: str = "",
-) -> None:
+) -> int:
     """Evalúa preferencias y encola correos para los usuarios de la empresa y el trabajador.
 
     Destinatarios:
@@ -270,4 +270,7 @@ def despachar_alerta_email(
     #   - no haya sido ya notificado como usuario de la plataforma (evita duplicado)
     if sujeto_email and sujeto_email.lower() not in emails_enviados:
         enqueue("enviar_email", to_email=sujeto_email, subject=titulo, html_body=html)
+        emails_enviados.add(sujeto_email.lower())
         log.debug("Alerta '%s' encolada para trabajador <%s>", evento_clave, sujeto_email)
+
+    return len(emails_enviados)
