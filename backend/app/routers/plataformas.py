@@ -200,17 +200,18 @@ def plataformas_efectivas(db: Session, cid: uuid.UUID,
                           contrato: Contrato) -> list[dict]:
     """Plataformas efectivas del contrato (regla de herencia de §8.1).
 
-    Si el contrato tiene filas en `contrato_plataformas`, esa lista es la
-    efectiva y reemplaza por completo a la de la faena. Si no tiene ninguna,
-    hereda las de su faena con el estado de acceso de la empresa; esas entradas
-    llegan con `id=null` porque todavía no existe fila propia.
+    Si `hereda_plataformas` es False, el contrato gestiona su propia lista
+    exclusiva (que puede estar vacía). Si es True y tiene filas, éstas reemplazan
+    a las de la faena. Si es True y no tiene, hereda.
     """
     filas = _filas_del_contrato(db, cid, contrato.id)
     if filas:
         cuentas = _cuentas_activas(db, cid, [f.id for f in filas])
         return [_out(f, cuentas.get(f.id, 0)) for f in filas]
-    return [_out_heredada(fp, acceso)
-            for fp, acceso in _heredables(db, cid, contrato.faena_id)]
+    if contrato.hereda_plataformas:
+        return [_out_heredada(fp, acceso)
+                for fp, acceso in _heredables(db, cid, contrato.faena_id)]
+    return []
 
 
 def materializar_heredadas(db: Session, cid: uuid.UUID,
@@ -221,6 +222,8 @@ def materializar_heredadas(db: Session, cid: uuid.UUID,
     plataforma manual: sin ella, las filas propias reemplazarían silenciosamente
     a toda la lista del mandante. No hace nada si el contrato ya tiene filas.
     """
+    contrato.hereda_plataformas = False
+    
     if _filas_del_contrato(db, cid, contrato.id):
         return 0
     n = 0
@@ -557,6 +560,32 @@ def solicitar_acceso(contrato_id: uuid.UUID, pid: uuid.UUID,
     out["heredadas_materializadas"] = materializadas
     out["notificado"] = integracion is not None
     return out
+
+
+@router.post("/plataformas/{pid}/subida")
+def marcar_subida(contrato_id: uuid.UUID, pid: uuid.UUID,
+                  db: Session = Depends(get_db),
+                  cid: uuid.UUID = Depends(get_company_id),
+                  user: User = Depends(get_current_user)):
+    """Marca los documentos como subidos a la plataforma (C21, `psMarkExported`).
+
+    No hay columna de estado: la marca es la última fila de `actividad` con
+    este módulo y plataforma, que el historial del contrato ya sabe filtrar.
+    Acepta tanto la plataforma propia como la heredada aún sin materializar.
+    """
+    c = contrato_de_empresa(db, cid, contrato_id, user)
+    p, _ = resolver_plataforma(db, cid, c, pid, materializar=True)
+    ahora = datetime.now(timezone.utc)
+    # entidad_tipo="contrato": _filtro_contrato solo atribuye contrato,
+    # sujetos y documentos; con "contrato_plataforma" la marca quedaría
+    # invisible en el historial del contrato. La plataforma va en `plataforma`.
+    actividad.log(db, cid, "actualizacion", "plataformas",
+                  f"Documentos subidos a '{p.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato",
+                  entidad_id=c.id, plataforma=p.nombre)
+    db.commit()
+    return {"ok": True, "plataforma": p.nombre,
+            "subida_at": ahora.isoformat()}
 
 
 # =============================================================================

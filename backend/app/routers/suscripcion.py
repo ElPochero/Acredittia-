@@ -177,9 +177,9 @@ def _factura_out(f: Factura) -> dict:
 
 def _solo_empresa(user: User) -> None:
     """La suscripción es de la empresa, no de un contrato (§17: rol company)."""
-    if user.role == "contract_admin":
+    if user.role in ("contract_admin", "visor"):
         raise err(403, "ROL_INSUFICIENTE",
-                  "El administrador de contrato no accede a la suscripción")
+                  "Tu rol no accede a la suscripción")
 
 
 def suscripcion_de(db: Session, cid: uuid.UUID) -> Suscripcion | None:

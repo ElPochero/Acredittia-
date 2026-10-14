@@ -71,6 +71,8 @@ class TrabajadorIn(BaseModel):
     cargo: str | None = None
     es_conductor: bool = False
     estado: str | None = None
+    telefono: str | None = None
+    email: str | None = None
 
 
 class EquipoIn(BaseModel):
@@ -88,6 +90,8 @@ class TrabajadorPatch(BaseModel):
     cargo: str | None = None
     es_conductor: bool | None = None
     estado: str | None = None
+    telefono: str | None = None
+    email: str | None = None
 
 
 class EquipoPatch(BaseModel):
@@ -137,6 +141,8 @@ def _out(db: Session, s: Sujeto, con_docs: bool = False,
         "rut": s.rut, "cargo": s.cargo,
         "cargo_id": str(s.cargo_id) if s.cargo_id else None,
         "es_conductor": s.es_conductor,
+        "telefono": s.telefono,
+        "email": s.email,
         "patente": s.patente, "tipo_equipo": s.tipo_equipo, "marca": s.marca,
         "modelo": s.modelo, "anio": s.anio,
         "contrato": {"id": str(s.contrato.id), "nombre": s.contrato.nombre,
@@ -319,7 +325,8 @@ def crear_trabajador(body: TrabajadorIn, db: Session = Depends(get_db),
                nombre=body.nombre.strip(), rut=body.rut,
                cargo=cargo.nombre if cargo else (body.cargo or None),
                cargo_id=cargo.id if cargo else None,
-               es_conductor=body.es_conductor)
+               es_conductor=body.es_conductor,
+               telefono=body.telefono, email=body.email)
     if body.estado:
         s.estado = body.estado
     db.add(s)

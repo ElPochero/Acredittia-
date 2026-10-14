@@ -129,6 +129,45 @@ def cumplimiento(p: Page = Depends(paginacion), db: Session = Depends(get_db),
     return sobre(items, total, p)
 
 
+@router.get("/contratos-resumen")
+def contratos_resumen(db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Lista de todos los contratos para el jefe de acreditación."""
+    from .contratos import _stats
+
+    scope = contrato_scope(user)
+    q = select(Contrato).where(Contrato.company_id == cid)
+    if scope:
+        q = q.where(Contrato.id == scope)
+    filas = list(db.scalars(q.order_by(Contrato.nombre)))
+
+    items = []
+    for c in filas:
+        st = _stats(db, c)
+        
+        # Alertas activas para este contrato
+        alertas = db.scalar(select(func.count()).select_from(Alerta).where(
+            Alerta.company_id == cid,
+            Alerta.contrato_id == c.id,
+            Alerta.resuelta_at.is_(None)
+        )) or 0
+        
+        items.append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "faena": c.faena.nombre if c.faena else None,
+            "estado": c.estado,
+            "cumplimiento_general_pct": st.get("cumplimiento_pct", 0),
+            "personal_ok": st.get("personal", {}).get("acreditados", 0),
+            "personal_total": st.get("personal", {}).get("total", 0),
+            "equipos_ok": st.get("equipos", {}).get("acreditados", 0),
+            "equipos_total": st.get("equipos", {}).get("total", 0),
+            "alertas_activas": alertas
+        })
+    return {"items": items}
+
+
 @router.get("/acreditaciones-estado")
 def acreditaciones(db: Session = Depends(get_db),
                    cid: uuid.UUID = Depends(get_company_id),

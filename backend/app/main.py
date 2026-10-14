@@ -10,16 +10,20 @@ El cron tampoco vive aquí cuando hay Celery: `celery beat` lo ejecuta. Con
 `QUEUE_BACKEND=inproc` (desarrollo) se mantiene APScheduler dentro del proceso.
 """
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy import select
 
 from .config import settings
 from .database import (SessionLocal, apply_schema, assert_schema_version,
-                       reset_ctx, schema_version, set_ctx, wait_for_db)
+                       auth_session, reset_ctx, schema_version, set_ctx, wait_for_db)
+from .models import User
+from .security import decode_access_token
 from .routers import (actividad, admin, alertas, auth, blobs, calendario, cargos,
                       company, contrato_requisitos, contratos, dashboard,
                       documentos, faenas, ia, integraciones, licencia_interna,
@@ -28,7 +32,8 @@ from .routers import (actividad, admin, alertas, auth, blobs, calendario, cargos
 # Importar los módulos de tareas registra las entradas de TAREAS que usa la cola.
 from .services import integraciones as _svc_integraciones  # noqa: F401
 from .services import tasks as _svc_tasks  # noqa: F401
-from .services.vencimientos import recalcular_documentos
+from .services import email as _svc_email  # noqa: F401
+from .services.vencimientos import recalcular_documentos, alertar_vencimiento_contratos
 
 log = logging.getLogger("acredittia")
 
@@ -38,6 +43,7 @@ def _job_vencimientos() -> None:
     from .database import worker_session
     with worker_session(is_admin=True) as db:
         recalcular_documentos(db)
+        alertar_vencimiento_contratos(db)
 
 
 @asynccontextmanager
@@ -56,6 +62,7 @@ async def lifespan(app: FastAPI):
         try:
             seeds.run(db)
             recalcular_documentos(db)
+            alertar_vencimiento_contratos(db)
         finally:
             reset_ctx()
 
@@ -97,6 +104,48 @@ async def limpiar_contexto(request: Request, call_next):
         return await call_next(request)
     finally:
         reset_ctx()
+
+
+_METODOS_LECTURA = {"GET", "HEAD", "OPTIONS"}
+# Mutaciones que el visor sí puede hacer: ciclo de sesión y recuperación.
+# Todo lo demás que no sea lectura se le deniega (fail-closed): es de solo
+# lectura en toda la plataforma y `require_company` ya lo excluye de la
+# administración de empresa.
+_SESION_VISOR = {
+    "/auth/login", "/auth/token", "/auth/refresh", "/auth/logout",
+    "/auth/password/forgot", "/auth/password/reset",
+}
+
+
+@app.middleware("http")
+async def negar_mutaciones_visor(request: Request, call_next):
+    """Bloquea con 403 las mutaciones del rol visor (C20).
+
+    Punto único de enforcement: ocultar botones en el frontend no es un
+    control (el atacante llama a la API directo), así que la denegación vive
+    aquí y cubre también los endpoints que se agreguen en el futuro. El rol se
+    lee de la BD en cada mutación para que un cambio de rol aplique sin
+    esperar al refresh del token.
+    """
+    if request.method in _METODOS_LECTURA or not request.url.path.startswith(API):
+        return await call_next(request)
+    if request.method == "POST" and request.url.path[len(API):] in _SESION_VISOR:
+        return await call_next(request)
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return await call_next(request)  # sin token: lo rechaza get_current_user
+    try:
+        sub = decode_access_token(auth[7:].strip())["sub"]
+    except Exception:
+        return await call_next(request)  # inválido: lo rechaza get_current_user
+    with auth_session() as db:
+        rol = db.scalar(select(User.role).where(User.id == uuid.UUID(sub)))
+    if rol != "visor":
+        return await call_next(request)
+    log.warning("visor bloqueado: %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=403, content={"error": {
+        "code": "SOLO_LECTURA",
+        "message": "El rol visor es de solo lectura"}})
 
 
 @app.exception_handler(HTTPException)

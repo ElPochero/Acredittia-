@@ -157,6 +157,51 @@ def resumen(db: Session = Depends(get_db),
     }
 
 
+@router.get("/resumen-contratos")
+def resumen_contratos(db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Resumen de alertas agrupadas por contrato para vista enriquecida."""
+    from ..models import Contrato
+
+    scope = contrato_scope(user)
+    q = select(Contrato.id, Contrato.nombre).where(
+        Contrato.company_id == cid, Contrato.estado == "vigente"
+    )
+    if scope:
+        q = q.where(Contrato.id == scope)
+    
+    contratos = list(db.execute(q).all())
+    items = []
+    
+    for c_id, c_nombre in contratos:
+        alertas = list(db.scalars(
+            select(Alerta).where(
+                Alerta.company_id == cid,
+                Alerta.contrato_id == c_id,
+                Alerta.resuelta_at.is_(None)
+            )
+        ))
+        if not alertas:
+            continue
+            
+        severidades = {"critica": 0, "alta": 0, "media": 0, "baja": 0, "advertencia": 0, "informativa": 0}
+        for a in alertas:
+            if a.severidad in severidades:
+                severidades[a.severidad] += 1
+                
+        items.append({
+            "contrato_id": str(c_id),
+            "contrato_nombre": c_nombre,
+            "total_activas": len(alertas),
+            "severidades": severidades,
+            "documentos_vencidos": sum(1 for a in alertas if a.origen == "vencimiento"),
+            "contrato_por_vencer": any("vencer" in (a.titulo or "").lower() for a in alertas)
+        })
+        
+    return {"items": items}
+
+
 @router.patch("/{alerta_id}")
 def editar(alerta_id: uuid.UUID, body: AlertaPatch,
            db: Session = Depends(get_db),

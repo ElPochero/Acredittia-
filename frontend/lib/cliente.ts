@@ -33,7 +33,9 @@ import type {
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
-  Usuario, UsuarioEmpresa, Exportacion, Periodo,
+  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento,
+  EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
+  CumplimientoDashboardData,
 } from "./tipos";
 
 export * from "./api";
@@ -154,7 +156,7 @@ export const empresa = {
     api<Pagina<UsuarioEmpresa>>("/company/usuarios", { query: q(params) }),
 
   invitar: (body: {
-    nombre: string; email: string; role?: "company" | "contract_admin";
+    nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
     contrato_id?: string | null;
   }) => api<UsuarioEmpresa & { activacion?: Record<string, unknown> }>(
     "/company/usuarios", { body }),
@@ -302,12 +304,21 @@ export const contratos = {
   equipos: (id: string, params?: Omit<ParamsEquipos, "contrato_id">) =>
     api<Pagina<Sujeto>>(`/contratos/${id}/equipos`, { query: q(params) }),
 
+  importarEquipos: (id: string, sujetos_ids: string[]) =>
+    api<{ importados: number; documentos_creados: number }>(
+      `/contratos/${id}/equipos/importar`, { body: { sujetos_ids } }),
+
   alertas: (id: string, params?: ParamsPagina & {
     severidad?: string; origen?: string; solo_activas?: boolean;
   }) => api<Pagina<Alerta>>(`/contratos/${id}/alertas`, { query: q(params) }),
 
   historial: (id: string, params?: ParamsPagina & { modulo?: string; tipo?: string }) =>
     api<Pagina<ActividadFila>>(`/contratos/${id}/historial`, { query: q(params) }),
+
+  /** Despacha una plantilla de correo del contrato (C22). */
+  enviarMail: (id: string, body: { plantilla: string; para?: string; asunto?: string }) =>
+    api<{ plantilla: string; asunto: string; modo: string; enviados: number }>(
+      `/contratos/${id}/mails`, { body }),
 
   /**
    * Encola la extracción IA de un contrato ya subido. **No crea el contrato**:
@@ -339,6 +350,13 @@ export const contratos = {
                     opciones?: { bulk?: boolean; aplicar_retroactivo?: boolean }) =>
     api<Record<string, unknown>>(`/contratos/${id}/requisitos`,
       { body, query: q(opciones) }),
+
+  /** Requisito anclado a una plataforma (`contrato_requisitos.py:509`). */
+  crearRequisitoPlataforma: (id: string, platId: string, body: {
+    ambito: string; titulo: string; obligatorio?: boolean;
+    vigencia_meses?: number | null;
+  }) => api<Record<string, unknown>>(
+    `/contratos/${id}/plataformas/${platId}/requisitos`, { body }),
 
   editarRequisito: (id: string, rid: string, cambios: object) =>
     patch<Record<string, unknown>>(`/contratos/${id}/requisitos/${rid}`, cambios),
@@ -378,12 +396,17 @@ export const plataformas = {
 
   eliminar: (contratoId: string, pid: string) =>
     api<{ ok: boolean; requisitos_eliminados: number; credenciales_eliminadas: number }>(
-      `/contratos/${contratoId}/plataformas/${pid}`, { method: "DELETE" }),
+      `/contratos/${contratoId}/plataformas/${pid}`, { method: "DELETE", query: { confirm: true } }),
 
   solicitarAcceso: (contratoId: string, pid: string, nota?: string) =>
     api<PlataformaContrato>(
       `/contratos/${contratoId}/plataformas/${pid}/solicitar-acceso`,
       { body: { nota: nota ?? null } }),
+
+  /** Marca los documentos como subidos a la plataforma (C21). */
+  marcarSubida: (contratoId: string, pid: string) =>
+    api<{ ok: boolean; plataforma: string; subida_at: string }>(
+      `/contratos/${contratoId}/plataformas/${pid}/subida`, { body: {} }),
 };
 
 /** Cuentas de acceso a una plataforma. El secreto nunca vuelve del backend. */
@@ -539,9 +562,21 @@ export const documentos = {
 // Revisión y extracción IA (todo asíncrono: se consulta con polling)
 // ============================================================================
 export const ia = {
+  chat: (body: { contexto: string; mensaje: string; historial: { role: string; content: string }[], file_name?: string, file_b64?: string }) =>
+    api<any>('/ia/chat', { body }),
+
+  historial: (contexto: string) =>
+    api<any>(`/ia/chat/${contexto}`),
+
   /** Vuelve a revisar un archivo ya subido. */
   revisar: (archivo_id: string) =>
     api<JobEncolado>("/ia/revisiones", { body: { archivo_id } }),
+
+  /** SAS temporal para subir un archivo de extracción (pantallazo, Excel, carpeta de arranque). */
+  uploadTmp: (body: {
+    filename: string; content_type?: string; size_bytes?: number;
+    proposito: "contrato" | "cedula" | "padron" | "carpeta_arranque";
+  }) => api<UploadUrl>("/ia/upload-url", { body }),
 
   revision: (jobId: string) => api<Revision>(`/ia/revisiones/${jobId}`),
 
@@ -658,6 +693,23 @@ export const reportes = {
   /** 409 `REPORTE_NO_LISTO` mientras el job no haya terminado. */
   urlDescarga: (id: string) => api<DownloadUrl>(`/reportes/${id}/download-url`),
 
+  /**
+   * Sondea un reporte asíncrono hasta `done` y devuelve la URL de descarga.
+   * Lanza con el mensaje del backend si falla o demora demasiado.
+   */
+  esperarDescarga: async (id: string, intentos = 40, intervaloMs = 3000): Promise<string> => {
+    for (let i = 0; i < intentos; i++) {
+      await new Promise((r) => setTimeout(r, intervaloMs));
+      const rep = await reportes.detalle(id);
+      if (rep.status === "done") {
+        const dl = await reportes.urlDescarga(id);
+        return dl.download_url;
+      }
+      if (rep.status === "failed") throw new Error(rep.error || "La generación falló en el servidor.");
+    }
+    throw new Error("La generación demoró demasiado. Inténtalo de nuevo.");
+  },
+
   programados: (params?: ParamsPagina & { activo?: boolean; tipo?: TipoReporte }) =>
     api<Pagina<ReporteProgramado>>("/reportes/programados", { query: q(params) }),
 
@@ -751,3 +803,68 @@ export const suscripcion = {
 
   urlFactura: (id: string) => api<DownloadUrl>(`/facturas/${id}/download-url`),
 };
+
+// ============================================================================
+// §16 — Certificación Laboral (Dev 4)
+// ============================================================================
+export const certificacion = {
+  listarPeriodos: async (params?: ParamsPagina & { estado?: string; contrato_id?: string; search?: string }) => {
+    return await api<Pagina<PeriodoLaboral>>("/periodos", { query: q(params) });
+  },
+
+  obtenerPeriodo: async (id: string) => {
+    return await api<PeriodoLaboral>(`/periodos/${id}`);
+  },
+
+  crearPeriodo: async (body: {
+    contrato_id: string;
+    nombre: string;
+    tipo: string;
+    fecha_inicio: string;
+    fecha_fin: string;
+  }) => {
+    return await api<PeriodoLaboral>(`/contratos/${body.contrato_id}/periodos`, { method: "POST", body });
+  },
+
+  actualizarPeriodo: async (id: string, cambios: Partial<PeriodoLaboral>) => {
+    return await patch<PeriodoLaboral>(`/periodos/${id}`, cambios);
+  },
+
+  eliminarPeriodo: async (id: string) => {
+    return await api<{ ok: boolean }>(`/periodos/${id}`, { method: "DELETE" });
+  },
+
+  matrizDocumental: async (periodoId: string): Promise<MatrizCumplimientoData> => {
+    return await api<MatrizCumplimientoData>(`/periodos/${periodoId}/matriz`);
+  },
+
+  subirDocumento: async (
+    periodoId: string,
+    body: { sujeto_id: string; requisito_template_id: string; archivo_url?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  auditarDocumento: async (
+    documentoId: string,
+    body: { accion: "aprobar" | "observar" | "rechazar"; observacion?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/documentos/${documentoId}/auditar`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  historialAuditoria: async (documentoId: string): Promise<AuditoriaDocumento[]> => {
+    return await api<AuditoriaDocumento[]>(`/periodos/documentos/${documentoId}/historial`);
+  },
+
+  dashboardCumplimiento: async (periodoId: string): Promise<CumplimientoDashboardData> => {
+    return await api<CumplimientoDashboardData>(`/periodos/${periodoId}/dashboard`);
+  },
+};
+
+

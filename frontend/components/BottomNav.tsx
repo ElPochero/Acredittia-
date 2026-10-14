@@ -8,6 +8,7 @@ export default function BottomNav() {
   const items = [
     { href: "/dashboard", icono: "🏠", nombre: "Inicio" },
     { href: "/contratos", icono: "📋", nombre: "Contratos" },
+    { href: "/certificacion-laboral", icono: "📊", nombre: "Certificación" },
     { href: "/personal", icono: "👥", nombre: "Personal" },
     { href: "/equipos", icono: "🚛", nombre: "Equipos" },
     { href: "/alertas", icono: "🔔", nombre: "Alertas" },

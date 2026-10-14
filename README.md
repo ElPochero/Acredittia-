@@ -108,3 +108,22 @@ cd backend
 | `JWT_SECRET` | Clave secreta para firmar tokens JWT | `secret_dev_key` |
 | `CORS_ORIGINS` | Orígenes permitidos para CORS | `http://localhost:3000` |
 
+---
+
+## ☁️ Despliegue en Azure
+
+El proyecto está configurado para desplegarse en **Azure Container Apps** con los siguientes servicios:
+- **API** y **Worker** en Container Apps (Consumo).
+- Tareas programadas (cron) mediante Container App Jobs.
+- **Base de Datos**: Azure Database for PostgreSQL Flexible Server.
+- **Cache / Cola**: Redis auto-hospedado (Container App interno).
+- **Almacenamiento y Secretos**: Azure Blob Storage y Azure Key Vault con identidades administradas (System-Assigned).
+
+Los archivos de configuración de infraestructura como código (YAML) se encuentran en la raíz del proyecto. Para desplegar un componente, asegúrate de tener definido el archivo `.env` en la raíz (usando `backend/.env.azure.template` como referencia) y ejecuta:
+
+```powershell
+.\deploy.ps1 -YamlFile api.yaml
+```
+
+Para ver el detalle completo de la arquitectura y pasos de migración, revisa el documento `plan_migracion_azure.md`.
+

@@ -49,12 +49,13 @@ logger = logging.getLogger("acredittia.requisitos")
 router = APIRouter(prefix="/contratos/{contrato_id}", tags=["requisitos"])
 
 Ambito = Literal["empresa", "personal", "equipo", "emsipor"]
-VinculoTipo = Literal["plataforma", "arranque", "otro"]
+VinculoTipo = Literal["plataforma", "arranque", "faena", "otro"]
 AMBITOS: tuple[str, ...] = ("empresa", "personal", "equipo", "emsipor")
 
 # Vínculos que no cuelgan de una plataforma (vinculo_ref siempre nulo).
 VINCULOS_FIJOS = (
     ("arranque", "Carpeta de Arranque"),
+    ("faena", "Documentos de Faena"),
     ("otro", "Otros requisitos"),
 )
 
@@ -504,6 +505,24 @@ def crear_requisitos(contrato_id: uuid.UUID,
     salida["documentos_creados"] = docs
     salida["heredadas_materializadas"] = materializadas
     return salida
+
+
+@router.post("/plataformas/{plat_id}/requisitos", status_code=201)
+def crear_requisitos_plataforma(contrato_id: uuid.UUID, plat_id: uuid.UUID,
+                                body: RequisitoIn | list[RequisitoIn],
+                                bulk: bool = Query(False),
+                                aplicar_retroactivo: bool = Query(False),
+                                db: Session = Depends(get_db),
+                                cid: uuid.UUID = Depends(get_company_id),
+                                user: User = Depends(get_current_user)):
+    """Crea requisitos específicamente anclados a una plataforma."""
+    entradas = body if isinstance(body, list) else [body]
+    for item in entradas:
+        item.vinculo_tipo = "plataforma"
+        item.vinculo_ref = plat_id
+    return crear_requisitos(contrato_id, body, bulk=bulk,
+                            aplicar_retroactivo=aplicar_retroactivo,
+                            db=db, cid=cid, user=user)
 
 
 @router.patch("/requisitos/{rid}")

@@ -244,6 +244,7 @@ CREATE TABLE contratos (
   renovacion_automatica boolean NOT NULL DEFAULT false,
   estado                contrato_estado NOT NULL DEFAULT 'vigente',
   origen_ia_review_id   uuid,          -- FK a ia_reviews (se agrega abajo)
+  hereda_plataformas    boolean NOT NULL DEFAULT true,
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT ck_contratos_fechas CHECK (fecha_termino IS NULL OR fecha_inicio IS NULL OR fecha_termino >= fecha_inicio),

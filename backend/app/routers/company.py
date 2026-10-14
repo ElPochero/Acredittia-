@@ -1,10 +1,11 @@
 """Perfil de la empresa del token y gestión de sus usuarios.
 
 La empresa administra sus propias cuentas: invita usuarios `company` (alcance
-empresa completa) y `contract_admin` (acotados a un contrato). Dos invariantes
+empresa completa) y `contract_admin` / `visor` (acotados a un contrato, el
+segundo de solo lectura). Dos invariantes
 gobiernan todo el módulo:
 
-1. `users` exige `(role='contract_admin') = (contrato_id IS NOT NULL)`; se valida
+1. `users` exige `(role IN ('contract_admin', 'visor')) = (contrato_id IS NOT NULL)`; se valida
    antes de tocar la BD para devolver 400 con un mensaje útil.
 2. Toda empresa debe conservar al menos un usuario `company` activo, o se
    quedaría sin nadie que pueda administrarla.
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/company", tags=["company"])
 # para reenviarle el enlace si caduca.
 ACTIVACION_TTL_HORAS = 72
 
-ROLES_INVITABLES = ("company", "contract_admin")
+ROLES_INVITABLES = ("company", "contract_admin", "visor")
 ORDEN_USUARIOS = {"nombre", "email", "role", "created_at", "last_login_at", "activo"}
 
 
@@ -156,14 +157,14 @@ def _valida_contrato(db: Session, cid: uuid.UUID,
 
 
 def _valida_rol(role: str, contrato_id: uuid.UUID | None) -> None:
-    """Refleja el CHECK de `users`: el contrato es obligatorio y exclusivo del
-    contract_admin."""
+    """Refleja el CHECK de `users`: el contrato es obligatorio y exclusivo de
+    los roles acotados (contract_admin, visor)."""
     if role not in ROLES_INVITABLES:
         raise err(400, "ROL_INVALIDO",
-                  "role debe ser 'company' o 'contract_admin'")
-    if role == "contract_admin" and not contrato_id:
+                  "role debe ser 'company', 'contract_admin' o 'visor'")
+    if role in ("contract_admin", "visor") and not contrato_id:
         raise err(400, "CONTRATO_REQUERIDO",
-                  "Un administrador de contrato necesita contrato_id")
+                  "Un usuario acotado a contrato necesita contrato_id")
     if role == "company" and contrato_id:
         raise err(400, "CONTRATO_NO_APLICA",
                   "Un usuario de empresa no puede estar acotado a un contrato")

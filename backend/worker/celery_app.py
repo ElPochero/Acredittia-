@@ -31,6 +31,7 @@ from app.config import settings  # noqa: E402
 # Importar los módulos de tareas puebla el registro TAREAS.
 from app.services import integraciones as _svc_integraciones  # noqa: E402,F401
 from app.services import tasks as _svc_tasks  # noqa: E402,F401
+from app.services import email as _svc_email  # noqa: E402,F401
 from app.services.jobs import TAREAS  # noqa: E402
 
 log = logging.getLogger("acredittia.worker")
@@ -81,15 +82,16 @@ def cron_diario():
     """
     from app.database import worker_session
     from app.services.vencimientos import (
-        expirar_credenciales, escribir_snapshots, recalcular_documentos)
+        expirar_credenciales, escribir_snapshots, recalcular_documentos, alertar_vencimiento_contratos)
 
     with worker_session(is_admin=True) as db:
         docs = recalcular_documentos(db)
+        contratos = alertar_vencimiento_contratos(db)
         snaps = escribir_snapshots(db)
         creds = expirar_credenciales(db)
-    log.info("Cron diario: %s documentos, %s snapshots, %s credenciales expiradas",
-             docs, snaps, creds)
-    return {"documentos": docs, "snapshots": snaps, "credenciales": creds}
+    log.info("Cron diario: %s documentos, %s contratos, %s snapshots, %s credenciales expiradas",
+             docs, contratos, snaps, creds)
+    return {"documentos": docs, "contratos": contratos, "snapshots": snaps, "credenciales": creds}
 
 
 @celery.task(name="acredittia.cron_reportes_programados")
@@ -106,11 +108,12 @@ def cron_reportes_programados():
 
 @celery.task(name="acredittia.cron_purga_temporales")
 def cron_purga_temporales():
-    """Purga los blobs temporales de extracción IA con más de 24 horas."""
-    from app.services.tasks import purgar_temporales
+    """Purga los blobs temporales y el historial de chats de IA con más de 3 meses."""
+    from app.services.tasks import purgar_temporales, purgar_chat_historial
     n = purgar_temporales()
-    log.info("Blobs temporales purgados: %s", n)
-    return {"purgados": n}
+    chats_purgados = purgar_chat_historial()
+    log.info("Blobs temporales purgados: %s, Chats purgados: %s", n, chats_purgados)
+    return {"blobs_purgados": n, "chats_purgados": chats_purgados}
 
 
 celery.conf.beat_schedule = {

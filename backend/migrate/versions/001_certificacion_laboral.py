@@ -34,6 +34,8 @@ def upgrade() -> None:
         sa.Column('requisito_template_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('ambito', postgresql.ENUM('empresa', 'personal', 'equipo', 'emsipor', name='req_ambito', create_type=False), nullable=False),
         sa.Column('obligatorio', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['periodo_id'], ['periodos_laborales.id'], ),
         sa.ForeignKeyConstraint(['requisito_template_id'], ['requisito_templates.id'], ),
         sa.PrimaryKeyConstraint('id')

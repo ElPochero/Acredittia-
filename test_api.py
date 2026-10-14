@@ -1,15 +1,7 @@
-import requests
-
-url = "http://localhost:8001/api/v1/personal"
-headers = {"Content-Type": "application/json"}
-data = {
-    "contrato_id": None,
-    "nombre": "juan",
-    "rut": "123432121",
-    "cargo": None,
-    "estado": "proc"
-}
-
-try:
-    # Intentionally omitted token to see if it even reaches the route
-    pass
+import sys
+sys.path.append("/app")
+from app.services.auth import encode_token
+import uuid, requests
+token = encode_token(uuid.UUID("50c4f58c-74e1-486e-a38c-b86920ba0ca5"))
+res = requests.get("http://localhost:8000/api/v1/contratos", headers={"Authorization": f"Bearer {token}", "X-Company-Id": "e8bf99f2-eec1-4320-80f0-19b36b1c481e"})
+print(res.json())

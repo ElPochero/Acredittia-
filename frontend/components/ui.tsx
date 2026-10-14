@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useId } from "react";
 
 export const ESTADO_LABEL: Record<string, string> = {
   ok: "Vigente",
@@ -126,11 +126,21 @@ export function Modal({
   ancho = "max-w-lg",
 }: {
   abierto: boolean;
-  titulo: string;
+  titulo: ReactNode;
   onCerrar: () => void;
   children: ReactNode;
   ancho?: string;
 }) {
+  const tituloId = useId();
+  useEffect(() => {
+    if (!abierto) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCerrar();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [abierto, onCerrar]);
+
   if (!abierto) return null;
   return (
     <div
@@ -138,13 +148,19 @@ export function Modal({
       onClick={onCerrar}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={tituloId}
         className={`w-full ${ancho} max-h-[85vh] overflow-y-auto rounded-xl bg-white p-5 shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-brand">{titulo}</h3>
+          <h3 id={tituloId} className="text-lg font-bold text-brand">
+            {titulo}
+          </h3>
           <button
             onClick={onCerrar}
+            aria-label="Cerrar"
             className="text-2xl leading-none text-slate-400 hover:text-slate-700"
           >
             ×

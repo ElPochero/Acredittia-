@@ -9,6 +9,7 @@ pwdlib[argon2]>=0.2
 PyJWT>=2.8
 python-multipart>=0.0.9
 email-validator>=2.1
+pymupdf>=1.24.0
 
 # --- Cola de trabajos --------------------------------------------------
 # Azure Cache for Redis. Con QUEUE_BACKEND=inproc no se usa, pero se instala
@@ -30,6 +31,11 @@ azure-keyvault-secrets>=4.8
 
 # --- Generación de reportes --------------------------------------------
 openpyxl>=3.1
+
+# --- RAG (pgvector + embeddings) -----------------------------------------
+# Pin exacto a propósito: el tipo VECTOR(N) queda grabado en el esquema y un
+# cambio de versión del driver podría alterar la adaptación de tipos.
+pgvector==0.5.1
 
 # --- Pruebas -----------------------------------------------------------
 pytest>=8.2

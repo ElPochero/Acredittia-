@@ -39,7 +39,7 @@ export type ParamsPagina = {
 // ============================================================================
 // Vocabularios cerrados
 // ============================================================================
-export type Rol = "admin" | "company" | "contract_admin";
+export type Rol = "admin" | "company" | "contract_admin" | "visor";
 export type EstadoEmpresa = "pending" | "approved" | "rejected";
 export type EstadoDoc = "ok" | "falta";
 export type EstadoCalc = "ok" | "porvenc" | "venc" | "falta";
@@ -103,7 +103,7 @@ export type Usuario = {
   nombre: string | null;
   activo: boolean;
   contrato_id: string | null;
-  /** Solo viene poblado para `role = contract_admin`. */
+  /** Solo viene poblado para roles acotados (`contract_admin`, `visor`). */
   contrato: ContratoResumen | null;
   last_login_at: string | null;
   company: EmpresaResumen | null;
@@ -402,6 +402,13 @@ export type ContratoIn = {
   renovacion_automatica?: boolean;
   /** Job de `POST /contratos/analizar` que originó el alta. */
   ia_review_id?: string | null;
+  /** Requisitos propios del contrato fijados por el asistente o a mano (C2a). */
+  requisitos_custom?: {
+    empresa?: string[];
+    personal?: string[];
+    equipos?: string[];
+    licencia?: string[];
+  } | null;
 };
 
 export type ContratoPatch = {
@@ -459,6 +466,8 @@ export type Sujeto = {
   cargo: string | null;
   cargo_id: string | null;
   es_conductor: boolean;
+  telefono: string | null;
+  email: string | null;
   patente: string | null;
   tipo_equipo: string | null;
   marca: string | null;
@@ -515,6 +524,9 @@ export type TrabajadorIn = {
   cargo?: string | null;
   es_conductor?: boolean;
   estado?: string | null;
+  /** Añadido en migración v10. */
+  telefono?: string | null;
+  email?: string | null;
 };
 
 /** `PATCH /personal/{id}`: solo estos campos (§5 de RUPTURAS). */
@@ -524,6 +536,8 @@ export type TrabajadorPatch = {
   cargo?: string | null;
   es_conductor?: boolean;
   estado?: string | null;
+  telefono?: string | null;
+  email?: string | null;
 };
 
 export type EquipoIn = {
@@ -1053,3 +1067,105 @@ export type RequisitoFila = {
   venc: number;
   falta: number;
 };
+
+// ============================================================================
+// Certificación Laboral (Dev 4)
+// ============================================================================
+export type EstadoPeriodo = "abierto" | "en_revision" | "cerrado";
+export type EstadoPeriodoDoc =
+  | "pendiente"
+  | "cargado"
+  | "en_revision"
+  | "aprobado"
+  | "observado"
+  | "rechazado";
+
+export type PeriodoLaboral = {
+  id: string;
+  contrato_id: string;
+  contrato_nombre?: string;
+  nombre: string;
+  tipo: "mensual" | "quincenal" | "otro";
+  fecha_inicio: string;
+  fecha_fin: string;
+  estado: EstadoPeriodo;
+  porcentaje_cumplimiento: number;
+  total_requeridos?: number;
+  total_aprobados?: number;
+  total_pendientes?: number;
+  total_observados?: number;
+  total_rechazados?: number;
+  created_at?: string;
+};
+
+export type PeriodoDocumentoRequerido = {
+  id: string;
+  periodo_id: string;
+  requisito_template_id: string;
+  requisito_nombre: string;
+  ambito: Ambito;
+  obligatorio: boolean;
+};
+
+export type PeriodoDocumento = {
+  id: string;
+  periodo_id: string;
+  sujeto_id: string;
+  sujeto_nombre: string;
+  sujeto_rut: string;
+  sujeto_cargo?: string;
+  requisito_template_id: string;
+  requisito_nombre: string;
+  archivo_url?: string | null;
+  estado: EstadoPeriodoDoc;
+  fecha_carga?: string | null;
+  cargado_por?: string | null;
+  observaciones?: string | null;
+  version?: number;
+};
+
+export type AuditoriaDocumento = {
+  id: string;
+  periodo_documento_id: string;
+  auditor_id?: string;
+  auditor_nombre: string;
+  accion: "cargar" | "aprobar" | "observar" | "rechazar";
+  observacion?: string;
+  fecha: string;
+  version: number;
+};
+
+export type MatrizSujeto = {
+  id: string;
+  nombre: string;
+  rut: string;
+  cargo?: string;
+};
+
+export type MatrizRequisito = {
+  id: string;
+  nombre: string;
+  ambito: Ambito;
+  obligatorio: boolean;
+};
+
+export type MatrizCumplimientoData = {
+  periodo: PeriodoLaboral;
+  sujetos: MatrizSujeto[];
+  requisitos: MatrizRequisito[];
+  celdas: Record<string, PeriodoDocumento>;
+};
+
+export type CumplimientoDashboardData = {
+  total_requeridos: number;
+  pendientes: number;
+  cargados: number;
+  en_revision: number;
+  aprobados: number;
+  observados: number;
+  rechazados: number;
+  porcentaje_cumplimiento: number;
+  por_tipo: { tipo: string; porcentaje: number; total: number; aprobados: number }[];
+  alertas: string[];
+};
+

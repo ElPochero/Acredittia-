@@ -34,4 +34,23 @@
   .lbtn {
     @apply w-full p-3.5 bg-accent text-white rounded-xl text-base font-bold transition hover:bg-cyan-d disabled:opacity-50 mt-1;
   }
+  /* Scroll horizontal sutil para la barra de pestañas (evita la barra
+     nativa gruesa sin quitar la capacidad de desplazar). */
+  .tabs-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  .tabs-scroll::-webkit-scrollbar {
+    height: 6px;
+  }
+  .tabs-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .tabs-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+  }
+  .tabs-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
 }

@@ -160,7 +160,7 @@ export default function DocsTrabajadoresPage() {
                 <SearchableSelect
                   placeholder={loadingModal ? "Cargando..." : "Buscar plantilla..."}
                   disabled={loadingModal}
-                  options={plantillas.map(p => ({ value: p.id, label: p.titulo || "" }))}
+                  options={plantillas.map(p => ({ value: (p as any).template_id || p.id, label: p.titulo || "" }))}
                   value={selectedPlantilla}
                   onChange={setSelectedPlantilla}
                 />

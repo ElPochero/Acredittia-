@@ -17,8 +17,20 @@ from ..config import UMBRAL_ACREDITADO_PCT
 from ..models import (Alerta, Contrato, CumplimientoSnapshot, Documento,
                       PlataformaCredencial, Sujeto)
 from .checklist import calc_estado_doc, calc_estado_sujeto
+from .email import despachar_alerta_email
 
 log = logging.getLogger("acredittia.vencimientos")
+
+
+def _alerta_contrato_existente(db: Session, contrato_id: uuid.UUID, severidad: str) -> bool:
+    return db.scalar(select(Alerta.id).where(
+        Alerta.contrato_id == contrato_id,
+        Alerta.documento_id.is_(None),
+        Alerta.sujeto_id.is_(None),
+        Alerta.severidad == severidad,
+        Alerta.origen == "vencimiento",
+        Alerta.resuelta_at.is_(None),
+    )) is not None
 
 
 def _alerta_existente(db: Session, documento_id: uuid.UUID, severidad: str) -> bool:
@@ -49,6 +61,30 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento) -> None:
             origen="vencimiento", titulo=titulo, descripcion=desc,
             documento_id=doc.id, sujeto_id=doc.sujeto_id, contrato_id=doc.contrato_id,
         ))
+        
+        # Mapear al evento configurable que más se acerque
+        if doc.estado_calc == "venc":
+            evento = "alerta_critica"
+        else:
+            dias = (doc.vence - date.today()).days
+            if dias <= 7:
+                evento = "vencimiento_7"
+            elif dias <= 15:
+                evento = "vencimiento_15"
+            else:
+                evento = "vencimiento_30"
+                
+        sujeto_email = doc.sujeto.email if doc.sujeto_id and doc.sujeto else None
+        contrato_nombre = ""
+        if doc.contrato_id and doc.sujeto and doc.sujeto.contrato:
+            contrato_nombre = doc.sujeto.contrato.nombre
+        despachar_alerta_email(
+            db, doc.company_id, evento, titulo, desc,
+            contrato_id=doc.contrato_id,
+            sujeto_email=sujeto_email,
+            severidad="critica" if doc.estado_calc == "venc" else "advertencia",
+            contrato_nombre=contrato_nombre,
+        )
 
 
 def recalcular_documentos(db: Session, company_id: uuid.UUID | None = None) -> int:
@@ -81,6 +117,48 @@ def recalcular_sujeto(db: Session, sujeto_id: uuid.UUID) -> None:
     for d in docs:
         d.estado_calc = calc_estado_doc(d)
     sujeto.estado = calc_estado_sujeto(list(docs), sujeto.estado)
+
+
+def alertar_vencimiento_contratos(db: Session, dias_aviso: int = 30) -> int:
+    """Emite alertas para contratos por vencer o vencidos."""
+    hoy = date.today()
+    cambios = 0
+    
+    q = select(Contrato).where(
+        Contrato.estado != "terminado",
+        Contrato.fecha_termino.is_not(None)
+    )
+    for c in db.scalars(q):
+        if c.fecha_termino < hoy:
+            sev, estado = "critica", "bloqueante"
+            titulo = f"Contrato vencido: {c.nombre}"
+            desc = f"El contrato '{c.nombre}' venció el {c.fecha_termino:%d/%m/%Y}."
+        else:
+            dias = (c.fecha_termino - hoy).days
+            if dias <= dias_aviso:
+                sev, estado = "advertencia", "nueva"
+                titulo = f"Contrato por vencer: {c.nombre}"
+                desc = f"El contrato '{c.nombre}' vence en {dias} días ({c.fecha_termino:%d/%m/%Y})."
+            else:
+                continue
+                
+        if not _alerta_contrato_existente(db, c.id, sev):
+            db.add(Alerta(
+                company_id=c.company_id, severidad=sev, estado=estado,
+                origen="vencimiento", titulo=titulo, descripcion=desc,
+                contrato_id=c.id
+            ))
+            cambios += 1
+            evento = "alerta_critica" if sev == "critica" else "vencimiento_30"
+            despachar_alerta_email(
+                db, c.company_id, evento, titulo, desc,
+                contrato_id=c.id,
+                severidad=sev,
+                contrato_nombre=c.nombre,
+            )
+            
+    db.commit()
+    return cambios
 
 
 # ------------------------------------------------------------- snapshots

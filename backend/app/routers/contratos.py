@@ -16,6 +16,7 @@ mismo que «falta».
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, timezone
 
@@ -60,6 +61,7 @@ class ContratoIn(BaseModel):
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
+    requisitos_custom: dict[str, list[str]] | None = None
 
 
 class ContratoPatch(BaseModel):
@@ -220,6 +222,26 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
         db.rollback()
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
 
+    if body.requisitos_custom:
+        from ..models import ContratoRequisito
+        for ambito, reqs in body.requisitos_custom.items():
+            if ambito not in ("empresa", "personal", "equipos", "licencia"):
+                continue
+            db_ambito = "personal" if ambito in ("personal", "licencia") else ("equipo" if ambito == "equipos" else "empresa")
+            for req in reqs:
+                if not req.strip():
+                    continue
+                cr = ContratoRequisito(
+                    company_id=cid,
+                    contrato_id=c.id,
+                    ambito=db_ambito,
+                    titulo=req.strip(),
+                    vinculo_tipo="otro",
+                    obligatorio=True
+                )
+                db.add(cr)
+        db.flush()
+
     n = instanciar_docs(db, cid, "empresa", contrato_id=c.id,
                         faena_id=faena.id, contrato_plantilla_id=c.id)
     actividad.log(db, cid, "creacion", "contrato",
@@ -303,6 +325,48 @@ def eliminar(contrato_id: uuid.UUID, confirm: bool = Query(False),
 # ============================================================================
 # §8.2 — Vistas del contrato
 # ============================================================================
+@router.get("/{contrato_id}/resumen")
+def resumen_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Vista enriquecida de contrato como carpeta: incluye plataformas y requisitos por ámbito."""
+    from ..models import ContratoPlataforma, ContratoRequisito
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    out = _out(db, c, con_stats=True)
+
+    plataformas = list(db.scalars(
+        select(ContratoPlataforma).where(
+            ContratoPlataforma.company_id == cid,
+            ContratoPlataforma.contrato_id == c.id
+        ).order_by(ContratoPlataforma.orden)
+    ))
+    out["plataformas"] = [
+        {
+            "id": str(p.id),
+            "nombre": p.nombre,
+            "descripcion": p.descripcion,
+            "url": p.url,
+            "color": p.color,
+            "estado": p.estado,
+            "es_custom": p.es_custom
+        } for p in plataformas
+    ]
+
+    reqs = list(db.execute(
+        select(ContratoRequisito.ambito, func.count())
+        .where(
+            ContratoRequisito.company_id == cid,
+            ContratoRequisito.contrato_id == c.id,
+            ContratoRequisito.activo == True
+        )
+        .group_by(ContratoRequisito.ambito)
+    ))
+    out["requisitos_resumen"] = {r[0]: r[1] for r in reqs}
+
+    return out
+
+
 @router.get("/{contrato_id}/documentos")
 def docs_empresa(contrato_id: uuid.UUID, p: Page = Depends(paginacion),
                  db: Session = Depends(get_db),
@@ -341,6 +405,114 @@ def personal_contrato(contrato_id: uuid.UUID,
                           es_conductor=es_conductor)
 
 
+class ImportarPersonalIn(BaseModel):
+    sujetos_ids: list[uuid.UUID]
+
+
+@router.post("/{contrato_id}/personal/importar")
+def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
+                      db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Importa personal desde nómina u otro contrato copiando el sujeto."""
+    from ..services.checklist import instanciar_docs
+    
+    c = _get_contrato(db, cid, contrato_id, user)
+    
+    sujetos = db.scalars(select(Sujeto).where(
+        Sujeto.company_id == cid,
+        Sujeto.id.in_(body.sujetos_ids),
+        Sujeto.tipo == "trabajador"
+    )).all()
+    
+    importados = 0
+    docs_creados = 0
+    for s_old in sujetos:
+        existe = db.scalar(select(Sujeto.id).where(
+            Sujeto.company_id == cid,
+            Sujeto.contrato_id == c.id,
+            Sujeto.rut == s_old.rut,
+            Sujeto.estado != "baja"
+        ))
+        if existe:
+            continue
+            
+        s_new = Sujeto(
+            company_id=cid,
+            contrato_id=c.id,
+            tipo="trabajador",
+            estado="proc",
+            nombre=s_old.nombre,
+            rut=s_old.rut,
+            cargo=s_old.cargo,
+            cargo_id=s_old.cargo_id,
+            es_conductor=s_old.es_conductor
+        )
+        db.add(s_new)
+        db.flush()
+        
+        n = instanciar_docs(db, cid, "personal", sujeto_id=s_new.id,
+                            faena_id=c.faena_id, cargo_id=s_new.cargo_id,
+                            contrato_plantilla_id=c.id)
+        docs_creados += n
+        importados += 1
+        
+    actividad.log(db, cid, "creacion", "personal",
+                  f"Importados {importados} trabajadores al contrato '{c.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {"importados": importados, "documentos_creados": docs_creados}
+
+
+@router.get("/{contrato_id}/personal/{sujeto_id}/docs-reutilizables")
+def docs_reutilizables(contrato_id: uuid.UUID, sujeto_id: uuid.UUID,
+                       db: Session = Depends(get_db),
+                       cid: uuid.UUID = Depends(get_company_id),
+                       user: User = Depends(get_current_user)):
+    """Busca documentos vigentes del mismo trabajador en otros contratos."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    s_actual = db.get(Sujeto, sujeto_id)
+    if not s_actual or s_actual.contrato_id != c.id or s_actual.company_id != cid:
+        raise err(404, "NO_ENCONTRADO", "Trabajador no pertenece a este contrato")
+
+    docs_actuales = list(db.scalars(
+        select(Documento).where(Documento.sujeto_id == s_actual.id)
+    ))
+    
+    reqs_necesitados = {d.template_id: d for d in docs_actuales if d.estado_calc != "ok" and d.template_id}
+    if not reqs_necesitados:
+        return {"reutilizables": []}
+
+    otros_sujetos = select(Sujeto.id).where(
+        Sujeto.company_id == cid,
+        Sujeto.rut == s_actual.rut,
+        Sujeto.id != s_actual.id
+    )
+
+    reutilizables = list(db.scalars(
+        select(Documento).where(
+            Documento.sujeto_id.in_(otros_sujetos),
+            Documento.estado_calc == "ok",
+            Documento.template_id.in_(list(reqs_necesitados.keys()))
+        )
+    ))
+
+    from .documentos import doc_out
+    out_docs = []
+    vistos = set()
+    for d in reutilizables:
+        if d.template_id in vistos:
+            continue
+        vistos.add(d.template_id)
+        
+        doc_dest = reqs_necesitados[d.template_id]
+        item = doc_out(d)
+        item["documento_destino_id"] = str(doc_dest.id)
+        out_docs.append(item)
+
+    return {"reutilizables": out_docs}
+
+
 @router.get("/{contrato_id}/equipos")
 def equipos_contrato(contrato_id: uuid.UUID,
                      estado: str | None = Query(None),
@@ -355,6 +527,65 @@ def equipos_contrato(contrato_id: uuid.UUID,
     c = _get_contrato(db, cid, contrato_id, user)
     return listar_sujetos(db, cid, "equipo", p, contrato_id=c.id,
                           estado=estado, tipo_equipo=tipo_equipo)
+
+
+@router.post("/{contrato_id}/equipos/importar")
+def importar_equipos(contrato_id: uuid.UUID, body: ImportarPersonalIn,
+                     db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Importa equipos de la flota u otro contrato copiando el sujeto."""
+    from ..services.checklist import instanciar_docs
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    sujetos = db.scalars(select(Sujeto).where(
+        Sujeto.company_id == cid,
+        Sujeto.id.in_(body.sujetos_ids),
+        Sujeto.tipo == "equipo"
+    )).all()
+
+    importados = 0
+    docs_creados = 0
+    for s_old in sujetos:
+        if not s_old.patente:
+            continue
+        existe = db.scalar(select(Sujeto.id).where(
+            Sujeto.company_id == cid,
+            Sujeto.contrato_id == c.id,
+            Sujeto.patente == s_old.patente.strip().upper(),
+            Sujeto.tipo == "equipo",
+            Sujeto.estado != "baja"
+        ))
+        if existe:
+            continue
+
+        s_new = Sujeto(
+            company_id=cid,
+            contrato_id=c.id,
+            tipo="equipo",
+            estado="proc",
+            nombre=s_old.nombre or s_old.patente,
+            patente=s_old.patente.strip().upper(),
+            tipo_equipo=s_old.tipo_equipo,
+            marca=s_old.marca,
+            modelo=s_old.modelo,
+            anio=s_old.anio
+        )
+        db.add(s_new)
+        db.flush()
+
+        n = instanciar_docs(db, cid, "equipo", sujeto_id=s_new.id,
+                            faena_id=c.faena_id,
+                            contrato_plantilla_id=c.id)
+        docs_creados += n
+        importados += 1
+
+    actividad.log(db, cid, "creacion", "equipos",
+                  f"Importados {importados} equipos al contrato '{c.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {"importados": importados, "documentos_creados": docs_creados}
 
 
 @router.get("/{contrato_id}/alertas")
@@ -387,6 +618,124 @@ def alertas_contrato(contrato_id: uuid.UUID,
     filas = list(db.scalars(q.order_by(Alerta.created_at.desc())
                             .offset(p.offset).limit(p.page_size)))
     return sobre([alerta_out(a) for a in filas], total, p)
+
+
+class MailIn(BaseModel):
+    plantilla: str
+    para: str | None = None
+    asunto: str | None = None
+
+
+PLANTILLAS_MAIL: tuple[str, ...] = ("resumen", "porvencer", "observado",
+                                    "semanal", "invitacion")
+_EVENTO_PLANTILLA = {
+    "resumen": "vencimiento_documento",
+    "porvencer": "vencimiento_documento",
+    "observado": "alerta_bloqueante",
+    "semanal": "reporte_programado",
+}
+_SEVERIDAD_PLANTILLA = {
+    "resumen": "advertencia",
+    "porvencer": "advertencia",
+    "observado": "advertencia",
+    "semanal": "info",
+    "invitacion": "info",
+}
+_CORREO_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _contenido_mail(db: Session, c: Contrato, plantilla: str
+                    ) -> tuple[str | None, str, str, str]:
+    """(evento, titulo, descripcion, severidad) con datos reales del contrato."""
+    stats = _stats(db, c)
+    pct = stats.get("cumplimiento_pct", 0)
+    n_alertas = stats.get("alertas_activas", 0)
+    top = list(db.scalars(
+        select(Alerta)
+        .where(Alerta.company_id == c.company_id, Alerta.contrato_id == c.id,
+               Alerta.resuelta_at.is_(None))
+        .order_by(Alerta.created_at.desc()).limit(5)))
+
+    if plantilla == "resumen":
+        return (_EVENTO_PLANTILLA[plantilla],
+                f"Resumen de vencimientos — {c.nombre}",
+                f"El contrato tiene {n_alertas} alertas activas "
+                f"y un cumplimiento documental del {pct}%.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "porvencer":
+        if top:
+            return (_EVENTO_PLANTILLA[plantilla], top[0].titulo,
+                    top[0].descripcion or "", _SEVERIDAD_PLANTILLA[plantilla])
+        return (_EVENTO_PLANTILLA[plantilla], "Sin vencimientos activos",
+                f"El contrato {c.nombre} no tiene alertas activas.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "observado":
+        return (_EVENTO_PLANTILLA[plantilla],
+                "Documento observado por la IA",
+                f"La IA observó un documento del contrato {c.nombre}: "
+                "requiere corrección antes de exportarlo.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    if plantilla == "semanal":
+        return (_EVENTO_PLANTILLA[plantilla],
+                f"Estado semanal — {c.nombre}",
+                f"Cumplimiento documental del {pct}% "
+                f"con {n_alertas} alertas activas.",
+                _SEVERIDAD_PLANTILLA[plantilla])
+    return (None, f"Te dieron acceso al contrato {c.nombre} en ACREDITTIA",
+            "Te invitaron a colaborar en ACREDITTIA con permiso "
+            "de colaborador del contrato.",
+            _SEVERIDAD_PLANTILLA[plantilla])
+
+
+@router.post("/{contrato_id}/mails")
+def enviar_mail(contrato_id: uuid.UUID, body: MailIn,
+                db: Session = Depends(get_db),
+                cid: uuid.UUID = Depends(get_company_id),
+                user: User = Depends(get_current_user)):
+    """Despacha una plantilla de correo del contrato.
+
+    Con `para` el envío es directo a esa dirección (acción explícita del
+    usuario, no pasa por preferencias). Sin `para` se difunde a los
+    responsables del contrato respetando `notificacion_preferencias`.
+    La plantilla `invitacion` siempre exige destinatario.
+    """
+    from ..services.email import _html_alerta, despachar_alerta_email
+    from ..services.jobs import enqueue
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    if body.plantilla not in PLANTILLAS_MAIL:
+        raise err(400, "PLANTILLA_INVALIDA",
+                  f"Plantilla debe ser una de: {', '.join(PLANTILLAS_MAIL)}")
+    para = (body.para or "").strip() or None
+    if para is not None and not _CORREO_OK.match(para):
+        raise err(400, "CORREO_INVALIDO", "El correo destinatario no es válido")
+    if body.plantilla == "invitacion" and para is None:
+        raise err(400, "FALTA_DESTINATARIO",
+                  "La invitación necesita un correo destinatario")
+
+    evento, titulo, descripcion, severidad = _contenido_mail(
+        db, c, body.plantilla)
+    asunto = (body.asunto or "").strip() or titulo
+
+    if para is not None:
+        enqueue("enviar_email", to_email=para, subject=asunto,
+                html_body=_html_alerta(
+                    titulo=titulo, descripcion=descripcion,
+                    severidad=severidad, contrato_nombre=c.nombre))
+        enviados, modo = 1, "directo"
+    else:
+        enviados = despachar_alerta_email(
+            db, cid, evento or "vencimiento_documento", titulo, descripcion,
+            contrato_id=c.id, severidad=severidad, contrato_nombre=c.nombre)
+        modo = "difusion"
+
+    actividad.log(db, cid, "actualizacion", "contratos",
+                  f"Correo '{body.plantilla}' enviado ({modo}, {enviados}) "
+                  f"en el contrato '{c.nombre}'",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {"plantilla": body.plantilla, "asunto": asunto,
+            "modo": modo, "enviados": enviados}
 
 
 @router.get("/{contrato_id}/historial")

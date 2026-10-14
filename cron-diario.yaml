@@ -1,0 +1,39 @@
+location: northcentralus
+name: acredittia-cron-diario
+properties:
+  configuration:
+    registries:
+    - passwordSecretRef: registry-password
+      server: acredittiaregistry.azurecr.io
+      username: acredittiaregistry
+    replicaRetryLimit: 0
+    replicaTimeout: 300
+    secrets:
+    - name: registry-password
+      value: "${ACR_PASSWORD}"
+    - name: db-url
+      value: "${DATABASE_URL}"
+    triggerType: Schedule
+    scheduleTriggerConfig:
+      cronExpression: "30 0 * * *"
+      parallelism: 1
+      replicaCompletionCount: 1
+  environmentId: /subscriptions/589fa66c-14d4-4148-a367-76aec6540c8f/resourceGroups/rg-acredittia/providers/Microsoft.App/managedEnvironments/acredittia-env
+  template:
+    containers:
+    - command:
+      - python
+      - "-c"
+      - "from worker.celery_app import cron_diario; cron_diario()"
+      env:
+      - name: DATABASE_URL
+        secretRef: db-url
+      - name: QUEUE_BACKEND
+        value: celery
+      - name: REDIS_URL
+        value: "redis://acredittia-redis:6379/0"
+      image: acredittiaregistry.azurecr.io/acredittia-backend:v1
+      name: acredittia-cron-diario
+      resources:
+        cpu: 0.25
+        memory: 0.5Gi

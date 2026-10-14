@@ -26,7 +26,8 @@ from app.database import worker_session
 from app.models import Alerta
 
 from tests.conftest import (API, crear_contract_admin, crear_contrato,
-                            patente_valida, rut_valido)
+                            patente_valida, primer_documento, rut_valido,
+                            subir_archivo)
 
 
 # ============================================================================
@@ -451,3 +452,84 @@ def test_rls_sin_contexto_no_devuelve_nada(app_cliente, empresa_a, contrato_a):
         assert db.execute(sa.text("SELECT count(*) FROM contratos")).scalar() == 0
         assert db.execute(sa.text("SELECT count(*) FROM sujetos")).scalar() == 0
         assert db.execute(sa.text("SELECT count(*) FROM documentos")).scalar() == 0
+
+
+# ============================================================================
+# Rol visor: lectura acotada al contrato, mutaciones denegadas (C20)
+# ============================================================================
+def _crear_visor(cliente, empresa, contrato_id: str) -> dict:
+    return crear_contract_admin(
+        cliente, empresa, contrato_id, email="visor@empresa.cl",
+        role="visor", nombre="Visor del Contrato")
+
+
+def test_visor_se_invita_acotado_y_sin_contrato_se_rechaza(
+        app_cliente, empresa_a, contrato_a):
+    r = app_cliente.post(f"{API}/company/usuarios", headers=empresa_a["headers"],
+                         json={"email": "suelto@empresa.cl", "nombre": "Sin Contrato",
+                               "role": "visor"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "CONTRATO_REQUERIDO"
+
+
+def test_visor_lee_pero_no_muta_su_contrato(
+        app_cliente, empresa_a, contrato_a):
+    """Abuso: el visor llama a la API directo, sin pasar por la UI.
+
+    Ocultar botones no es un control; la denegación vive en el middleware y
+    cubre POST, PATCH y DELETE con 403 SOLO_LECTURA.
+    """
+    visor = _crear_visor(app_cliente, empresa_a, contrato_a["id"])
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}",
+                        headers=visor["headers"])
+    assert r.status_code == 200, r.text
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/personal",
+                        headers=visor["headers"])
+    assert r.status_code == 200, r.text
+
+    r = app_cliente.post(f"{API}/personal", headers=visor["headers"], json={
+        "contrato_id": contrato_a["id"], "nombre": "Intruso",
+        "rut": rut_valido(201), "cargo": "Ayudante"})
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SOLO_LECTURA"
+
+    r = app_cliente.patch(f"{API}/contratos/{contrato_a['id']}",
+                          headers=visor["headers"], json={"nombre": "Hackeado"})
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SOLO_LECTURA"
+
+    doc = primer_documento(app_cliente, empresa_a,
+                           contrato_id=contrato_a["id"])
+    r = app_cliente.patch(f"{API}/documentos/{doc['id']}",
+                          headers=visor["headers"], json={"estado": "ok"})
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SOLO_LECTURA"
+
+    subido = subir_archivo(app_cliente, empresa_a, doc["id"])
+    fid = subido["archivo"]["id"]
+    r = app_cliente.delete(
+        f"{API}/documentos/{doc['id']}/archivos/{fid}",
+        headers=visor["headers"])
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "SOLO_LECTURA"
+
+    # El ciclo de sesión sigue funcionando: puede entrar y mirar.
+    r = app_cliente.post(f"{API}/auth/login",
+                         json={"email": "visor@empresa.cl",
+                               "password": "Secreta123"})
+    assert r.status_code == 200, r.text
+
+
+def test_roles_con_escritura_no_cambian(app_cliente, empresa_a, contrato_a):
+    """El visor es solo lectura; company y contract_admin conservan su escritura."""
+    r = app_cliente.post(f"{API}/personal", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"], "nombre": "Normal",
+        "rut": rut_valido(202), "cargo": "Ayudante"})
+    assert r.status_code == 201, r.text
+
+    jefe = crear_contract_admin(app_cliente, empresa_a, contrato_a["id"])
+    r = app_cliente.post(f"{API}/personal", headers=jefe["headers"], json={
+        "contrato_id": contrato_a["id"], "nombre": "Del Jefe",
+        "rut": rut_valido(203), "cargo": "Ayudante"})
+    assert r.status_code == 201, r.text

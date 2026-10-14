@@ -45,6 +45,7 @@ importa antes que cualquier módulo de prueba— y no dentro de un fixture. Los
 fixtures `pg_server` y `esquema` exponen el resultado para las pruebas que lo
 necesiten.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -64,11 +65,23 @@ import pytest
 # ============================================================================
 import pgserver
 
-RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # app/backend
-MODELO = os.path.normpath(os.path.join(RAIZ, "..", "..", "modelo_datos"))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # backend
+MODELO = os.path.normpath(os.path.join(RAIZ, "..", "modelo_datos"))
 
-SCRIPTS = ["01_esquema.sql", "02_indices.sql", "03_triggers.sql",
-           "04_rls.sql", "06_migracion_v11.sql"]
+SCRIPTS = [
+    "01_esquema.sql",
+    "02_indices.sql",
+    "03_triggers.sql",
+    "04_rls.sql",
+    "06_migracion_v11.sql",
+    "07_migracion_v12.sql",
+    "08_migracion_v13.sql",
+    "09_certificacion_laboral.sql",
+    "10_add_telefono_email.sql",
+    "11_rag_pgvector.sql",
+    "12_vinculo_faena.sql",
+    "13_rol_visor.sql",
+]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")
 PGDATA = os.path.join(_TMP, "pgdata")
@@ -79,8 +92,15 @@ STORAGE_DIR = os.path.join(_TMP, "uploads")
 PSQL = os.path.join(os.path.dirname(pgserver.__file__), "pginstall", "bin", "psql")
 
 # Catálogos globales sembrados al arrancar: NO se vacían entre pruebas.
-CATALOGOS = {"faenas", "faena_plataformas", "doc_ejemplos", "requisito_templates",
-             "requisitos_terreno", "proveedores_catalogo", "planes"}
+CATALOGOS = {
+    "faenas",
+    "faena_plataformas",
+    "doc_ejemplos",
+    "requisito_templates",
+    "requisitos_terreno",
+    "proveedores_catalogo",
+    "planes",
+}
 
 
 def _parchear_scripts() -> str:
@@ -94,8 +114,16 @@ def _parchear_scripts() -> str:
         for linea in lineas:
             desnudo = linea.strip()
             if desnudo.startswith("\\echo"):
-                continue                                   # metacomando de psql
+                continue  # metacomando de psql
+            if desnudo.upper().startswith("SET TIMEZONE"):
+                salida.append(
+                    "-- [pruebas] sin tzdata en el sandbox: no se fija zona horaria"
+                )
+                continue
             if desnudo.upper().startswith("CREATE EXTENSION"):
+                if "VECTOR" in desnudo.upper():
+                    salida.append(linea)  # pgvector sí existe en el sandbox
+                    continue
                 salida.append(f"-- [pruebas] extensión no disponible: {linea}")
                 continue
             if "gin_trgm_ops" in linea:
@@ -108,10 +136,17 @@ def _parchear_scripts() -> str:
 
 
 def _psql(uri: str, *args: str) -> None:
-    r = subprocess.run([PSQL, uri, "-v", "ON_ERROR_STOP=1", "-q", *args],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        # Las opciones van ANTES de la URI: el getopt de MSVC (Windows) no
+        # permuta argumentos y todo lo que sigue a la URI se ignora en silencio.
+        [PSQL, "-v", "ON_ERROR_STOP=1", "-q", *args, uri],
+        capture_output=True,
+        text=True,
+    )
     if r.returncode:
-        raise RuntimeError(f"psql falló ({args}):\n{r.stdout[-3000:]}\n{r.stderr[-6000:]}")
+        raise RuntimeError(
+            f"psql falló ({args}):\n{r.stdout[-3000:]}\n{r.stderr[-6000:]}"
+        )
 
 
 def _arrancar() -> tuple[object, str]:
@@ -120,23 +155,40 @@ def _arrancar() -> tuple[object, str]:
     servidor = pgserver.get_server(PGDATA)
     uri_super = servidor.get_uri()
 
-    _psql(uri_super, "-c", "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
-    _psql(uri_super, "-c", "DROP DOMAIN IF EXISTS citext; CREATE DOMAIN citext AS text;")
+    _psql(
+        uri_super, "-c", "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+    )
+    _psql(
+        uri_super, "-c", "DROP DOMAIN IF EXISTS citext; CREATE DOMAIN citext AS text;"
+    )
     sql_dir = _parchear_scripts()
     for nombre in SCRIPTS:
         _psql(uri_super, "-f", os.path.join(sql_dir, nombre))
 
-    # El rol de aplicación existe tras 04_rls.sql; el socket local admite
-    # conexión sin contraseña, así que la API se conecta como acredittia_app y
-    # RLS se aplica de verdad.
-    socket = uri_super.split("host=", 1)[1]
-    return servidor, f"postgresql+psycopg://acredittia_app@/postgres?host={socket}"
+    # El rol de aplicación existe tras 04_rls.sql; en local admite conexión
+    # sin contraseña (socket Unix o trust en loopback), así que la API se
+    # conecta como acredittia_app y RLS se aplica de verdad.
+    if "host=" in uri_super:
+        socket = uri_super.split("host=", 1)[1]
+        return servidor, f"postgresql+psycopg://acredittia_app@/postgres?host={socket}"
+    # pgserver sobre TCP (Windows): la URI ya trae host y puerto.
+    base = uri_super.replace("postgresql://", "postgresql+psycopg://")
+    return servidor, base.replace("postgres:@", "acredittia_app@", 1)
+
+
+def _uri_sa(uri_super: str) -> str:
+    if "host=" in uri_super:
+        return (
+            "postgresql+psycopg://postgres@/postgres?host="
+            + uri_super.split("host=", 1)[1]
+        )
+    return uri_super.replace("postgresql://", "postgresql+psycopg://")
 
 
 # Referencia global: pgserver apaga el servidor cuando se recolecta.
 SERVIDOR, URI_APP = _arrancar()
 URI_SUPER = SERVIDOR.get_uri()
-URI_SUPER_SA = "postgresql+psycopg://postgres@/postgres?host=" + URI_SUPER.split("host=", 1)[1]
+URI_SUPER_SA = _uri_sa(URI_SUPER)
 
 # ============================================================================
 # 2. Entorno de la aplicación (antes de importar app.*)
@@ -146,34 +198,37 @@ shutil.rmtree(STORAGE_DIR, ignore_errors=True)
 os.makedirs(KEYS_DIR, exist_ok=True)
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-os.environ.update({
-    "DATABASE_URL": URI_APP,
-    "QUEUE_BACKEND": "inproc",
-    "JWE_BACKEND": "local",
-    "KEYS_DIR": KEYS_DIR,
-    "STORAGE_BACKEND": "local",
-    "STORAGE_DIR": STORAGE_DIR,
-    "JWT_SECRET": "dev-test",
-    "DB_APPLY_SCHEMA_ON_START": "false",
-    "DB_RLS_ENABLED": "true",
-    "IA_BACKEND": "simulada",
-    "PUBLIC_BASE_URL": "http://test",
-    "SCHEMA_DIR": SQL_DIR,
-    "CORS_ORIGINS": "http://test",
-})
+os.environ.update(
+    {
+        "DATABASE_URL": URI_APP,
+        "QUEUE_BACKEND": "inproc",
+        "JWE_BACKEND": "local",
+        "KEYS_DIR": KEYS_DIR,
+        "STORAGE_BACKEND": "local",
+        "STORAGE_DIR": STORAGE_DIR,
+        "JWT_SECRET": "dev-test",
+        "DB_APPLY_SCHEMA_ON_START": "false",
+        "DB_RLS_ENABLED": "true",
+        "IA_BACKEND": "simulada",
+        "PUBLIC_BASE_URL": "http://test",
+        "SCHEMA_DIR": SQL_DIR,
+        "CORS_ORIGINS": "http://test",
+    }
+)
 
 if RAIZ not in sys.path:
     sys.path.insert(0, RAIZ)
 
-import sqlalchemy as sa                                          # noqa: E402
-from fastapi.testclient import TestClient                        # noqa: E402
+import sqlalchemy as sa  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
-from app import security                                         # noqa: E402
-from app.config import settings                                  # noqa: E402
-from app.database import worker_session                          # noqa: E402
-from app.models import User                            # noqa: E402
+from app import security  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.database import worker_session  # noqa: E402
+from app.models import User  # noqa: E402
 
 assert settings.database_url == URI_APP, "el entorno no llegó a app.config"
+
 
 # ----------------------------------------------------------------------------
 # Hash de contraseñas rápido SOLO en pruebas.
@@ -220,10 +275,16 @@ def patente_valida(i: int) -> str:
 
 
 def _tablas_de_negocio(conn) -> list[str]:
-    filas = conn.execute(sa.text(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema='public' AND table_type='BASE TABLE'"
-    )).scalars().all()
+    filas = (
+        conn.execute(
+            sa.text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_type='BASE TABLE'"
+            )
+        )
+        .scalars()
+        .all()
+    )
     return sorted(t for t in filas if t not in CATALOGOS)
 
 
@@ -254,6 +315,7 @@ def motor_admin(esquema):
 def _app_arrancada(esquema):
     """TestClient con el lifespan ejecutado una sola vez (siembra catálogos)."""
     from app.main import app
+
     with TestClient(app) as cliente:
         yield cliente
 
@@ -270,12 +332,17 @@ def app_cliente(_app_arrancada, motor_admin):
     """
     with motor_admin.begin() as conn:
         tablas = _tablas_de_negocio(conn)
-        conn.execute(sa.text(
-            "TRUNCATE " + ", ".join(f'"{t}"' for t in tablas)
-            + " RESTART IDENTITY CASCADE"))
+        conn.execute(
+            sa.text(
+                "TRUNCATE "
+                + ", ".join(f'"{t}"' for t in tablas)
+                + " RESTART IDENTITY CASCADE"
+            )
+        )
     shutil.rmtree(STORAGE_DIR, ignore_errors=True)
     os.makedirs(STORAGE_DIR, exist_ok=True)
     from app.database import reset_ctx
+
     reset_ctx()
     yield _app_arrancada
     reset_ctx()
@@ -300,30 +367,43 @@ def admin(app_cliente):
     contexto de tenant, y desde ahí se autentica por la API como cualquier otro.
     """
     with worker_session(is_admin=True) as db:
-        u = User(email="admin@acredittia.cl", nombre="Admin Plataforma",
-                 password_hash=security.hash_password(CLAVE),
-                 role="admin", company_id=None, status="approved")
+        u = User(
+            email="admin@acredittia.cl",
+            nombre="Admin Plataforma",
+            password_hash=security.hash_password(CLAVE),
+            role="admin",
+            company_id=None,
+            status="approved",
+        )
         db.add(u)
         db.commit()
         uid = str(u.id)
 
-    r = app_cliente.post(f"{API}/auth/login",
-                         json={"email": "admin@acredittia.cl", "password": CLAVE})
+    r = app_cliente.post(
+        f"{API}/auth/login", json={"email": "admin@acredittia.cl", "password": CLAVE}
+    )
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
-    return {"user_id": uid, "email": "admin@acredittia.cl", "token": token,
-            "headers": {"Authorization": f"Bearer {token}"}}
+    return {
+        "user_id": uid,
+        "email": "admin@acredittia.cl",
+        "token": token,
+        "headers": {"Authorization": f"Bearer {token}"},
+    }
 
 
 def _crear_empresa(cliente, admin, *, nombre: str, rut: str, email: str) -> dict:
     """Registro por la API + aprobación por el admin + login. El flujo real."""
-    r = cliente.post(f"{API}/auth/register", json={
-        "empresa": nombre, "rut": rut, "email": email, "password": CLAVE})
+    r = cliente.post(
+        f"{API}/auth/register",
+        json={"empresa": nombre, "rut": rut, "email": email, "password": CLAVE},
+    )
     assert r.status_code == 201, r.text
     company_id = r.json()["company_id"]
 
-    r = cliente.post(f"{API}/admin/companies/{company_id}/approve",
-                     headers=admin["headers"])
+    r = cliente.post(
+        f"{API}/admin/companies/{company_id}/approve", headers=admin["headers"]
+    )
     assert r.status_code == 200, r.text
 
     r = cliente.post(f"{API}/auth/login", json={"email": email, "password": CLAVE})
@@ -344,14 +424,24 @@ def _crear_empresa(cliente, admin, *, nombre: str, rut: str, email: str) -> dict
 
 @pytest.fixture
 def empresa_a(app_cliente, admin) -> dict:
-    return _crear_empresa(app_cliente, admin, nombre="Transportes Alfa SpA",
-                          rut=rut_valido(1), email="alfa@empresa.cl")
+    return _crear_empresa(
+        app_cliente,
+        admin,
+        nombre="Transportes Alfa SpA",
+        rut=rut_valido(1),
+        email="alfa@empresa.cl",
+    )
 
 
 @pytest.fixture
 def empresa_b(app_cliente, admin) -> dict:
-    return _crear_empresa(app_cliente, admin, nombre="Servicios Beta Ltda",
-                          rut=rut_valido(2), email="beta@empresa.cl")
+    return _crear_empresa(
+        app_cliente,
+        admin,
+        nombre="Servicios Beta Ltda",
+        rut=rut_valido(2),
+        email="beta@empresa.cl",
+    )
 
 
 @pytest.fixture
@@ -367,13 +457,20 @@ def faena_pelambres(faenas) -> dict:
     return next(f for f in faenas if f["nombre"] == "Los Pelambres")
 
 
-def crear_contrato(cliente, empresa, faena_id, *, nombre="Contrato Mina",
-                   codigo=None) -> dict:
-    r = cliente.post(f"{API}/contratos", headers=empresa["headers"], json={
-        "nombre": nombre, "codigo": codigo, "faena_id": faena_id,
-        "fecha_inicio": date.today().isoformat(),
-        "fecha_termino": (date.today() + timedelta(days=365)).isoformat(),
-    })
+def crear_contrato(
+    cliente, empresa, faena_id, *, nombre="Contrato Mina", codigo=None
+) -> dict:
+    r = cliente.post(
+        f"{API}/contratos",
+        headers=empresa["headers"],
+        json={
+            "nombre": nombre,
+            "codigo": codigo,
+            "faena_id": faena_id,
+            "fecha_inicio": date.today().isoformat(),
+            "fecha_termino": (date.today() + timedelta(days=365)).isoformat(),
+        },
+    )
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -395,13 +492,24 @@ def contrato_b(app_cliente, empresa_b, faenas) -> dict:
 
 
 # ---------------------------------------------------------------- ayudantes
-def subir_archivo(cliente, empresa, doc_id: str, *, filename="acta.pdf",
-                  contenido: bytes = b"%PDF-1.4 documento de prueba") -> dict:
+def subir_archivo(
+    cliente,
+    empresa,
+    doc_id: str,
+    *,
+    filename="acta.pdf",
+    contenido: bytes = b"%PDF-1.4 documento de prueba",
+) -> dict:
     """Ejecuta el flujo SAS completo de tres pasos y devuelve la confirmación."""
-    r = cliente.post(f"{API}/documentos/{doc_id}/upload-url",
-                     headers=empresa["headers"],
-                     json={"filename": filename, "content_type": "application/pdf",
-                           "size_bytes": len(contenido)})
+    r = cliente.post(
+        f"{API}/documentos/{doc_id}/upload-url",
+        headers=empresa["headers"],
+        json={
+            "filename": filename,
+            "content_type": "application/pdf",
+            "size_bytes": len(contenido),
+        },
+    )
     assert r.status_code == 200, r.text
     sas = r.json()
 
@@ -409,9 +517,11 @@ def subir_archivo(cliente, empresa, doc_id: str, *, filename="acta.pdf",
     r = cliente.put(ruta, content=contenido, headers=sas["headers"])
     assert r.status_code == 201, r.text
 
-    r = cliente.post(f"{API}/documentos/{doc_id}/archivos",
-                     headers=empresa["headers"],
-                     json={"blob_path": sas["blob_path"], "filename": filename})
+    r = cliente.post(
+        f"{API}/documentos/{doc_id}/archivos",
+        headers=empresa["headers"],
+        json={"blob_path": sas["blob_path"], "filename": filename},
+    )
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -425,13 +535,21 @@ def primer_documento(cliente, empresa, **filtros) -> dict:
     return items[0]
 
 
-def crear_contract_admin(cliente, empresa, contrato_id: str, *,
-                         email="jefe.contrato@empresa.cl") -> dict:
+def crear_contract_admin(
+    cliente, empresa, contrato_id: str, *, email="jefe.contrato@empresa.cl",
+    role="contract_admin", nombre="Jefe de Contrato",
+) -> dict:
     """Usuario acotado a un contrato, creado por la API de la empresa."""
-    r = cliente.post(f"{API}/company/usuarios", headers=empresa["headers"], json={
-        "email": email, "nombre": "Jefe de Contrato",
-        "role": "contract_admin", "contrato_id": contrato_id,
-    })
+    r = cliente.post(
+        f"{API}/company/usuarios",
+        headers=empresa["headers"],
+        json={
+            "email": email,
+            "nombre": nombre,
+            "role": role,
+            "contrato_id": contrato_id,
+        },
+    )
     assert r.status_code == 201, r.text
     uid = r.json()["id"]
 
@@ -446,6 +564,10 @@ def crear_contract_admin(cliente, empresa, contrato_id: str, *,
     r = cliente.post(f"{API}/auth/login", json={"email": email, "password": CLAVE})
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
-    return {"user_id": uid, "email": email, "token": token,
-            "contrato_id": contrato_id,
-            "headers": {"Authorization": f"Bearer {token}"}}
+    return {
+        "user_id": uid,
+        "email": email,
+        "token": token,
+        "contrato_id": contrato_id,
+        "headers": {"Authorization": f"Bearer {token}"},
+    }

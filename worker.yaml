@@ -1,0 +1,52 @@
+location: northcentralus
+name: acredittia-worker
+properties:
+  configuration:
+    registries:
+    - passwordSecretRef: registry-password
+      server: acredittiaregistry.azurecr.io
+      username: acredittiaregistry
+    secrets:
+    - name: registry-password
+      value: "${ACR_PASSWORD}"
+    - name: db-url
+      value: "${DATABASE_URL}"
+  environmentId: /subscriptions/589fa66c-14d4-4148-a367-76aec6540c8f/resourceGroups/rg-acredittia/providers/Microsoft.App/managedEnvironments/acredittia-env
+  template:
+    containers:
+    - command:
+      - celery
+      - "-A"
+      - worker.celery_app
+      - worker
+      - "--loglevel=info"
+      - "--concurrency=2"
+      env:
+      - name: DATABASE_URL
+        secretRef: db-url
+      - name: SCHEMA_DIR
+        value: /schema
+      - name: QUEUE_BACKEND
+        value: celery
+      - name: REDIS_URL
+        value: "redis://acredittia-redis:6379/0"
+      - name: STORAGE_BACKEND
+        value: azure
+      - name: AZURE_STORAGE_ACCOUNT
+        value: acredittiablobs
+      - name: AZURE_BLOB_CONTAINER
+        value: docs
+      - name: JWE_BACKEND
+        value: keyvault
+      - name: AZURE_KEYVAULT_URL
+        value: "https://acredittia-kv.vault.azure.net/"
+      - name: IA_BACKEND
+        value: simulada
+      image: acredittiaregistry.azurecr.io/acredittia-backend:v1
+      name: acredittia-worker
+      resources:
+        cpu: 0.5
+        memory: 1Gi
+    scale:
+      minReplicas: 0
+      maxReplicas: 2

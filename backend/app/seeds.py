@@ -12,7 +12,7 @@ from .models import (
     LicenciaInterna, NotificacionPreferencia, PasswordResetToken, Plan,
     PlataformaCredencial, ProveedorCatalogo, RefreshToken, Reporte,
     ReporteProgramado, RequisitoTemplate, RequisitoTerreno, Sujeto, Suscripcion,
-    SyncLog, User,
+    SyncLog, User, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento
 )
 from .security import hash_password
 
@@ -757,5 +757,34 @@ def run(db: Session) -> None:
                                     evento="reporte_programado", canal_email=True, canal_whatsapp=False),
         ])
         db.flush()
+
+    # 24. Periodos Laborales Demo
+    if not db.scalar(select(PeriodoLaboral.id).limit(1)):
+        ct = db.scalar(select(Contrato).where(Contrato.company_id == demo_company.id))
+        if ct:
+            # Create two periods
+            p_sep = PeriodoLaboral(id=uuid.uuid4(), contrato_id=ct.id, nombre="Periodo Septiembre 2026", tipo="mensual", fecha_inicio=today.replace(day=1, month=9), fecha_fin=today.replace(day=30, month=9), estado="cerrado", porcentaje_cumplimiento=100)
+            p_oct = PeriodoLaboral(id=uuid.uuid4(), contrato_id=ct.id, nombre="Periodo Octubre 2026", tipo="mensual", fecha_inicio=today.replace(day=1, month=10), fecha_fin=today.replace(day=31, month=10), estado="abierto", porcentaje_cumplimiento=0)
+            db.add_all([p_sep, p_oct])
+            db.flush()
+            
+            # Requisitos Requeridos
+            req_tmpl = db.scalar(select(RequisitoTemplate).limit(1))
+            if req_tmpl:
+                db.add_all([
+                    PeriodoDocumentoRequerido(id=uuid.uuid4(), periodo_id=p_sep.id, requisito_template_id=req_tmpl.id, ambito="personal", obligatorio=True),
+                    PeriodoDocumentoRequerido(id=uuid.uuid4(), periodo_id=p_oct.id, requisito_template_id=req_tmpl.id, ambito="personal", obligatorio=True)
+                ])
+                db.flush()
+                
+                # Documentos
+                s = db.scalar(select(Sujeto).where(Sujeto.company_id == demo_company.id))
+                if s:
+                    doc = PeriodoDocumento(id=uuid.uuid4(), periodo_id=p_sep.id, sujeto_id=s.id, requisito_template_id=req_tmpl.id, archivo_url="https://demo.url", estado="aprobado", fecha_carga=datetime.utcnow(), cargado_por=demo_user.id)
+                    db.add(doc)
+                    db.flush()
+                    
+                    db.add(AuditoriaDocumento(id=uuid.uuid4(), periodo_documento_id=doc.id, auditor_id=demo_user.id, accion="aprobar", observacion="Documento vlido", fecha=datetime.utcnow(), version=1))
+                    db.flush()
 
     db.commit()
