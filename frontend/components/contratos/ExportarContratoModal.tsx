@@ -255,7 +255,7 @@ export function ExportarContratoModal({ abierto, onCerrar, contrato, plataformas
                 {plataformas.length === 0 && <span className="text-[0.8rem] text-slate-400">Sin plataformas en este contrato.</span>}
                 {plataformas.map((p) => (
                   <button
-                    key={p.id}
+                    key={p.id || p.faena_plataforma_id || p.nombre}
                     role="radio"
                     aria-checked={plat === p.nombre}
                     onClick={() => setPlat(p.nombre)}

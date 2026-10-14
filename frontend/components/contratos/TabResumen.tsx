@@ -235,7 +235,7 @@ export function TabResumen({ contrato: c, cambiarTab, plataformas = [] }: TabRes
           {plataformas.length > 0 ? (
             <div className="flex flex-col gap-1 mb-3">
               {plataformas.slice(0, 4).map((p) => (
-                <div key={p.id} className="flex justify-between text-[0.75rem]">
+                <div key={p.id || p.faena_plataforma_id || p.nombre} className="flex justify-between text-[0.75rem]">
                   <span className="text-slate-600 truncate">{p.nombre}</span>
                   <span className="font-bold text-slate-800 ml-2">{p.credenciales || 0}</span>
                 </div>

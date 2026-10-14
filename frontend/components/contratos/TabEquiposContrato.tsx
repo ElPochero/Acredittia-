@@ -148,12 +148,12 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start">
       <div className="flex-1 min-w-0 w-full">
-        <div className="flex items-start justify-between mb-3.5 gap-3">
-          <div>
+        <div className="flex items-start justify-between flex-wrap mb-3.5 gap-3">
+          <div className="min-w-[220px] flex-1">
             <h3 className="text-[#1E293B] text-[0.95rem] font-bold">Equipos y vehículos del contrato</h3>
             <p className="text-[0.78rem] text-slate-500 m-0 mt-0.5">Consulta y gestiona todos los equipos y vehículos asociados a este contrato.</p>
           </div>
-          <div className="flex gap-2 shrink-0 items-center">
+          <div className="flex gap-2 items-center flex-wrap justify-end">
             <button onClick={abrirAddEquipo} className="px-3 py-1.5 bg-blue-600 text-white rounded text-[0.78rem] font-medium hover:bg-blue-700 transition-colors shadow-sm">
               + Agregar equipo
             </button>

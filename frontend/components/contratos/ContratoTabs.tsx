@@ -33,7 +33,7 @@ export function ContratoTabs({ currentTab, onTabChange, colorTheme = "bg-blue-60
     <div
       role="tablist"
       aria-label="Secciones del contrato"
-      className="flex bg-white border border-slate-200 border-b-2 rounded-t-2xl overflow-x-auto mb-5"
+      className="flex bg-white border border-slate-200 border-b-2 rounded-t-2xl overflow-x-auto tabs-scroll mb-5"
     >
       {TABS.map((t) => {
         const isActive = currentTab === t;

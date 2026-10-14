@@ -151,12 +151,12 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start">
       <div className="flex-1 min-w-0 w-full">
-        <div className="flex items-start justify-between mb-4 gap-3">
-          <div>
+        <div className="flex items-start justify-between flex-wrap mb-4 gap-3">
+          <div className="min-w-[220px] flex-1">
             <h3 className="text-[#1E293B] text-[0.95rem] font-bold">Personal del contrato</h3>
             <p className="text-[0.78rem] text-slate-500 m-0 mt-0.5">Consulta y gestiona todo el personal asociado a este contrato.</p>
           </div>
-          <div className="flex gap-2 shrink-0 items-center flex-wrap justify-end">
+          <div className="flex gap-2 items-center flex-wrap justify-end">
             <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm mr-2 h-[34px]">
               <button 
                 onClick={() => setVista('lista')}

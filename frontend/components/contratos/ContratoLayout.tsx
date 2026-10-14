@@ -214,7 +214,7 @@ export function ContratoLayout({
              plataformas.map((pl, i) => {
                 const logo = logoForPlatform(pl.nombre);
                 return (
-                  <div key={pl.id} className={`flex-1 min-w-[200px] shrink-0 snap-start py-3.5 px-4 bg-white ${i < plataformas.length - 1 ? 'border-r border-slate-200' : ''}`}>
+                  <div key={pl.id || pl.faena_plataforma_id || pl.nombre} className={`flex-1 min-w-[200px] shrink-0 snap-start py-3.5 px-4 bg-white ${i < plataformas.length - 1 ? 'border-r border-slate-200' : ''}`}>
                     <div className="flex items-center justify-between mb-2">
                       {logo ? (
                         <div className="h-[34px] min-w-[64px] px-1 bg-white border border-slate-200 rounded-md flex items-center justify-center overflow-hidden">
