@@ -1,3 +1,11 @@
+"""Integración IA auxiliar (jobs de registro en ../Consultas).
+
+DEPRECATED (advisory): el proveedor real se elige con IA_BACKEND en
+services/ia.py (`gemini` es el actual). Este módulo solo persiste el payload
+ya calculado en ../Consultas para trazabilidad; es agnóstico al proveedor,
+por eso tasks.py lo sigue importando sin cambios. No añadir features aquí.
+"""
+
 import json
 import logging
 import os
