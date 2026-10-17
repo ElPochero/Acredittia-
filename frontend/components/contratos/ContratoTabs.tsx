@@ -33,7 +33,7 @@ export function ContratoTabs({ currentTab, onTabChange, colorTheme = "bg-blue-60
     <div
       role="tablist"
       aria-label="Secciones del contrato"
-      className="flex bg-white border border-slate-200 border-b-2 rounded-t-2xl overflow-x-auto tabs-scroll mb-5"
+      className="flex bg-white border border-slate-200 border-b-2 rounded-t-2xl overflow-x-auto overflow-y-hidden tabs-scroll mb-5"
     >
       {TABS.map((t) => {
         const isActive = currentTab === t;
@@ -43,7 +43,7 @@ export function ContratoTabs({ currentTab, onTabChange, colorTheme = "bg-blue-60
             role="tab"
             aria-selected={isActive}
             onClick={() => onTabChange(t)}
-            className={`px-3 py-[13px] text-[0.8rem] font-semibold whitespace-nowrap bg-white transition-colors border-b-[3px] -mb-[2px] cursor-pointer ${
+            className={`px-3 py-[13px] text-[0.8rem] font-semibold whitespace-nowrap bg-white transition-colors border-b-[3px] -mb-[2px] box-border cursor-pointer ${
               isActive
                 ? `${borderColor} ${textColor}`
                 : "border-b-transparent text-slate-500 hover:text-slate-700"

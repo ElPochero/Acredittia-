@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import * as Api from "@/lib/cliente";
@@ -41,6 +41,7 @@ export default function ContratoDetalle() {
   const [analizandoId, setAnalizandoId] = useState<string | null>(null);
   const [showCorreosAlertas, setShowCorreosAlertas] = useState(false);
   const [recordando, setRecordando] = useState<string | null>(null);
+  const reintentoRef = useRef<HTMLInputElement>(null);
 
   const [showAddPlataforma, setShowAddPlataforma] = useState(false);
   const [plataformaToManage, setPlataformaToManage] = useState<PlataformaContrato | null>(null);
@@ -360,6 +361,19 @@ export default function ContratoDetalle() {
       )}
 
       <Modal abierto={!!review} titulo="Revisión IA" onCerrar={() => setReview(null)} ancho="max-w-xl">
+        <input
+          ref={reintentoRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            const docId = review?.documento_id;
+            e.target.value = "";
+            if (!file || !docId) return;
+            setReview(null);
+            subir(docId, file);
+          }}
+        />
         {review && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -381,6 +395,21 @@ export default function ContratoDetalle() {
                 Detalle del error: {review.error}
               </p>
             )}
+            {review.resultado === "con_errores" && (
+              <div className="rounded-lg bg-red-50 border border-red-300 px-3.5 py-3">
+                <p className="m-0 text-sm font-bold text-red-700">⛔ Documento rechazado</p>
+                <p className="mt-1 mb-0 text-[0.8rem] text-red-700">
+                  Corrige los errores señalados y vuelve a subir el archivo; la IA lo revisará de nuevo.
+                </p>
+                {review.hallazgos.some((h) => h.tipo === "error") && (
+                  <ul className="mt-2 mb-0 pl-4 list-disc space-y-1 text-[0.8rem] text-red-700">
+                    {review.hallazgos.filter((h) => h.tipo === "error").map((h, i) => (
+                      <li key={i}>{h.mensaje}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <ul className="space-y-2 text-sm">
               {review.hallazgos.map((h, i) => (
                 <li key={i} className="rounded-lg bg-slate-50 px-3 py-2">
@@ -388,7 +417,14 @@ export default function ContratoDetalle() {
                 </li>
               ))}
             </ul>
-            <button className="btn-primary w-full" onClick={() => setReview(null)}>Entendido</button>
+            <div className="flex gap-2">
+              <button className="btn-outline flex-1 justify-center" onClick={() => setReview(null)}>Entendido</button>
+              {review.resultado === "con_errores" && review.documento_id && (
+                <button className="btn-primary flex-1 justify-center" onClick={() => reintentoRef.current?.click()}>
+                  Subir documento corregido
+                </button>
+              )}
+            </div>
           </div>
         )}
       </Modal>

@@ -111,13 +111,13 @@ export default function ContratosPage() {
             </button>
           </div>
           <button
-            className="btn-outline"
+            className="btn-outline inline-flex items-center justify-center gap-2"
             onClick={() => alert("Exportar — próximamente")}
           >
-            ↓ Exportar
+            <span aria-hidden="true">↓</span> Exportar
           </button>
-          <button className="btn-primary" onClick={() => setIsModalOpen(true)}>
-            + Nuevo contrato
+          <button className="btn-primary inline-flex items-center justify-center gap-2" onClick={() => setIsModalOpen(true)}>
+            <span aria-hidden="true">+</span> Nuevo contrato
           </button>
         </div>
       </div>
@@ -188,7 +188,7 @@ export default function ContratosPage() {
         viewMode={viewMode}
       />
 
-      <NuevaModalContrato abierto={isModalOpen} onCerrar={() => setIsModalOpen(false)} />
+      <NuevaModalContrato abierto={isModalOpen} onCerrar={() => setIsModalOpen(false)} onCreado={fetchContratos} />
 
       {/* Modal de eliminación (C3) */}
       <Modal

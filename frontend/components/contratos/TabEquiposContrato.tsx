@@ -160,9 +160,6 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
             <button onClick={() => { setShowPicker(true); setFlota([]); setQFlota(""); setSelIds([]); }} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm">
               ⧉ Desde flota
             </button>
-            <button className="px-3 py-1.5 bg-blue-600 text-white rounded text-[0.78rem] font-medium hover:bg-blue-700 transition-colors shadow-sm">
-              ✨ Asignar con Sofía IA
-            </button>
             <label className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium cursor-pointer hover:bg-slate-50 transition-colors shadow-sm bg-white">
               ↑ Subir documento
               <input type="file" className="hidden" />
