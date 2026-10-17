@@ -22,6 +22,15 @@ const SettingsIcon = () => (
 );
 
 // Helpers
+const ESTADO_ALERTA_LBL: Record<string, string> = {
+  nueva: "Nueva", en_progreso: "En progreso", bloqueante: "Bloqueante", informativa: "Informativa", resuelta: "Resuelta",
+};
+const ORIGEN_LBL: Record<string, string> = {
+  vencimiento: "Vencimiento", ia: "IA", integracion: "Integración", sistema: "Sistema",
+};
+const ambitoDe = (a: Alerta) => (a.sujeto_id ? "Personal" : "Empresa");
+const faenaDe = (a: Alerta) => (a.contrato_id ? "Asociado a Contrato" : "General");
+
 const formatDateStr = (dateStr: string) => {
   const d = new Date(dateStr);
   const diffDays = Math.floor((new Date().getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
@@ -36,6 +45,11 @@ export default function AlertasPage() {
   const [alertasList, setAlertasList] = useState<Alerta[]>([]);
   const [resumen, setResumen] = useState<ResumenAlertas | null>(null);
   const [filtroTab, setFiltroTab] = useState("Todas");
+  const [q, setQ] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [filtroTipo, setFiltroTipo] = useState("Todos");
+  const [filtroAmbito, setFiltroAmbito] = useState("Todos");
+  const [filtroFaena, setFiltroFaena] = useState("Todas");
 
   useEffect(() => {
     async function fetchData() {
@@ -56,12 +70,24 @@ export default function AlertasPage() {
     fetchData();
   }, []);
 
+  const opcionesEstado = Array.from(new Set(alertasList.map((a) => a.estado))).filter(Boolean);
+  const opcionesOrigen = Array.from(new Set(alertasList.map((a) => a.origen))).filter(Boolean);
+
   const getFilteredAlerts = () => {
-    if (filtroTab === "Críticas") return alertasList.filter(a => a.severidad === "critica");
-    if (filtroTab === "Advertencias") return alertasList.filter(a => a.severidad === "advertencia" || a.severidad === "alta");
-    if (filtroTab === "Informativas") return alertasList.filter(a => a.severidad === "informativa");
-    if (filtroTab === "Resueltas") return alertasList.filter(a => a.estado === "resuelta");
-    return alertasList;
+    let lista = alertasList;
+    if (filtroTab === "Críticas") lista = lista.filter(a => a.severidad === "critica");
+    else if (filtroTab === "Advertencias") lista = lista.filter(a => a.severidad === "advertencia" || a.severidad === "alta");
+    else if (filtroTab === "Informativas") lista = lista.filter(a => a.severidad === "informativa");
+    else if (filtroTab === "Resueltas") lista = lista.filter(a => a.estado === "resuelta");
+    if (q.trim()) {
+      const t = q.toLowerCase();
+      lista = lista.filter(a => `${a.titulo} ${a.descripcion || ""}`.toLowerCase().includes(t));
+    }
+    if (filtroEstado !== "Todos") lista = lista.filter(a => a.estado === filtroEstado);
+    if (filtroTipo !== "Todos") lista = lista.filter(a => a.origen === filtroTipo);
+    if (filtroAmbito !== "Todos") lista = lista.filter(a => ambitoDe(a) === filtroAmbito);
+    if (filtroFaena !== "Todas") lista = lista.filter(a => faenaDe(a) === filtroFaena);
+    return lista;
   };
 
   const alertasFiltradas = getFilteredAlerts();
@@ -159,21 +185,29 @@ export default function AlertasPage() {
           <input 
             type="text" 
             placeholder="Buscar alerta por palabra clave..." 
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="flex gap-2 overflow-x-auto">
-          <select className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option>Estado: Todas</option>
+          <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
+            <option value="Todos">Estado: Todos</option>
+            {opcionesEstado.map((es) => <option key={es} value={es}>{ESTADO_ALERTA_LBL[es] || es}</option>)}
           </select>
-          <select className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option>Tipo: Todos</option>
+          <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
+            <option value="Todos">Tipo: Todos</option>
+            {opcionesOrigen.map((o) => <option key={o} value={o}>{ORIGEN_LBL[o] || o}</option>)}
           </select>
-          <select className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option>Ámbito: Todos</option>
+          <select value={filtroAmbito} onChange={(e) => setFiltroAmbito(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
+            <option value="Todos">Ámbito: Todos</option>
+            <option value="Personal">Personal</option>
+            <option value="Empresa">Empresa</option>
           </select>
-          <select className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option>Faena: Todas</option>
+          <select value={filtroFaena} onChange={(e) => setFiltroFaena(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
+            <option value="Todas">Faena: Todas</option>
+            <option value="Asociado a Contrato">Asociado a Contrato</option>
+            <option value="General">General</option>
           </select>
         </div>
       </div>

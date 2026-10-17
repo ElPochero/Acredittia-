@@ -28,6 +28,14 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   });
   const [creando, setCreando] = useState(false);
 
+  // Filtros de la tabla (en memoria sobre la página cargada).
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroPlataforma, setFiltroPlataforma] = useState("Todas");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [filtroAcreditacion, setFiltroAcreditacion] = useState("Todas");
+  const [filtroFaena, setFiltroFaena] = useState("Todas");
+  const [filtroCargo, setFiltroCargo] = useState("Todos");
+
   const toggleConduce = async (id: string, actual: boolean) => {
     try {
       // Optimistic update
@@ -108,6 +116,29 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   }, [page, contrato.id]);
 
   const list = personal ? personal.items : [];
+
+  const ESTADO_LBL: Record<string, string> = { ok: "Acreditado", venc: "Vencido", baja: "Suspendido", proc: "Por acreditar", falta: "Por acreditar" };
+  const acredLblDe = (pct: number) => (pct >= 70 ? "Completa" : pct >= 40 ? "Incompleta" : "Sin acreditar");
+  const plataformasFila = plataformas.map((p) => p.nombre).filter(Boolean);
+  const chipsFila = plataformasFila.length ? plataformasFila.slice(0, 2) : ["siga", "WC"];
+
+  // Opciones derivadas de la propia lista de trabajadores.
+  const opcionesEstado = Array.from(new Set(list.map((s) => s.estado))).filter(Boolean);
+  const opcionesCargo = Array.from(new Set(list.map((s) => s.cargo).filter(Boolean))) as string[];
+  const opcionesFaena = Array.from(new Set(list.map((s) => s.contrato?.faena).filter(Boolean))) as string[];
+
+  const visibles = list.filter((s) => {
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      if (!`${s.nombre} ${s.rut || ""} ${s.cargo || ""}`.toLowerCase().includes(q)) return false;
+    }
+    if (filtroEstado !== "Todos" && (ESTADO_LBL[s.estado] || s.estado) !== filtroEstado) return false;
+    if (filtroAcreditacion !== "Todas" && acredLblDe(s.stats?.cumplimiento_pct || 0) !== filtroAcreditacion) return false;
+    if (filtroCargo !== "Todos" && (s.cargo || "") !== filtroCargo) return false;
+    if (filtroFaena !== "Todas" && (s.contrato?.faena || "") !== filtroFaena) return false;
+    if (filtroPlataforma !== "Todas" && !chipsFila.includes(filtroPlataforma)) return false;
+    return true;
+  });
   
   // En lugar de globales precisas (que requerirían un endpoint de stats de personal), 
   // usamos las stats del contrato para lo básico y el resto aproximado o en 0.
@@ -178,10 +209,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
             <button onClick={() => setShowAddWorker(true)} className="h-[34px] px-3 bg-blue-600 text-white rounded-lg text-[0.75rem] font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center justify-center gap-1.5">
               + Agregar trabajador
             </button>
-            <button className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5">
-              ✨ Asignar con Sofía IA
-            </button>
-            <button onClick={handleSubirDocumento} className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
+            <button className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
               ↑ Subir documento
             </button>
           </div>
@@ -202,36 +230,51 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
         </div>
 
         <div className="flex flex-wrap gap-2.5 mb-4 items-center">
-          <input className="flex-1 min-w-[200px] max-w-[360px] bg-white border border-slate-200 rounded-[10px] px-3.5 py-2.5 text-[0.88rem] text-slate-800 placeholder-slate-400 outline-none shadow-sm" placeholder="Buscar por nombre, RUT o cargo..." />
-          <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Plataforma: Todas</option></select>
-          <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Estado: Todos</option></select>
-          <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Acreditación: Todas</option></select>
-          <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Faena: Todas</option></select>
-          <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Cargo: Todos</option></select>
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="flex-1 min-w-[200px] max-w-[360px] bg-white border border-slate-200 rounded-[10px] px-3.5 py-2.5 text-[0.88rem] text-slate-800 placeholder-slate-400 outline-none shadow-sm" placeholder="Buscar por nombre, RUT o cargo..." />
+          <select value={filtroPlataforma} onChange={(e) => setFiltroPlataforma(e.target.value)} className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm">
+            <option value="Todas">Plataforma: Todas</option>
+            {plataformasFila.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm">
+            <option value="Todos">Estado: Todos</option>
+            {Array.from(new Set(opcionesEstado.map((e) => ESTADO_LBL[e] || e))).map((lbl) => <option key={lbl} value={lbl}>{lbl}</option>)}
+          </select>
+          <select value={filtroAcreditacion} onChange={(e) => setFiltroAcreditacion(e.target.value)} className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm">
+            <option value="Todas">Acreditación: Todas</option>
+            {["Completa", "Incompleta", "Sin acreditar"].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <select value={filtroFaena} onChange={(e) => setFiltroFaena(e.target.value)} className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm">
+            <option value="Todas">Faena: Todas</option>
+            {opcionesFaena.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <select value={filtroCargo} onChange={(e) => setFiltroCargo(e.target.value)} className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm">
+            <option value="Todos">Cargo: Todos</option>
+            {opcionesCargo.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
 
           {cargando ? (
             <div className="p-8 text-center text-slate-500 text-sm">Cargando personal...</div>
           ) : vista === 'lista' ? (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm mb-4">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm mb-4">
+              <table className="w-full min-w-[1100px] text-left border-collapse">
                 <thead>
                   <tr className="bg-white border-b border-slate-200 text-[0.65rem] text-slate-400 font-bold uppercase tracking-wider text-left">
-                    <th className="p-4 pl-5">Nombre</th>
-                    <th className="p-4">RUT</th>
-                    <th className="p-4">Cargo</th>
-                    <th className="p-4">Conduce</th>
-                    <th className="p-4">Faena</th>
-                    <th className="p-4">Plataformas</th>
-                    <th className="p-4">Estado</th>
-                    <th className="p-4">Acreditación</th>
-                    <th className="p-4">Vencimiento</th>
-                    <th className="p-4">Últ. Actualización</th>
-                    <th className="p-4 text-center pr-5">Acciones</th>
+                    <th className="p-4 pl-5 whitespace-nowrap">Nombre</th>
+                    <th className="p-4 whitespace-nowrap">RUT</th>
+                    <th className="p-4 whitespace-nowrap">Cargo</th>
+                    <th className="p-4 whitespace-nowrap">Conduce</th>
+                    <th className="p-4 whitespace-nowrap">Faena</th>
+                    <th className="p-4 whitespace-nowrap">Plataformas</th>
+                    <th className="p-4 whitespace-nowrap">Estado</th>
+                    <th className="p-4 whitespace-nowrap">Acreditación</th>
+                    <th className="p-4 whitespace-nowrap">Vencimiento</th>
+                    <th className="p-4 whitespace-nowrap">Últ. Actualización</th>
+                    <th className="p-4 text-center pr-5 whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map(s => {
+                  {visibles.map(s => {
                     const pct = s.stats?.cumplimiento_pct || 0;
                     const acredLbl = pct >= 70 ? 'Completa' : pct >= 40 ? 'Incompleta' : 'Sin acreditar';
                     const estLbl = s.estado === 'ok' ? 'Acreditado' : s.estado === 'venc' ? 'Vencido' : s.estado === 'baja' ? 'Suspendido' : 'Por acreditar';
@@ -251,8 +294,8 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5">{s.rut}</td>
-                        <td className="p-4 text-[0.75rem] font-medium text-slate-700 leading-tight align-top pt-5 min-w-[100px]">{s.cargo}</td>
+                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5 whitespace-nowrap">{s.rut}</td>
+                        <td className="p-4 text-[0.75rem] font-medium text-slate-700 leading-tight align-top pt-5 min-w-[100px] whitespace-nowrap">{s.cargo}</td>
                         <td className="p-4 align-top pt-5">
                           <div className="flex items-center gap-1.5">
                             <button 
@@ -267,13 +310,16 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                             </span>
                           </div>
                         </td>
-                        <td className="p-4 text-[0.75rem] font-medium text-slate-700 leading-tight align-top pt-5 min-w-[90px]">{contrato.faena?.nombre}</td>
-                        <td className="p-4 flex items-center gap-1 align-top pt-5">
-                          <span className="text-[0.65rem] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded italic lowercase">siga</span>
-                          <span className="text-[0.65rem] font-bold text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded">WC</span>
+                        <td className="p-4 text-[0.75rem] font-medium text-slate-700 leading-tight align-top pt-5 min-w-[90px] whitespace-nowrap">{contrato.faena?.nombre}</td>
+                        <td className="p-4 align-top pt-5">
+                          <div className="flex items-center gap-1">
+                            {chipsFila.map((p) => (
+                              <span key={p} className="text-[0.65rem] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded whitespace-nowrap">{p}</span>
+                            ))}
+                          </div>
                         </td>
                         <td className="p-4 align-top pt-4">
-                          <span className={`px-2.5 py-1 rounded-md text-[0.7rem] font-bold ${
+                          <span className={`px-2.5 py-1 rounded-md text-[0.7rem] font-bold whitespace-nowrap ${
                             s.estado === 'ok' ? 'bg-emerald-50 text-emerald-600' :
                             s.estado === 'venc' ? 'bg-red-50 text-red-600' :
                             s.estado === 'baja' ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-600'
@@ -282,15 +328,15 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                           </span>
                         </td>
                         <td className="p-4 align-top pt-4">
-                          <span className={`px-2.5 py-1 rounded-md border text-[0.7rem] font-bold bg-white ${
+                          <span className={`px-2.5 py-1 rounded-md border text-[0.7rem] font-bold bg-white whitespace-nowrap ${
                             pct >= 70 ? 'border-emerald-200 text-emerald-600' :
                             pct >= 40 ? 'border-amber-200 text-amber-600' : 'border-red-200 text-red-600'
                           }`}>
                             {acredLbl}
                           </span>
                         </td>
-                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5">2026-10-28</td>
-                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5">Hoy</td>
+                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5 whitespace-nowrap">2026-10-28</td>
+                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5 whitespace-nowrap">Hoy</td>
                         <td className="p-4 align-top pt-3 pr-5">
                           <div className="flex flex-col items-center justify-center gap-1.5 min-w-[65px] mx-auto">
                             <Link href={`/personal/${s.id}`} className="text-[0.7rem] text-blue-600 font-bold hover:bg-[#E0E7FF] bg-[#EEF2FF] w-full text-center py-1.5 rounded-lg leading-tight transition-colors">
@@ -304,9 +350,11 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                       </tr>
                     );
                   })}
-                  {list.length === 0 && !cargando && (
+                  {visibles.length === 0 && !cargando && (
                     <tr>
-                      <td colSpan={11} className="p-6 text-center text-slate-500 text-sm">Sin personal registrado</td>
+                      <td colSpan={11} className="p-6 text-center text-slate-500 text-sm">
+                        {list.length === 0 ? "Sin personal registrado" : "Sin resultados para los filtros aplicados"}
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -314,7 +362,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
-              {list.map(s => {
+              {visibles.map(s => {
                 const pct = s.stats?.cumplimiento_pct || 0;
                 return (
                   <div key={s.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col">
@@ -336,16 +384,16 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                     <div className="flex items-center justify-between mt-auto pt-3 border-t border-slate-100">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[0.7rem] text-slate-500 font-medium">Acreditación:</span>
-                        <span className="text-[0.75rem] font-bold text-emerald-600">Completa ({pct}%)</span>
+                        <span className="text-[0.75rem] font-bold text-emerald-600">{acredLblDe(pct)} ({pct}%)</span>
                       </div>
                       <Link href={`/personal/${s.id}`} className="text-[0.75rem] text-blue-600 font-bold hover:underline">Ver</Link>
                     </div>
                   </div>
                 );
               })}
-              {list.length === 0 && !cargando && (
+              {visibles.length === 0 && !cargando && (
                 <div className="col-span-full p-8 text-center text-slate-500 text-sm bg-white rounded-xl border border-slate-200">
-                  Sin personal registrado
+                  {list.length === 0 ? "Sin personal registrado" : "Sin resultados para los filtros aplicados"}
                 </div>
               )}
             </div>
@@ -394,7 +442,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-[0.85rem] text-slate-800">Requisitos<br/>críticos</h3>
-            <span className="text-[0.7rem] text-blue-600 font-bold cursor-pointer hover:underline">Ver<br/>todos</span>
+            <button type="button" onClick={() => setFiltroEstado("Vencido")} className="text-[0.7rem] text-blue-600 font-bold cursor-pointer hover:underline bg-transparent border-0 p-0 leading-tight">Ver<br/>todos</button>
           </div>
           <div className="flex flex-col gap-3">
             {[

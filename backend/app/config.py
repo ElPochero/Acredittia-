@@ -50,10 +50,19 @@ class Settings(BaseSettings):
     keys_dir: str = "/data/keys"  # solo jwe_backend=local
     credencial_ttl_meses: int = 12
 
-    # --- Revisión IA: simulada | claude | nvidia --------------------------
+    # --- Revisión IA: simulada | claude | nvidia | gemini ---------------
+    # `nvidia` queda como alias transitorio (advisory deprecated, ver
+    # services/nvidia_nim.py): get_reviewer() sigue resolviéndolo.
     ia_backend: str = "simulada"
     anthropic_api_key: str = ""
     nvidia_nim_api_key: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
+    # Verificador post-generación del chat (Critic/Guardrail de razonabilidad).
+    # Modelo ligero y barato; el timeout acota la latencia extra en el peor caso.
+    gemini_verifier_model: str = "gemini-1.5-flash"
+    ia_verifier_enabled: bool = True
+    ia_verifier_timeout_s: float = 6.0
     # Embeddings para RAG (endpoint OpenAI-compatible de NIM).
     # Verificado con la key actual: nemotron-3-embed-1b → 2048 dims.
     nvidia_embedding_model: str = "nvidia/nemotron-3-embed-1b"
@@ -81,6 +90,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

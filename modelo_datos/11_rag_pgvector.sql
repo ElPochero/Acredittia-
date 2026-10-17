@@ -92,6 +92,15 @@ CREATE INDEX IF NOT EXISTS ix_periodo_doc_sujeto ON periodo_documentos (sujeto_i
 CREATE INDEX IF NOT EXISTS ix_periodo_req_periodo ON periodo_documentos_requeridos (periodo_id);
 CREATE INDEX IF NOT EXISTS ix_periodo_req_template ON periodo_documentos_requeridos (requisito_template_id);
 CREATE INDEX IF NOT EXISTS ix_periodos_contrato ON periodos_laborales (contrato_id);
-CREATE INDEX IF NOT EXISTS ix_plantilla_reqs_requisito ON plantilla_requisitos (requisito_id);
-CREATE INDEX IF NOT EXISTS ix_plantillas_company ON plantillas (company_id);
-CREATE INDEX IF NOT EXISTS ix_sujetos_plantilla ON sujetos (plantilla_id);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plantilla_requisitos') THEN
+    CREATE INDEX IF NOT EXISTS ix_plantilla_reqs_requisito ON plantilla_requisitos (requisito_id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'plantillas') THEN
+    CREATE INDEX IF NOT EXISTS ix_plantillas_company ON plantillas (company_id);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'sujetos' AND column_name = 'plantilla_id') THEN
+    CREATE INDEX IF NOT EXISTS ix_sujetos_plantilla ON sujetos (plantilla_id);
+  END IF;
+END $$;

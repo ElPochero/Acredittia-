@@ -4,6 +4,9 @@ import { Modal, Spinner } from "./ui";
 import * as Api from "@/lib/cliente";
 import type { PlataformaContrato, Credencial } from "@/lib/tipos";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PASSWORD_MIN = 8;
+
 export function AgregarPlataformaModal({
   abierto,
   onCerrar,
@@ -98,31 +101,36 @@ export function GestionarUsuariosModal({
   const [password, setPassword] = useState("");
   const [creando, setCreando] = useState(false);
 
+  // Plataforma heredada sin materializar: viene sin `id` propio; el backend
+  // acepta el id de la faena y materializa la lista al crear la cuenta.
+  const pid = plataforma ? plataforma.id || plataforma.faena_plataforma_id || null : null;
+  const pidValido = !!pid && UUID_RE.test(pid);
+
   useEffect(() => {
-    if (plataforma) {
-      // Safeguard for mock string IDs to prevent backend 422 Unprocessable Entity
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(plataforma.id);
-      if (!isUUID) {
-        setUsuarios([]);
-        setLoading(false);
-        return;
-      }
-      
-      setLoading(true);
-      Api.credenciales.listar(contratoId, plataforma.id)
-        .then(res => setUsuarios(res.items || []))
-        .catch(e => alert(Api.mensajeError(e)))
-        .finally(() => setLoading(false));
+    if (!plataforma) return;
+    if (!pidValido || !pid) {
+      setUsuarios([]);
+      setLoading(false);
+      return;
     }
-  }, [plataforma, contratoId]);
+    setLoading(true);
+    Api.credenciales.listar(contratoId, pid)
+      .then(res => setUsuarios(res.items || []))
+      .catch(e => alert(Api.mensajeError(e)))
+      .finally(() => setLoading(false));
+  }, [plataforma, contratoId, pid, pidValido]);
 
   const handleAgregar = async () => {
-    if (!usuario || !password || !plataforma) return alert("Falta usuario o contraseña");
+    if (!plataforma) return;
+    if (!pidValido || !pid) return alert("Esta plataforma aún no tiene identificador válido para guardar usuarios.");
+    if (!nombre.trim()) return alert("El nombre del titular es obligatorio");
+    if (!usuario.trim()) return alert("El usuario es obligatorio");
+    if (password.length < PASSWORD_MIN) return alert(`La contraseña debe tener al menos ${PASSWORD_MIN} caracteres`);
     setCreando(true);
     try {
-      await Api.credenciales.crear(contratoId, plataforma.id, { nombre, usuario, password });
+      await Api.credenciales.crear(contratoId, pid, { nombre: nombre.trim(), usuario, password });
       setNombre(""); setUsuario(""); setPassword("");
-      const res = await Api.credenciales.listar(contratoId, plataforma.id);
+      const res = await Api.credenciales.listar(contratoId, pid);
       setUsuarios(res.items || []);
     } catch (e) {
       alert(Api.mensajeError(e));
@@ -132,9 +140,9 @@ export function GestionarUsuariosModal({
   };
 
   const handleEliminar = async (uid: string) => {
-    if (!plataforma || !confirm("¿Eliminar esta cuenta?")) return;
+    if (!plataforma || !pid || !confirm("¿Eliminar esta cuenta?")) return;
     try {
-      await Api.credenciales.eliminar(contratoId, plataforma.id, uid);
+      await Api.credenciales.eliminar(contratoId, pid, uid);
       setUsuarios(usuarios.filter(u => u.id !== uid));
     } catch (e) {
       alert(Api.mensajeError(e));
@@ -177,10 +185,15 @@ export function GestionarUsuariosModal({
         </div>
       )}
 
+      {!pidValido ? (
+        <div className="text-[0.8rem] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Esta plataforma aún no tiene identificador válido para asociar usuarios.
+        </div>
+      ) : (
       <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
         <div className="text-[0.75rem] font-bold text-slate-700 mb-2.5">NUEVO USUARIO</div>
         <div className="mb-2.5">
-          <label className="block text-[0.7rem] font-bold text-slate-600 mb-1 uppercase">Nombre del responsable</label>
+          <label className="block text-[0.7rem] font-bold text-slate-600 mb-1 uppercase">Nombre del responsable *</label>
           <input
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
@@ -205,6 +218,7 @@ export function GestionarUsuariosModal({
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               type="password"
+              minLength={PASSWORD_MIN}
               className="w-full h-[34px] px-3 border border-slate-300 rounded text-[0.8rem] focus:outline-none focus:border-blue-500"
             />
           </div>
@@ -222,6 +236,7 @@ export function GestionarUsuariosModal({
           </button>
         </div>
       </div>
+      )}
     </Modal>
   );
 }
@@ -303,7 +318,7 @@ export function DetallePlataformaModal({
   };
 
   if (!plataforma) return null;
-  const esUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(plataforma.id);
+  const esUuid = UUID_RE.test(plataforma.id);
 
   return (
     <Modal abierto={!!plataforma} titulo={`${plataforma.nombre} — Requisitos`} onCerrar={onCerrar} ancho="max-w-[560px]">

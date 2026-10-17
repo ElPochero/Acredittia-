@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 interface NuevaModalContratoProps {
   abierto: boolean;
   onCerrar: () => void;
+  onCreado?: () => void;
 }
 
 const EXTRA_PLATS = ["SIGA", "Workmate", "Webcontrol", "Metacontratas", "SUCAL", "DIRECTIC", "Otra plataforma"];
@@ -29,7 +30,7 @@ const unir = (prev: string[], nuevos: string[]) => {
   return [...prev, ...nuevos.filter((x) => x.trim() && !vistos.has(x.toLowerCase().trim()))];
 };
 
-export function NuevaModalContrato({ abierto, onCerrar }: NuevaModalContratoProps) {
+export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalContratoProps) {
   const router = useRouter();
 
   const [nombre, setNombre] = useState("");
@@ -206,6 +207,7 @@ export function NuevaModalContrato({ abierto, onCerrar }: NuevaModalContratoProp
         },
       });
       onCerrar();
+      onCreado?.();
       router.push(`/contratos/${c.id}`);
     } catch (e) {
       alert(Api.mensajeError(e));

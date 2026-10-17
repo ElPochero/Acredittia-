@@ -936,14 +936,12 @@ async def chat_ia(
     # agregar o quitar (igual que el `confirm` de la referencia): en una
     # consulta ("lista", "cómo va", "qué vence") el modelo tiende a
     # rellenarlos con lo listado y el botón Confirmar crearía duplicados.
-    import re as _re
+    # Excepción: análisis/extracción de un archivo adjunto, donde los
+    # requisitos extraídos son justamente el resultado esperado.
+    from ..services.ia import conserva_acciones_chat
 
-    if not _re.search(
-        r"\b(agrega|agregar|a[ñn]ad|suma|sumar|incluye|incluir|crea|crear|"
-        r"elimina|eliminar|quita|quitar|borra|borrar)\b",
-        body.mensaje,
-        _re.IGNORECASE,
-    ):
+    tiene_adjunto = bool(body.file_b64 and body.file_name)
+    if not conserva_acciones_chat(body.mensaje, tiene_adjunto):
         try:
             _parsed = json.loads(respuesta_json)
             _parsed.pop("agregados", None)

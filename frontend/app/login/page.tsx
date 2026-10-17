@@ -41,13 +41,13 @@ export default function LoginPage() {
     return {};
   };
 
-  const handleLogin = async (e?: React.FormEvent) => {
+  const handleLogin = async (e?: React.FormEvent, creds?: { email: string; password: string }) => {
     if (e) e.preventDefault();
     setErr("");
     const newFieldErrors: Record<string, string> = {};
 
-    const userEmail = email.trim();
-    const userPass = password.trim();
+    const userEmail = (creds?.email ?? email).trim();
+    const userPass = (creds?.password ?? password).trim();
 
     if (!userEmail) {
       newFieldErrors.lEmail = "Falta ingresar el correo electrónico.";
@@ -266,7 +266,7 @@ export default function LoginPage() {
                 onClick={() => {
                   setEmail("demo@acredittia.cl");
                   setPassword("Demo2026!");
-                  handleLogin();
+                  handleLogin(undefined, { email: "demo@acredittia.cl", password: "Demo2026!" });
                 }}
                 className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer mt-2"
               >
