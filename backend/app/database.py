@@ -326,61 +326,19 @@ def apply_schema(schema_dir: str | None = None) -> int:
             actual = schema_version()
             if actual >= SCHEMA_VERSION:
                 return actual
-            if actual == 0:
-                pendientes = SCHEMA_SCRIPTS
-            elif actual == 3:
-                pendientes = [
-                    "04_rls.sql",
-                    "06_migracion_v11.sql",
-                    "07_migracion_v12.sql",
-                    "08_migracion_v13.sql",
-                    "09_certificacion_laboral.sql",
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 4:
-                pendientes = [
-                    "06_migracion_v11.sql",
-                    "07_migracion_v12.sql",
-                    "08_migracion_v13.sql",
-                    "09_certificacion_laboral.sql",
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 6:
-                pendientes = [
-                    "07_migracion_v12.sql",
-                    "08_migracion_v13.sql",
-                    "09_certificacion_laboral.sql",
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 7:
-                pendientes = [
-                    "08_migracion_v13.sql",
-                    "09_certificacion_laboral.sql",
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 8:
-                pendientes = [
-                    "09_certificacion_laboral.sql",
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 9:
-                pendientes = [
-                    "10_add_telefono_email.sql",
-                    "11_rag_pgvector.sql",
-                ]
-            elif actual == 10:
-                pendientes = ["11_rag_pgvector.sql", "12_vinculo_faena.sql"]
-            elif actual == 11:
-                pendientes = ["12_vinculo_faena.sql", "13_rol_visor.sql"]
-            elif actual == 12:
-                pendientes = ["13_rol_visor.sql"]
-            else:
-                pendientes = []
+            scripts_por_version = {
+                0: SCHEMA_SCRIPTS,
+                3: SCHEMA_SCRIPTS[3:],
+                4: SCHEMA_SCRIPTS[4:],
+                6: SCHEMA_SCRIPTS[5:],
+                7: SCHEMA_SCRIPTS[6:],
+                8: SCHEMA_SCRIPTS[7:],
+                9: SCHEMA_SCRIPTS[8:],
+                10: SCHEMA_SCRIPTS[9:],
+                11: SCHEMA_SCRIPTS[10:],
+                12: SCHEMA_SCRIPTS[11:],
+            }
+            pendientes = scripts_por_version.get(actual, [])
 
             for nombre in pendientes:
                 ruta = os.path.join(sdir, nombre)

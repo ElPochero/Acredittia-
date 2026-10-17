@@ -40,3 +40,15 @@ ENV/
 *.swo
 .DS_Store
 Thumbs.db
+
+#Agents
+.agents/
+graphify-out/
+local_tools/
+.ruff_cache/
+AGENTS.md
+deploy_update.ps1
+.graphifyignore
+
+#Tasks
+tasks/
