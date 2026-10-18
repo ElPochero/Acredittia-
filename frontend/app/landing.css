@@ -1,0 +1,79 @@
+/* ==========================================================================
+   ACREDITTIA Landing v2 — Keyframes y primitivas de mockup (≤ 120 líneas)
+   ========================================================================== */
+
+/* Keyframes (§5.3) */
+@keyframes hvMailPop {
+  0% { opacity: 0; transform: translateY(14px) scale(0.9); }
+  55% { opacity: 1; transform: translateY(-5px) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes feIconPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+@keyframes feDotMove {
+  0% { left: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+@keyframes platFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ecoFlow {
+  to { stroke-dashoffset: -56; }
+}
+
+@keyframes xlsArrowMove {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(7px); }
+}
+
+@keyframes xlsWarnPulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(217, 119, 6, 0.45); }
+  50% { box-shadow: inset 0 0 0 20px rgba(217, 119, 6, 0.16); }
+}
+
+@keyframes xlsBadPulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(185, 28, 28, 0.45); }
+  50% { box-shadow: inset 0 0 0 20px rgba(185, 28, 28, 0.18); }
+}
+
+/* Clases de animación */
+.animate-hv-mail-pop { animation: hvMailPop 0.55s ease forwards; }
+.animate-fe-icon-pulse { animation: feIconPulse 2.8s ease-in-out infinite; }
+.animate-fe-dot-move { animation: feDotMove 2.2s ease-in-out infinite; }
+.animate-plat-fade { animation: platFade 0.25s ease forwards; }
+.animate-eco-flow { animation: ecoFlow 3.2s linear infinite; }
+.animate-xls-arrow { animation: xlsArrowMove 1.7s ease-in-out infinite; }
+.animate-xls-warn { animation: xlsWarnPulse 2.2s ease-in-out infinite; }
+.animate-xls-bad { animation: xlsBadPulse 2.2s ease-in-out infinite; }
+
+/* Primitivas de mockup y scroll */
+.carq-bar-fill {
+  transition: width 1.4s ease;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Guardrail de accesibilidad: respeto estricto de prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
