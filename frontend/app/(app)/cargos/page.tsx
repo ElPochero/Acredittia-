@@ -127,14 +127,8 @@ export default function CargosPage() {
 
   return (
     <div className="p-4 md:p-8 space-y-6 bg-slate-50 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Cargos</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Catálogo de cargos operativos y los requisitos documentales que exige cada uno.
-          </p>
-        </div>
+      {/* Header único (título en AppHeader) */}
+      <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
           <button className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-slate-50 shadow-sm transition-colors">
             <DownloadIcon /> Exportar

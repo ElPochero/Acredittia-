@@ -40,6 +40,12 @@ export default function AppHeader({
   };
 
   const getTitulo = () => {
+    if (path.includes("/docs-trabajadores"))
+      return { title: "Documentación de Trabajadores", sub: "Carga y vigencia de documentos del personal" };
+    if (path.includes("/certificacion-laboral"))
+      return { title: "Certificación Laboral", sub: "Períodos laborales y matriz documental" };
+    if (path.includes("/admin"))
+      return { title: "Administración", sub: "Gestión de empresas y usuarios" };
     if (path.includes("/contratos"))
       return { title: "Contratos", sub: "Administración de contratos" };
     if (path.includes("/faenas"))

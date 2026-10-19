@@ -122,14 +122,8 @@ export default function PersonasPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Personal</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Gestiona y supervisa a todo el personal de tu empresa en sus diferentes faenas.
-          </p>
-        </div>
+      {/* Header único (título en AppHeader) */}
+      <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
           <button className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar

@@ -42,14 +42,8 @@ export default function EquiposPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Equipos & Maquinaria</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Gestiona la flota de vehículos y maquinaria pesada de tu empresa.
-          </p>
-        </div>
+      {/* Header único (título en AppHeader) */}
+      <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
           <button className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar

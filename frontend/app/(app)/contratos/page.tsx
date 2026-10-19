@@ -88,11 +88,7 @@ export default function ContratosPage() {
   return (
     <div className="p-6 max-w-[1400px] mx-auto pb-20">
       {/* Encabezado de la vista */}
-      <div className="view-head">
-        <div>
-          <h2 className="text-[#0F172A]">Contratos</h2>
-          <p>Administra todos los contratos de tu empresa en sus diferentes faenas.</p>
-        </div>
+      <div className="view-head" style={{ justifyContent: "flex-end" }}>
         <div className="view-head-actions">
           <div className="flex bg-slate-100 p-1 rounded-[10px] mr-1">
             <button

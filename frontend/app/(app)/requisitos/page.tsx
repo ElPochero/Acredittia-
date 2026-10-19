@@ -335,13 +335,7 @@ export default function RequisitosPage() {
   return (
     <div className="w-full space-y-6 text-slate-800">
       {/* 1. Cabecera Principal */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Requisitos</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Administra y controla los requisitos exigidos en contratos y faenas.
-          </p>
-        </div>
+      <div className="flex flex-col sm:flex-row sm:justify-end gap-4">
         <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={handleExportar}
