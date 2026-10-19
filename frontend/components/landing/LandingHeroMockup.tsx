@@ -11,7 +11,7 @@ import Image from "next/image";
  */
 export default function LandingHeroMockup() {
   return (
-    <div className="relative w-full max-w-[560px] mx-auto lg:max-w-none">
+    <div className="relative w-full max-w-[540px] mx-auto">
       {/* Marco principal del dashboard */}
       <div className="rounded-[18px] overflow-hidden border border-landing-linea shadow-landing-frame bg-white">
         {/* Barra superior estilo ventana de aplicación (Chrome) */}
@@ -25,66 +25,66 @@ export default function LandingHeroMockup() {
           </div>
         </div>
 
-        {/* Pestañas de navegación de datos */}
-        <div className="flex gap-1.5 px-4 py-3 border-b border-landing-linea bg-white flex-wrap">
-          <span className="text-[0.74rem] font-bold text-landing-gris px-3.5 py-1.5 rounded-full transition-colors cursor-default">
+        {/* Pestañas de navegación de datos (en una sola línea) */}
+        <div className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-2.5 border-b border-landing-linea bg-white overflow-x-auto scrollbar-none whitespace-nowrap">
+          <span className="text-[0.72rem] font-bold text-landing-gris px-3 py-1 rounded-full transition-colors cursor-default shrink-0">
             Panel
           </span>
-          <span className="text-[0.74rem] font-bold text-landing-gris px-3.5 py-1.5 rounded-full transition-colors cursor-default">
+          <span className="text-[0.72rem] font-bold text-landing-gris px-3 py-1 rounded-full transition-colors cursor-default shrink-0">
             Contratos
           </span>
-          <span className="text-[0.74rem] font-bold text-landing-gris px-3.5 py-1.5 rounded-full transition-colors cursor-default">
+          <span className="text-[0.72rem] font-bold text-landing-gris px-3 py-1 rounded-full transition-colors cursor-default shrink-0">
             Empresa
           </span>
-          <span className="text-[0.74rem] font-bold text-landing-gris px-3.5 py-1.5 rounded-full transition-colors cursor-default">
+          <span className="text-[0.72rem] font-bold text-landing-gris px-3 py-1 rounded-full transition-colors cursor-default shrink-0">
             Personal
           </span>
-          <span className="text-[0.74rem] font-bold bg-landing-azul text-white px-3.5 py-1.5 rounded-full shadow-sm">
+          <span className="text-[0.72rem] font-bold bg-landing-azul text-white px-3 py-1 rounded-full shadow-sm shrink-0">
             Equipos
           </span>
-          <span className="text-[0.74rem] font-bold text-landing-gris px-3.5 py-1.5 rounded-full transition-colors cursor-default">
+          <span className="text-[0.72rem] font-bold text-landing-gris px-3 py-1 rounded-full transition-colors cursor-default shrink-0">
             Alertas
           </span>
         </div>
 
         {/* Cuerpo del dashboard */}
-        <div className="p-5 sm:p-6">
+        <div className="p-4 sm:p-5">
           <div className="flex justify-between items-baseline gap-2 mb-2.5">
-            <span className="text-[0.66rem] font-extrabold tracking-wider text-landing-gris2 uppercase">
+            <span className="text-[0.62rem] sm:text-[0.66rem] font-extrabold tracking-wider text-landing-gris2 uppercase">
               TRABAJADORES EN TODOS TUS CONTRATOS
             </span>
-            <b className="text-[0.78rem] text-landing-ink font-extrabold">
+            <b className="text-[0.72rem] sm:text-[0.78rem] text-landing-ink font-extrabold whitespace-nowrap">
               184 trabajadores · 12 contratos
             </b>
           </div>
 
-          {/* Grilla de KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
-            <div className="bg-landing-soft rounded-xl p-3 border border-landing-linea/60">
-              <b className="block text-xl font-extrabold text-landing-verde">142</b>
-              <span className="flex items-center gap-1.5 text-[0.64rem] font-bold text-landing-gris">
-                <i className="w-2 h-2 rounded-full bg-landing-verde inline-block shrink-0" />
+          {/* Grilla de KPIs en 4 columnas fijas horizontales */}
+          <div className="grid grid-cols-4 gap-2 sm:gap-2.5 mb-4">
+            <div className="bg-landing-soft rounded-xl p-2 sm:p-2.5 border border-landing-linea/60 text-center sm:text-left">
+              <b className="block text-lg sm:text-xl font-extrabold text-landing-verde">142</b>
+              <span className="inline-flex sm:flex items-center justify-center sm:justify-start gap-1 text-[0.62rem] sm:text-[0.66rem] font-bold text-landing-gris truncate">
+                <i className="w-1.5 h-1.5 rounded-full bg-landing-verde inline-block shrink-0" />
                 Acreditados
               </span>
             </div>
-            <div className="bg-landing-soft rounded-xl p-3 border border-landing-linea/60">
-              <b className="block text-xl font-extrabold text-landing-azul">27</b>
-              <span className="flex items-center gap-1.5 text-[0.64rem] font-bold text-landing-gris">
-                <i className="w-2 h-2 rounded-full bg-landing-azul inline-block shrink-0" />
+            <div className="bg-landing-soft rounded-xl p-2 sm:p-2.5 border border-landing-linea/60 text-center sm:text-left">
+              <b className="block text-lg sm:text-xl font-extrabold text-landing-azul">27</b>
+              <span className="inline-flex sm:flex items-center justify-center sm:justify-start gap-1 text-[0.62rem] sm:text-[0.66rem] font-bold text-landing-gris truncate">
+                <i className="w-1.5 h-1.5 rounded-full bg-landing-azul inline-block shrink-0" />
                 En proceso
               </span>
             </div>
-            <div className="bg-landing-soft rounded-xl p-3 border border-landing-linea/60">
-              <b className="block text-xl font-extrabold text-landing-ambar">9</b>
-              <span className="flex items-center gap-1.5 text-[0.64rem] font-bold text-landing-gris">
-                <i className="w-2 h-2 rounded-full bg-landing-ambar inline-block shrink-0" />
+            <div className="bg-landing-soft rounded-xl p-2 sm:p-2.5 border border-landing-linea/60 text-center sm:text-left">
+              <b className="block text-lg sm:text-xl font-extrabold text-landing-ambar">9</b>
+              <span className="inline-flex sm:flex items-center justify-center sm:justify-start gap-1 text-[0.62rem] sm:text-[0.66rem] font-bold text-landing-gris truncate">
+                <i className="w-1.5 h-1.5 rounded-full bg-landing-ambar inline-block shrink-0" />
                 Vencidos
               </span>
             </div>
-            <div className="bg-landing-soft rounded-xl p-3 border border-landing-linea/60">
-              <b className="block text-xl font-extrabold text-landing-rojo">6</b>
-              <span className="flex items-center gap-1.5 text-[0.64rem] font-bold text-landing-gris">
-                <i className="w-2 h-2 rounded-full bg-landing-rojo inline-block shrink-0" />
+            <div className="bg-landing-soft rounded-xl p-2 sm:p-2.5 border border-landing-linea/60 text-center sm:text-left">
+              <b className="block text-lg sm:text-xl font-extrabold text-landing-rojo">6</b>
+              <span className="inline-flex sm:flex items-center justify-center sm:justify-start gap-1 text-[0.62rem] sm:text-[0.66rem] font-bold text-landing-gris truncate">
+                <i className="w-1.5 h-1.5 rounded-full bg-landing-rojo inline-block shrink-0" />
                 Bloqueados
               </span>
             </div>
