@@ -100,6 +100,14 @@ export default function AlertasPage() {
           <SettingsIcon /> Configurar notificaciones
         </button>
       </div>
+      <div className="mb-2">
+        <button
+          onClick={(e) => { e.preventDefault(); (window as any).setAppRoute?.("/dashboard"); }}
+          className="text-sm font-semibold text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          ← Volver a Inicio
+        </button>
+      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

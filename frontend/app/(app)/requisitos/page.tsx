@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import * as Api from "@/lib/cliente";
+import { abrirDescarga } from "@/lib/api";
 import type { RequisitoFila, Ambito, TipoRequisito, EstadoCalc } from "@/lib/tipos";
 
 type RequisitoFilaExt = RequisitoFila & {
@@ -324,9 +325,23 @@ export default function RequisitosPage() {
     }
   };
 
-  const handleExportar = () => {
-    const url = `${Api.getBaseUrl()}/api/v1/reportes/exportar?recurso=requisitos`;
-    window.open(url, "_blank");
+  const handleExportar = async () => {
+    try {
+      const r = await Api.exportaciones.crear({ recurso: "requisitos", filtros: {} });
+      if (!r.download_url) {
+        // 202: por encima de EXPORT_FILAS_MAX el job queda encolado
+        (window as any).toast?.("Exportación en proceso. Te avisaremos cuando esté lista.");
+        return;
+      }
+      // anchor cruzado tras await no descarga fiable; pasamos el archivo a blob
+      const res = await fetch(r.download_url);
+      if (!res.ok) throw new Error("No se pudo generar el archivo (" + res.status + ")");
+      const url = URL.createObjectURL(await res.blob());
+      abrirDescarga(url, r.filename);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err: any) {
+      (window as any).toast?.(err.message || "Error al generar la exportación");
+    }
   };
 
   const startIndex = (currentPage - 1) * pageSize + 1;

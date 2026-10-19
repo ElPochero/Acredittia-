@@ -153,7 +153,13 @@ export default function Sidebar({
         {/* Company Selector */}
         <div
           className="orgsw"
-          onClick={() => alert("Cambiar de empresa — demo")}
+          onClick={(e) => {
+            if (esAdmin) {
+              handleNav(e, "/admin");
+            } else {
+              (window as any).toast?.("El cambio de empresa está disponible solo para administradores.");
+            }
+          }}
         >
           <span className="orgic">⛏️</span>
           <span className="orgnm" id="dyn-orgname">
