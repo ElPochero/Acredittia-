@@ -41,6 +41,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (pathname) setActiveRoute(pathname);
+    // H-09: cada cambio de módulo arranca en la parte superior de la vista
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }, [pathname]);
 
   useEffect(() => {

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import * as Api from "@/lib/cliente";
 
 const ITEMS = [
@@ -90,6 +91,14 @@ export default function Sidebar({
     return currentRoute.startsWith(href);
   };
 
+  // Tooltip fuera del sidebar: el pseudo-elemento CSS se recortaba contra el
+  // overflow del carril (H-02). Se posiciona por rect en un portal al body.
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const mostrarTip = (e: React.MouseEvent, texto: string) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setTip({ text: texto, x: r.right + 10, y: r.top + r.height / 2 });
+  };
+
   return (
     <>
       <aside className={`side ${isOpen ? "mob-open" : ""}`}>
@@ -174,9 +183,10 @@ export default function Sidebar({
             <Link
               href="/admin"
               onClick={(e) => handleNav(e, "/admin")}
+              onMouseEnter={(e) => mostrarTip(e, "Panel admin")}
+              onMouseLeave={() => setTip(null)}
               className={`snavi ${isItemActive("/admin") ? "active" : ""}`}
-              title="Panel admin"
-              data-tooltip="Panel admin"
+              aria-label="Panel admin"
             >
               <span className="ico">🛡️</span>Panel admin
             </Link>
@@ -187,9 +197,10 @@ export default function Sidebar({
                 key={i.href}
                 href={i.href}
                 onClick={(e) => handleNav(e, i.href)}
+                onMouseEnter={(e) => mostrarTip(e, i.nombre)}
+                onMouseLeave={() => setTip(null)}
                 className={`snavi ${isItemActive(i.href) ? "active" : ""}`}
-                title={i.nombre}
-                data-tooltip={i.nombre}
+                aria-label={i.nombre}
               >
                 <span className="ico">{i.icono}</span>
                 {i.nombre}
@@ -205,27 +216,30 @@ export default function Sidebar({
           <Link
             href="/config"
             onClick={(e) => handleNav(e, "/config")}
+            onMouseEnter={(e) => mostrarTip(e, "Configuración")}
+            onMouseLeave={() => setTip(null)}
             className={`snavi ${isItemActive("/config") ? "active" : ""}`}
-            title="Configuración"
-            data-tooltip="Configuración"
+            aria-label="Configuración"
           >
             <span className="ico">⚙️</span>Configuración
           </Link>
           <a
             className="snavi"
             onClick={() => alert("Centro de ayuda — próximamente")}
+            onMouseEnter={(e) => mostrarTip(e, "Ayuda")}
+            onMouseLeave={() => setTip(null)}
             style={{ cursor: "pointer" }}
-            title="Ayuda"
-            data-tooltip="Ayuda"
+            aria-label="Ayuda"
           >
             <span className="ico">❓</span>Ayuda
           </a>
           <a
             className="snavi snavi-logout"
             onClick={salir}
+            onMouseEnter={(e) => mostrarTip(e, "Cerrar sesión")}
+            onMouseLeave={() => setTip(null)}
             style={{ cursor: "pointer" }}
-            title="Cerrar sesión"
-            data-tooltip="Cerrar sesión"
+            aria-label="Cerrar sesión"
           >
             <span className="ico">🚪</span>Cerrar sesión
           </a>
@@ -238,6 +252,13 @@ export default function Sidebar({
           onClick={onClose}
           style={{ display: "block" }}
         ></div>
+      )}
+
+      {tip && createPortal(
+        <div className="snav-tip" style={{ position: "fixed", left: tip.x, top: tip.y }}>
+          {tip.text}
+        </div>,
+        document.body,
       )}
     </>
   );
