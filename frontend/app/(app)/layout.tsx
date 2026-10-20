@@ -178,7 +178,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div style={{ display: isMatch("/calendario") ? "block" : "none" }}><CalendarioPage /></div>
           <div style={{ display: isMatch("/integraciones") ? "block" : "none" }}><IntegracionesPage /></div>
           <div style={{ display: isMatch("/config") ? "block" : "none" }}><ConfigPage /></div>
-          <div style={{ display: isMatch("/admin") ? "block" : "none" }}><AdminPage /></div>
+          {isMatch("/admin") && <AdminPage />}
           <div style={{ display: isMatch("/certificacion-laboral") ? "block" : "none" }}><CertificacionLaboralPage /></div>
           {!isKnown && children}
         </div>

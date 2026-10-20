@@ -456,12 +456,18 @@ def _reutilizar_documentos(db: Session, cid: uuid.UUID, s_new: Sujeto) -> int:
     usados = 0
     for tid, fuente in fuentes.items():
         dest = faltantes[tid]
+        # Sólo copiamos si los bytes del archivo fuente existen: los datos
+        # semilla pueden marcar documentos `ok` con un blob_path sin archivo
+        # real, y fallar aquí rompería la importación completa.
+        filas = [(a, make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename))
+                 for a in fuente.archivos if storage.exists(a.blob_path)]
+        if not filas:
+            continue
         dest.estado = "ok"
         dest.vence = fuente.vence
         dest.updated_at = ahora
         dest.estado_calc = calc_estado_doc(dest)
-        for a in fuente.archivos:
-            ruta = make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename)
+        for a, ruta in filas:
             storage.save(ruta, storage.read(a.blob_path))
             db.add(DocumentoArchivo(
                 company_id=cid, documento_id=dest.id, filename=a.filename,

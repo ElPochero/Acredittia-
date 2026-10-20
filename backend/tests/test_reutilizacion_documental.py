@@ -123,3 +123,33 @@ def test_importar_esta_persona_en_dos_contratos_es_idempotente(
                          headers=empresa_a["headers"], json={"sujetos_ids": [s1]})
     assert r.json()["importados"] == 0
     assert r.status_code == 200, r.text
+
+
+def test_importar_con_blob_fuente_inexistente_no_rompe_la_importacion(
+        app_cliente, empresa_a, dos_contratos, monkeypatch):
+    """Los datos semilla pueden marcar documentos `ok` con un blob_path sin
+    archivo real: la importación los ignora (500 sería un bug) y esos
+    documentos siguen `falta` en el contrato destino hasta subirse de nuevo."""
+    from app.services.storage import LocalStorage
+
+    c1, c2 = dos_contratos
+    s1 = _alta(app_cliente, empresa_a, c1["id"])["id"]
+    ced1 = _cedula_vigente(app_cliente, empresa_a, s1)
+
+    monkeypatch.setattr(LocalStorage, "read",
+                        lambda self, p: (_ for _ in ()).throw(
+                            FileNotFoundError(2, "sin archivo", p)))
+    monkeypatch.setattr(LocalStorage, "exists", lambda self, p: False)
+
+    r = app_cliente.post(f"{API}/contratos/{c2['id']}/personal/importar",
+                         headers=empresa_a["headers"], json={"sujetos_ids": [s1]})
+    assert r.status_code == 200, r.text
+    assert r.json()["documentos_reutilizados"] == 0
+
+    r = app_cliente.get(f"{API}/contratos/{c2['id']}/personal",
+                        headers=empresa_a["headers"], params={"search": "1911246"})
+    s2 = r.json()["items"][0]["id"]
+    ced2 = next(d for d in _docs(app_cliente, empresa_a, s2)
+                if _sdc(d["titulo"]) == _sdc(ced1["titulo"]))
+    assert ced2["estado"] == "falta"
+    assert ced2["archivos_count"] == 0

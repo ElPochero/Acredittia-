@@ -16,7 +16,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   const [personal, setPersonal] = useState<Api.Pagina<Sujeto> | null>(null);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
-  const [vista, setVista] = useState<'lista' | 'cuadricula'>('lista');
+  const [vista, setVista] = useState<'lista' | 'cuadricula' | 'hoja'>('lista');
   const [showAddWorker, setShowAddWorker] = useState(false);
   const [newWorker, setNewWorker] = useState<TrabajadorIn>({
     nombre: "",
@@ -174,7 +174,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   const ESTADO_LBL: Record<string, string> = { ok: "Acreditado", venc: "Vencido", baja: "Suspendido", proc: "Por acreditar", falta: "Por acreditar" };
   const acredLblDe = (pct: number) => (pct >= 70 ? "Completa" : pct >= 40 ? "Incompleta" : "Sin acreditar");
   const plataformasFila = plataformas.map((p) => p.nombre).filter(Boolean);
-  const chipsFila = plataformasFila.length ? plataformasFila.slice(0, 2) : ["siga", "WC"];
+  const chipsFila = plataformasFila.slice(0, 2);
 
   // Opciones derivadas de la propia lista de trabajadores.
   const opcionesEstado = Array.from(new Set(list.map((s) => s.estado))).filter(Boolean);
@@ -255,6 +255,12 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
               >
                 <span className="text-sm">⊞</span> Cuadrícula
               </button>
+              <button 
+                onClick={() => setVista('hoja')}
+                className={`px-3 h-full font-bold text-[0.75rem] rounded-md flex items-center justify-center gap-1.5 transition-colors ${vista === 'hoja' ? 'bg-white text-slate-800 shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
+              >
+                <span className="text-sm">▦</span> Hoja de cálculo
+              </button>
             </div>
             <button onClick={descargarExcel} className="h-[34px] px-3 bg-white border border-slate-200 text-emerald-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -266,7 +272,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
             <button onClick={abrirImportar} className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5">
               ↓ Desde listado general
             </button>
-            <button className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
+            <button onClick={handleSubirDocumento} className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
               ↑ Subir documento
             </button>
           </div>
@@ -312,6 +318,54 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
 
           {cargando ? (
             <div className="p-8 text-center text-slate-500 text-sm">Cargando personal...</div>
+          ) : vista === 'hoja' ? (
+            <div className="overflow-x-auto overflow-y-auto max-h-[520px] rounded-xl border border-slate-200 bg-white shadow-sm mb-4">
+              <table className="w-full min-w-[860px] text-left border-collapse border border-slate-300">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-300 text-[0.62rem] text-slate-600 font-bold uppercase tracking-wider">
+                    <th className="p-1.5 border-r border-slate-300 text-center w-7">#</th>
+                    <th className="p-1.5 pl-2 border-r border-slate-300 whitespace-nowrap">Nombre</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">RUT</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">Cargo</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">Conduce</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">Faena</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">Estado</th>
+                    <th className="p-1.5 border-r border-slate-300 whitespace-nowrap">Acreditación</th>
+                    <th className="p-1.5 whitespace-nowrap">Ficha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibles.map((s, i) => {
+                    const pctNum = s.stats?.cumplimiento_pct || 0;
+                    const estLbl = s.estado === 'ok' ? 'Acreditado' : s.estado === 'venc' ? 'Vencido' : s.estado === 'baja' ? 'Suspendido' : 'Por acreditar';
+                    return (
+                      <tr key={s.id} className={`border-b border-slate-200 text-[0.7rem] ${i % 2 ? 'bg-slate-50/50' : 'bg-white'} hover:bg-amber-50/60 transition-colors`}>
+                        <td className="p-1.5 border-r border-slate-200 text-center text-slate-400">{i + 1}</td>
+                        <td className="p-1.5 pl-2 border-r border-slate-200">
+                          <Link href={`/personal/${s.id}`} className="font-bold text-blue-700 hover:underline">{s.nombre}</Link>
+                        </td>
+                        <td className="p-1.5 border-r border-slate-200 text-slate-600 whitespace-nowrap">{s.rut}</td>
+                        <td className="p-1.5 border-r border-slate-200 text-slate-700 whitespace-nowrap">{s.cargo}</td>
+                        <td className="p-1.5 border-r border-slate-200 text-center">{s.es_conductor ? 'Sí' : 'No'}</td>
+                        <td className="p-1.5 border-r border-slate-200 text-slate-700 whitespace-nowrap">{contrato.faena?.nombre}</td>
+                        <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{estLbl}</td>
+                        <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{acredLblDe(pctNum)} ({pctNum}%)</td>
+                        <td className="p-1.5 whitespace-nowrap">
+                          <Link href={`/personal/${s.id}`} className="text-blue-600 font-bold hover:underline">Ver ficha</Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {visibles.length === 0 && !cargando && (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-500 text-sm border border-slate-300">
+                        {list.length === 0 ? "Sin personal registrado" : "Sin resultados para los filtros aplicados"}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           ) : vista === 'lista' ? (
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm mb-4">
               <table className="w-full min-w-[1100px] text-left border-collapse">
@@ -325,8 +379,6 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                     <th className="p-4 whitespace-nowrap">Plataformas</th>
                     <th className="p-4 whitespace-nowrap">Estado</th>
                     <th className="p-4 whitespace-nowrap">Acreditación</th>
-                    <th className="p-4 whitespace-nowrap">Vencimiento</th>
-                    <th className="p-4 whitespace-nowrap">Últ. Actualización</th>
                     <th className="p-4 text-center pr-5 whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
@@ -392,24 +444,17 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                             {acredLbl}
                           </span>
                         </td>
-                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5 whitespace-nowrap">2026-10-28</td>
-                        <td className="p-4 text-[0.75rem] text-slate-500 font-medium align-top pt-5 whitespace-nowrap">Hoy</td>
-                        <td className="p-4 align-top pt-3 pr-5">
-                          <div className="flex flex-col items-center justify-center gap-1.5 min-w-[65px] mx-auto">
-                            <Link href={`/personal/${s.id}`} className="text-[0.7rem] text-blue-600 font-bold hover:bg-[#E0E7FF] bg-[#EEF2FF] w-full text-center py-1.5 rounded-lg leading-tight transition-colors">
-                              Ver perfil
-                            </Link>
-                            <button className="w-full h-[22px] rounded-lg bg-[#EEF2FF] hover:bg-[#E0E7FF] flex items-center justify-center text-blue-400 hover:text-blue-600 transition-colors">
-                              <span className="text-xs pb-2 tracking-widest font-bold">...</span>
-                            </button>
-                          </div>
+                        <td className="p-4 align-top pt-4 pr-5">
+                          <Link href={`/personal/${s.id}`} className="text-[0.7rem] text-blue-600 font-bold hover:bg-[#E0E7FF] bg-[#EEF2FF] w-full text-center py-1.5 rounded-lg leading-tight transition-colors block">
+                            Ver perfil
+                          </Link>
                         </td>
                       </tr>
                     );
                   })}
                   {visibles.length === 0 && !cargando && (
                     <tr>
-                      <td colSpan={11} className="p-6 text-center text-slate-500 text-sm">
+                      <td colSpan={9} className="p-6 text-center text-slate-500 text-sm">
                         {list.length === 0 ? "Sin personal registrado" : "Sin resultados para los filtros aplicados"}
                       </td>
                     </tr>
@@ -417,7 +462,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : vista === 'cuadricula' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
               {visibles.map(s => {
                 const pct = s.stats?.cumplimiento_pct || 0;
@@ -431,9 +476,6 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                         </Link>
                         <div className="text-[0.7rem] text-slate-500">{s.rut}</div>
                       </div>
-                      <button className="w-6 h-6 rounded-md hover:bg-slate-50 border border-transparent hover:border-slate-200 flex items-center justify-center text-slate-400 transition-all">
-                        <span className="text-xs pb-1.5 tracking-widest font-bold">...</span>
-                      </button>
                     </div>
                     
                     <div className="text-[0.8rem] font-medium text-slate-700 mb-2 truncate">{s.cargo}</div>
@@ -454,7 +496,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         
         {personal && personal.total_pages > 1 && (
           <div className="flex justify-between items-center bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm text-[0.8rem]">
