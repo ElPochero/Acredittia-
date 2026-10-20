@@ -7,11 +7,17 @@ import LandingProblema from "./LandingProblema";
 import LandingPlataforma from "./LandingPlataforma";
 import LandingParaQuien from "./LandingParaQuien";
 import LandingStats from "./LandingStats";
+import LandingFunciones from "./LandingFunciones";
+import LandingAlertas from "./LandingAlertas";
+import LandingIndustrias from "./LandingIndustrias";
+import LandingFaenas from "./LandingFaenas";
+import LandingAgentes from "./LandingAgentes";
 import { LANDING_SECTIONS } from "./sections";
 
 /**
- * LandingPage — Orquestador de la landing con diseño alternativo (Día 2).
- * Integra Nav, Hero, Problema, Plataforma, ParaQuién y Stats.
+ * LandingPage — Orquestador de la landing con diseño alternativo (Día 3).
+ * Integra Nav, Hero, Problema, Plataforma, ParaQuién, Stats, Funciones, Alertas,
+ * Industrias, Faenas y Agentes.
  */
 export default function LandingPage() {
   return (
@@ -23,11 +29,17 @@ export default function LandingPage() {
         <LandingPlataforma />
         <LandingParaQuien />
         <LandingStats />
+        <LandingFunciones />
+        <LandingAlertas />
+        <LandingIndustrias />
 
-        {/* Puntos de ancla para enlaces de navegación durante el desarrollo incremental (Días 3 y 4) */}
+        {/* Punto de ancla para flujo (se implementa el Día 4) */}
         <div id={LANDING_SECTIONS.FLUJO} className="scroll-mt-20" />
-        <div id={LANDING_SECTIONS.AGENTES} className="scroll-mt-20" />
-        <div id={LANDING_SECTIONS.FAENAS} className="scroll-mt-20" />
+
+        <LandingFaenas />
+        <LandingAgentes />
+
+        {/* Puntos de ancla para enlaces de navegación durante el desarrollo incremental (Días 4 y 5) */}
         <div id={LANDING_SECTIONS.BENEFICIADOS} className="scroll-mt-20" />
         <div id={LANDING_SECTIONS.CONTACT} className="scroll-mt-20" />
       </main>
