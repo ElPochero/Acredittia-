@@ -308,6 +308,11 @@ export const contratos = {
     api<{ importados: number; documentos_creados: number }>(
       `/contratos/${id}/equipos/importar`, { body: { sujetos_ids } }),
 
+  /** Reasigna personal de la empresa a este contrato; reutiliza documentos vigentes. */
+  importarPersonal: (id: string, sujetos_ids: string[]) =>
+    api<{ importados: number; documentos_creados: number; documentos_reutilizados: number }>(
+      `/contratos/${id}/personal/importar`, { body: { sujetos_ids } }),
+
   alertas: (id: string, params?: ParamsPagina & {
     severidad?: string; origen?: string; solo_activas?: boolean;
   }) => api<Pagina<Alerta>>(`/contratos/${id}/alertas`, { query: q(params) }),

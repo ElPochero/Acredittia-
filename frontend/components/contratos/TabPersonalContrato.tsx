@@ -32,6 +32,40 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   const [errorRut, setErrorRut] = useState<string | null>(null);
   const [errorForm, setErrorForm] = useState<string | null>(null);
 
+  // Re-asignación desde el listado maestro de la empresa (Feedback punto 2).
+  const [showImportar, setShowImportar] = useState(false);
+  const [maestro, setMaestro] = useState<Sujeto[]>([]);
+  const [selImportar, setSelImportar] = useState<Set<string>>(new Set());
+  const [importando, setImportando] = useState(false);
+
+  const abrirImportar = async () => {
+    setShowImportar(true);
+    try {
+      const res = await Api.personal.listar({ page_size: 100 });
+      const enContrato = new Set(list.map(s => s.rut));
+      setMaestro((res.items || []).map(s => s.rut && enContrato.has(s.rut) ? null : s)
+        .filter(Boolean) as Sujeto[]);
+    } catch (e: any) {
+      toast.error(e.message || "Error al cargar el listado general");
+    }
+  };
+
+  const aplicarImportar = async () => {
+    if (!selImportar.size || importando) return;
+    setImportando(true);
+    try {
+      const out = await Api.contratos.importarPersonal(contrato.id, Array.from(selImportar));
+      toast.success(`Importados ${out.importados} trabajadores · ${out.documentos_reutilizados} documentos reutilizados`);
+      setShowImportar(false);
+      setSelImportar(new Set());
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message || "Error al importar");
+    } finally {
+      setImportando(false);
+    }
+  };
+
   // Filtros de la tabla (en memoria sobre la página cargada).
   const [busqueda, setBusqueda] = useState("");
   const [filtroPlataforma, setFiltroPlataforma] = useState("Todas");
@@ -228,6 +262,9 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
             </button>
             <button onClick={() => setShowAddWorker(true)} className="h-[34px] px-3 bg-blue-600 text-white rounded-lg text-[0.75rem] font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center justify-center gap-1.5">
               + Agregar trabajador
+            </button>
+            <button onClick={abrirImportar} className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5">
+              ↓ Desde listado general
             </button>
             <button className="h-[34px] px-3 bg-white border border-slate-200 text-slate-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
               ↑ Subir documento
@@ -587,6 +624,58 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal abierto={showImportar} titulo="Re-asignar desde el listado general" onCerrar={() => setShowImportar(false)} ancho="max-w-lg">
+        <div className="flex flex-col gap-3">
+          <p className="text-[0.78rem] text-slate-500">
+            Trabajadores de la empresa todavía no asignados a este contrato. Al
+            reasignarlos se reutilizan sus documentos vigentes ya cargados en
+            otros contratos, sin volver a subir los archivos.
+          </p>
+          <div className="max-h-[320px] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {maestro.length === 0 && (
+              <div className="p-4 text-center text-slate-400 text-xs">
+                No hay trabajadores pendientes de asignar a este contrato.
+              </div>
+            )}
+            {maestro.map(s => (
+              <label key={s.id} className="flex items-center gap-3 p-2.5 hover:bg-slate-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4"
+                  checked={selImportar.has(s.id)}
+                  onChange={e => {
+                    const n = new Set(selImportar);
+                    if (e.target.checked) n.add(s.id); else n.delete(s.id);
+                    setSelImportar(n);
+                  }}
+                />
+                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(s.nombre)}&background=random`} alt={s.nombre} className="w-7 h-7 rounded-full object-cover" />
+                <span className="text-[0.8rem] font-semibold text-slate-800">{s.nombre}</span>
+                <span className="text-[0.7rem] text-slate-400">{s.rut}</span>
+                <span className="ml-auto text-[0.7rem] text-slate-500 truncate max-w-[140px]">{s.contrato?.faena || "— Sin asignar"}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 mt-2">
+            <button
+              type="button"
+              onClick={() => setShowImportar(false)}
+              className="px-4 py-2 border border-slate-200 text-slate-600 font-bold text-[0.85rem] rounded-lg hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={aplicarImportar}
+              disabled={importando || selImportar.size === 0}
+              className="px-4 py-2 bg-blue-600 text-white font-bold text-[0.85rem] rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {importando ? "Importando..." : `Asignar ${selImportar.size || ""}`}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

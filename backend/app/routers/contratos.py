@@ -409,6 +409,68 @@ class ImportarPersonalIn(BaseModel):
     sujetos_ids: list[uuid.UUID]
 
 
+def _reutilizar_documentos(db: Session, cid: uuid.UUID, s_new: Sujeto) -> int:
+    """Feedback 17-10 punto 2: los documentos obligatorios VIGENTES de la persona
+    en otros contratos quedan ligados y validados en el registro nuevo, sin que
+    nadie vuelva a subir el archivo.
+
+    Cada copia integra el `documento_destino` del checklist nuevo: el blob se
+    duplica server-side (el índice UNIQUE de `blob_path` impide compartir la
+    fila) pero el contenido es idéntico y el usuario no repite la subida.
+    """
+    from ..models import DocumentoArchivo
+    from ..services.checklist import calc_estado_doc
+    from ..services.storage import get_storage, make_blob_path
+
+    # autoflush=False en `SessionLocal`: los documentos recién instanciados son
+    # pendientes; sin flush explícito la consulta los vería como inexistentes.
+    db.flush()
+
+    faltantes = {
+        d.template_id: d
+        for d in db.scalars(select(Documento).where(
+            Documento.sujeto_id == s_new.id, Documento.template_id.is_not(None),
+            Documento.es_emsipor.is_(False), Documento.estado == "falta"))
+        if d.template_id
+    }
+    if not faltantes:
+        return 0
+
+    otros = select(Sujeto.id).where(
+        Sujeto.company_id == cid, Sujeto.tipo == "trabajador",
+        Sujeto.rut == s_new.rut, Sujeto.id != s_new.id)
+    # El más actualizado por plantilla: si la persona tira dos registros con el
+    # mismo documento, gana la versión más reciente.
+    fuentes: dict[uuid.UUID, Documento] = {}
+    for d in db.scalars(select(Documento).join(DocumentoArchivo,
+            Documento.id == DocumentoArchivo.documento_id).where(
+            Documento.sujeto_id.in_(otros),
+            Documento.template_id.in_(list(faltantes)),
+            Documento.estado == "ok").order_by(Documento.updated_at.desc())):
+        fuentes.setdefault(d.template_id, d)
+    if not fuentes:
+        return 0
+
+    storage = get_storage()
+    ahora = datetime.now(timezone.utc)
+    usados = 0
+    for tid, fuente in fuentes.items():
+        dest = faltantes[tid]
+        dest.estado = "ok"
+        dest.vence = fuente.vence
+        dest.updated_at = ahora
+        dest.estado_calc = calc_estado_doc(dest)
+        for a in fuente.archivos:
+            ruta = make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename)
+            storage.save(ruta, storage.read(a.blob_path))
+            db.add(DocumentoArchivo(
+                company_id=cid, documento_id=dest.id, filename=a.filename,
+                blob_path=ruta, content_type=a.content_type,
+                size_bytes=a.size_bytes, uploaded_by=a.uploaded_by))
+        usados += 1
+    return usados
+
+
 @router.post("/{contrato_id}/personal/importar")
 def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
                       db: Session = Depends(get_db),
@@ -416,17 +478,18 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
                       user: User = Depends(get_current_user)):
     """Importa personal desde nómina u otro contrato copiando el sujeto."""
     from ..services.checklist import instanciar_docs
-    
+
     c = _get_contrato(db, cid, contrato_id, user)
-    
+
     sujetos = db.scalars(select(Sujeto).where(
         Sujeto.company_id == cid,
         Sujeto.id.in_(body.sujetos_ids),
         Sujeto.tipo == "trabajador"
     )).all()
-    
+
     importados = 0
     docs_creados = 0
+    docs_reutilizados = 0
     for s_old in sujetos:
         existe = db.scalar(select(Sujeto.id).where(
             Sujeto.company_id == cid,
@@ -436,7 +499,7 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
         ))
         if existe:
             continue
-            
+
         s_new = Sujeto(
             company_id=cid,
             contrato_id=c.id,
@@ -450,18 +513,20 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
         )
         db.add(s_new)
         db.flush()
-        
+
         n = instanciar_docs(db, cid, "personal", sujeto_id=s_new.id,
                             faena_id=c.faena_id, cargo_id=s_new.cargo_id,
                             contrato_plantilla_id=c.id)
         docs_creados += n
+        docs_reutilizados += _reutilizar_documentos(db, cid, s_new)
         importados += 1
-        
+
     actividad.log(db, cid, "creacion", "personal",
                   f"Importados {importados} trabajadores al contrato '{c.nombre}'",
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
     db.commit()
-    return {"importados": importados, "documentos_creados": docs_creados}
+    return {"importados": importados, "documentos_creados": docs_creados,
+            "documentos_reutilizados": docs_reutilizados}
 
 
 @router.get("/{contrato_id}/personal/{sujeto_id}/docs-reutilizables")

@@ -140,6 +140,12 @@ export default function PersonasPage() {
     );
   });
 
+  // Listado maestro: cuántos contratos tiene asignados cada RUT único.
+  const registrosPorRut = new Map<string, number>();
+  for (const p of personalList) {
+    if (p.rut) registrosPorRut.set(p.rut, (registrosPorRut.get(p.rut) || 0) + 1);
+  }
+
   const total = personalList.length;
   const acreditados = personalList.filter((p) => p.estado === "ok").length;
   const pendientes = personalList.filter((p) => p.estado === "proc" || p.estado === "falta").length;
@@ -237,6 +243,7 @@ export default function PersonasPage() {
               <th className="p-3.5">Trabajador</th>
               <th className="p-3.5">RUT</th>
               <th className="p-3.5">Cargo</th>
+              <th className="p-3.5">Contratos</th>
               <th className="p-3.5">Estado</th>
               <th className="p-3.5 text-right">Acciones</th>
             </tr>
@@ -260,6 +267,11 @@ export default function PersonasPage() {
                   <td className="p-3.5 font-bold text-slate-800">{p.nombre}</td>
                   <td className="p-3.5 text-slate-500">{p.rut || "Sin RUT"}</td>
                   <td className="p-3.5 text-slate-700">{p.cargo || "Sin cargo"}</td>
+                  <td className="p-3.5">
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-600">
+                      {p.rut ? `${registrosPorRut.get(p.rut) || 1} contrato${(registrosPorRut.get(p.rut) || 1) === 1 ? "" : "s"}` : "—"}
+                    </span>
+                  </td>
                   <td className="p-3.5">
                     <span
                       className={`px-2 py-0.5 text-[10px] font-bold rounded ${
