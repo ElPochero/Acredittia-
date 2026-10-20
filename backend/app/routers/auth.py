@@ -162,12 +162,10 @@ def register(body: RegisterIn):
     duplicados como el propio INSERT.
     """
     _valida_password(body.password, status=422)
-    rut_str = body.rut.strip()
-    import re
-    if re.fullmatch(r"\d{7,8}-[\dkK]", rut_str):
-        c = rut_str[:-2]
-        rut_str = f"{c[:-6]}.{c[-6:-3]}.{c[-3:]}-{rut_str[-1]}"
-    if not validar_rut(rut_str):
+    # Mismo RUT canónico que los sujetos: la unicidad de empresa no admite variantes.
+    from ..security import normalizar_rut
+    rut_str = normalizar_rut(body.rut)
+    if not rut_str:
         raise err(422, "RUT_INVALIDO", "RUT inválido; use formato 76.543.210-3")
     with auth_session() as db:
         if db.scalar(select(User).where(User.email == body.email)):

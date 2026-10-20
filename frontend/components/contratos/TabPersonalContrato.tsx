@@ -5,6 +5,7 @@ import * as Api from "@/lib/cliente";
 import { Contrato, PlataformaContrato, Sujeto, TrabajadorIn } from "@/lib/tipos";
 import { Paginador, Modal } from "@/components/ui";
 import { toast } from "sonner";
+import { normalizarRut, validarRut } from "@/lib/rut";
 
 interface TabPersonalContratoProps {
   contrato: Contrato;
@@ -27,6 +28,9 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
     contrato_id: contrato.id
   });
   const [creando, setCreando] = useState(false);
+  // Errores de validación inline bajo cada campo (reemplazan alertas nativas).
+  const [errorRut, setErrorRut] = useState<string | null>(null);
+  const [errorForm, setErrorForm] = useState<string | null>(null);
 
   // Filtros de la tabla (en memoria sobre la página cargada).
   const [busqueda, setBusqueda] = useState("");
@@ -54,8 +58,17 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
 
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorRut(null);
+    setErrorForm(null);
     if (!newWorker.nombre || !newWorker.rut || !newWorker.cargo) {
-      toast.error("Por favor completa los campos obligatorios");
+      if (!newWorker.rut) setErrorRut("Ingrese el RUT del trabajador");
+      if (!newWorker.nombre || !newWorker.cargo) {
+        setErrorForm("Complete nombre y cargo");
+      }
+      return;
+    }
+    if (!validarRut(newWorker.rut)) {
+      setErrorRut("RUT inválido. Puede escribir «19.112.466-9», «19112466-9» o «191124669»");
       return;
     }
     setCreando(true);
@@ -66,7 +79,14 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
       setNewWorker({ nombre: "", rut: "", cargo: "", telefono: "", email: "", es_conductor: false, contrato_id: contrato.id });
       cargar();
     } catch (e: any) {
-      toast.error(e.message || "Error al agregar trabajador");
+      const cod = e.code || "";
+      if (cod === "RUT_INVALIDO" || cod === "RUT_DUPLICADO") {
+        setErrorRut(cod === "RUT_DUPLICADO"
+          ? "Ese RUT ya está registrado en este contrato"
+          : e.message || "RUT inválido");
+      } else {
+        toast.error(e.message || "Error al agregar trabajador");
+      }
     } finally {
       setCreando(false);
     }
@@ -467,14 +487,33 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
       <Modal abierto={showAddWorker} titulo="Agregar Trabajador" onCerrar={() => setShowAddWorker(false)} ancho="max-w-md">
         <form onSubmit={handleAddWorker} className="flex flex-col gap-4">
           <div>
-            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">RUT *</label>
-            <input 
-              type="text" 
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none" 
-              placeholder="Ej. 12.345.678-9" 
+            <label htmlFor="rut_trabajador" className="block text-[0.75rem] font-bold text-slate-700 mb-1">RUT *</label>
+            <input
+              id="rut_trabajador"
+              type="text"
+              aria-invalid={!!errorRut || undefined}
+              aria-describedby={errorRut ? "rut_trabajador_error" : undefined}
+              className={`w-full bg-white border rounded-lg px-3 py-2 text-[0.85rem] text-slate-800 outline-none ${errorRut ? 'border-red-400 ring-1 ring-red-200' : 'border-slate-200 focus:ring-1 focus:ring-blue-300'}`}
+              placeholder="Ej. 19.112.466-9, 19112466-9 o 191124669"
               value={newWorker.rut || ''}
-              onChange={e => setNewWorker({...newWorker, rut: e.target.value})}
+              onChange={e => {
+                setErrorRut(null);
+                setNewWorker({...newWorker, rut: e.target.value});
+              }}
+              onBlur={() => {
+                if (newWorker.rut && !validarRut(newWorker.rut)) {
+                  setErrorRut("RUT inválido. Puede escribir «19.112.466-9», «19112466-9» o «191124669»");
+                }
+              }}
             />
+            {errorRut && (
+              <p id="rut_trabajador_error" role="alert" className="mt-1.5 text-[0.72rem] font-semibold text-red-600">
+                ⚠ {errorRut}
+              </p>
+            )}
+            {errorForm && (
+              <p role="alert" className="mt-1.5 text-[0.72rem] font-semibold text-red-600">⚠ {errorForm}</p>
+            )}
           </div>
           <div>
             <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Nombre Completo *</label>
