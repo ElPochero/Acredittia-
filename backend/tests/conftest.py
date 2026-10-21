@@ -81,6 +81,7 @@ SCRIPTS = [
     "11_rag_pgvector.sql",
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
+    "14_unidad_negocio.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")
@@ -537,9 +538,13 @@ def primer_documento(cliente, empresa, **filtros) -> dict:
 
 def crear_contract_admin(
     cliente, empresa, contrato_id: str, *, email="jefe.contrato@empresa.cl",
-    role="contract_admin", nombre="Jefe de Contrato",
+    role="contract_admin", nombre="Jefe de Contrato", unidad_negocio=None,
 ) -> dict:
-    """Usuario acotado a un contrato, creado por la API de la empresa."""
+    """Usuario acotado a un contrato, creado por la API de la empresa.
+
+    `unidad_negocio` lo convierte en encargado jerárquico de esa unidad: accede
+    automáticamente a todos sus contratos (v14).
+    """
     r = cliente.post(
         f"{API}/company/usuarios",
         headers=empresa["headers"],
@@ -548,6 +553,7 @@ def crear_contract_admin(
             "nombre": nombre,
             "role": role,
             "contrato_id": contrato_id,
+            "unidad_negocio": unidad_negocio,
         },
     )
     assert r.status_code == 201, r.text

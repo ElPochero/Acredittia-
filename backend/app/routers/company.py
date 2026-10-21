@@ -30,6 +30,7 @@ from ..models import (Company, Contrato, Documento, PasswordResetToken,
                       RefreshToken, Sujeto, User)
 from ..security import hash_password
 from ..services import actividad
+from .contratos import UNIDADES_NEGOCIO
 
 logger = logging.getLogger("acredittia.company")
 
@@ -58,6 +59,9 @@ class UsuarioIn(BaseModel):
     email: EmailStr
     role: str = "company"
     contrato_id: uuid.UUID | None = None
+    # Unidad de negocio que lidera (encargado jerárquico). Da acceso automático
+    # a todos los contratos de esa unidad.
+    unidad_negocio: str | None = None
 
 
 class UsuarioPatch(BaseModel):
@@ -65,6 +69,7 @@ class UsuarioPatch(BaseModel):
     role: str | None = None
     contrato_id: uuid.UUID | None = None
     activo: bool | None = None
+    unidad_negocio: str | None = None
 
 
 # ------------------------------------------------------------------ helpers
@@ -125,10 +130,24 @@ def _usuario_out(u: User, contrato_nombre: str | None = None) -> dict:
         "id": str(u.id), "nombre": u.nombre, "email": u.email, "role": u.role,
         "contrato_id": str(u.contrato_id) if u.contrato_id else None,
         "contrato_nombre": contrato_nombre,
+        "unidad_negocio": u.unidad_negocio,
         "activo": u.activo, "status": u.status,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
         "created_at": u.created_at.isoformat(),
     }
+
+
+def _valida_unidad(unidad: str | None) -> str | None:
+    """Normaliza la unidad de negocio del usuario; 400 si no está en el catálogo."""
+    if unidad is None:
+        return None
+    u = unidad.strip()
+    if not u:
+        return None
+    if u not in UNIDADES_NEGOCIO:
+        raise err(400, "UNIDAD_NEGOCIO_INVALIDA",
+                  f"Unidad de negocio debe ser una de: {', '.join(UNIDADES_NEGOCIO)}")
+    return u
 
 
 def _get_company(db: Session, cid: uuid.UUID) -> Company:
@@ -270,6 +289,7 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
     _valida_rol(body.role, body.contrato_id)
     if body.contrato_id:
         _valida_contrato(db, cid, body.contrato_id)
+    unidad = _valida_unidad(body.unidad_negocio)
     # El email es único a nivel de plataforma. La comprobación previa solo
     # alcanza a los usuarios visibles por RLS (la propia empresa); para el resto
     # el 409 lo produce el IntegrityError de más abajo.
@@ -279,6 +299,7 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
     u = User(
         email=str(body.email), nombre=body.nombre, role=body.role,
         company_id=cid, contrato_id=body.contrato_id,
+        unidad_negocio=unidad,
         # Contraseña aleatoria que nadie conoce: la cuenta solo se puede usar
         # después de canjear el token de activación.
         password_hash=hash_password(secrets.token_urlsafe(32)),
@@ -338,6 +359,8 @@ def editar_usuario(uid: uuid.UUID, body: UsuarioPatch,
         u.nombre = data["nombre"]
     if "activo" in data:
         u.activo = data["activo"]
+    if "unidad_negocio" in data:
+        u.unidad_negocio = _valida_unidad(data["unidad_negocio"])
     u.role = role
     u.contrato_id = contrato_id
     u.updated_at = datetime.now(timezone.utc)

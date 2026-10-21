@@ -14,6 +14,8 @@ export default function ContratosPage() {
   const [search, setSearch] = useState("");
   const [estadoFilter, setEstadoFilter] = useState<"Todos" | EstadoVig>("Todos");
   const [faenaFilter, setFaenaFilter] = useState("Todas");
+  const [unidadFilter, setUnidadFilter] = useState("Todas");
+  const [unidades, setUnidades] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [deleteTarget, setDeleteTarget] = useState<Contrato | null>(null);
@@ -35,6 +37,9 @@ export default function ContratosPage() {
 
   useEffect(() => {
     fetchContratos();
+    Api.contratos.unidadesNegocio()
+      .then((r) => setUnidades((r.items || []).map((u) => u.nombre)))
+      .catch(() => setUnidades([]));
   }, []);
 
   const handleDelete = (id: string, nombre: string) => {
@@ -62,13 +67,26 @@ export default function ContratosPage() {
       const match =
         c.nombre?.toLowerCase().includes(term) ||
         c.codigo?.toLowerCase().includes(term) ||
-        c.faena?.nombre?.toLowerCase().includes(term);
+        c.faena?.nombre?.toLowerCase().includes(term) ||
+        c.unidad_negocio?.toLowerCase().includes(term);
       if (!match) return false;
     }
     if (estadoFilter !== "Todos" && estadoVigencia(c) !== estadoFilter) return false;
     if (faenaFilter !== "Todas" && c.faena?.nombre !== faenaFilter) return false;
+    if (unidadFilter !== "Todas" && (c.unidad_negocio || "Sin unidad") !== unidadFilter) return false;
     return true;
   });
+
+  /** Listado agrupado por unidad de negocio (Punto 3 del feedback 17-10). */
+  const grupos = Array.from(
+    filtered.reduce((m, c) => {
+      const k = c.unidad_negocio || "Sin unidad";
+      const arr = m.get(k) || [];
+      arr.push(c);
+      m.set(k, arr);
+      return m;
+    }, new Map<string, Contrato[]>())
+  ).sort((a, b) => a[0].localeCompare(b[0], "es"));
 
   const total = contratosList.length;
   const vig = contratosList.map((c) => estadoVigencia(c));
@@ -160,6 +178,15 @@ export default function ContratosPage() {
             <option key={f} value={f}>{f}</option>
           ))}
         </select>
+        <select className="view-select" value={unidadFilter} onChange={(e) => setUnidadFilter(e.target.value)} aria-label="Unidad de negocio">
+          <option value="Todas">Unidad: Todas</option>
+          {unidades.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+          {filtered.some((c) => !c.unidad_negocio) && (
+            <option value="Sin unidad">Sin unidad</option>
+          )}
+        </select>
       </div>
 
       {error && (
@@ -175,14 +202,33 @@ export default function ContratosPage() {
         </div>
       )}
 
-      {/* Tabla / Tarjetas */}
-      <ContratosTable
-        contratos={filtered}
-        loading={loading}
-        total={total}
-        onDelete={handleDelete}
-        viewMode={viewMode}
-      />
+      {/* Listado agrupado por unidad de negocio */}
+      <div className="mb-3 text-[0.78rem] font-medium text-slate-500">
+        {filtered.length} contrato{filtered.length === 1 ? "" : "s"} en {grupos.length} unidad{grupos.length === 1 ? "" : "es"} de negocio
+      </div>
+      {grupos.map(([unidad, lista]) => (
+        <section key={unidad} className="mb-7">
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <h2 className="m-0 text-[0.92rem] font-bold text-[#1E293B]">{unidad}</h2>
+            <span className="rounded-full bg-indigo-50 text-indigo-700 px-2 py-[2px] text-[0.7rem] font-bold">
+              {lista.length} contrato{lista.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <ContratosTable
+            contratos={lista}
+            loading={loading}
+            total={filtered.length}
+            onDelete={handleDelete}
+            viewMode={viewMode}
+            pie={false}
+          />
+        </section>
+      ))}
+      {!loading && filtered.length === 0 && (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-[0.85rem]">
+          No se encontraron contratos con los filtros actuales.
+        </div>
+      )}
 
       <NuevaModalContrato abierto={isModalOpen} onCerrar={() => setIsModalOpen(false)} onCreado={fetchContratos} />
 

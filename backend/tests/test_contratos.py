@@ -64,6 +64,74 @@ def test_ia_review_de_otra_empresa_no_se_puede_referenciar(
     assert r.status_code == 404
 
 
+# ============================================================================
+# Unidad de negocio (v14): agrupación del listado y acceso del encargado
+# ============================================================================
+def test_la_unidad_de_negocio_se_registra_y_filtra(app_cliente, empresa_a,
+                                                   faena_pelambres):
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Transporte de personal", "faena_id": faena_pelambres["id"],
+        "unidad_negocio": "Transporte de Personal"})
+    assert r.status_code == 201, r.text
+    c = r.json()
+    assert c["unidad_negocio"] == "Transporte de Personal"
+
+    r = app_cliente.get(f"{API}/contratos?unidad_negocio=Transporte%20de%20Personal",
+                        headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert [i["id"] for i in r.json()["items"]] == [c["id"]]
+
+    r = app_cliente.get(f"{API}/contratos/unidades-negocio",
+                        headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert "Transporte de Personal" in [i["nombre"] for i in r.json()["items"]]
+
+
+def test_una_unidad_de_negocio_inventada_se_rechaza(app_cliente, empresa_a,
+                                                    faena_pelambres):
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Sin catálogo", "faena_id": faena_pelambres["id"],
+        "unidad_negocio": "Inventada"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "UNIDAD_NEGOCIO_INVALIDA"
+
+
+def test_el_encargado_de_la_unidad_accede_a_sus_contratos(
+        app_cliente, empresa_a, faena_pelambres):
+    """El encargado jerárquico ve su contrato y los de su unidad, no los demás."""
+    from tests.conftest import crear_contract_admin
+
+    suyo = crear_contrato(app_cliente, empresa_a, faena_pelambres["id"],
+                          nombre="Suyo")
+    mismo = crear_contrato(app_cliente, empresa_a, faena_pelambres["id"],
+                           nombre="Otro de la unidad")
+    otro = crear_contrato(app_cliente, empresa_a, faena_pelambres["id"],
+                          nombre="De otra unidad")
+    app_cliente.patch(f"{API}/contratos/{suyo['id']}", headers=empresa_a["headers"],
+                      json={"unidad_negocio": "Mantención"})
+    app_cliente.patch(f"{API}/contratos/{mismo['id']}", headers=empresa_a["headers"],
+                      json={"unidad_negocio": "Mantención"})
+    app_cliente.patch(f"{API}/contratos/{otro['id']}", headers=empresa_a["headers"],
+                      json={"unidad_negocio": "Obras Civiles"})
+
+    jefe = crear_contract_admin(app_cliente, empresa_a, suyo["id"],
+                                email="jefe.mantencion@empresa.cl",
+                                nombre="Jefe de Mantención",
+                                unidad_negocio="Mantención")
+
+    r = app_cliente.get(f"{API}/contratos", headers=jefe["headers"])
+    assert r.status_code == 200, r.text
+    ids = {i["id"] for i in r.json()["items"]}
+    assert suyo["id"] in ids and mismo["id"] in ids
+    assert otro["id"] not in ids
+
+    # Y el detalle de un contrato de su unidad abre; el de otra unidad, 404.
+    r = app_cliente.get(f"{API}/contratos/{mismo['id']}", headers=jefe["headers"])
+    assert r.status_code == 200, r.text
+    r = app_cliente.get(f"{API}/contratos/{otro['id']}", headers=jefe["headers"])
+    assert r.status_code == 404
+
+
 def test_borrar_el_contrato_purga_sujetos_y_archivos(app_cliente, empresa_a,
                                                     contrato_a):
     from tests.conftest import subir_archivo

@@ -28,8 +28,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..deps import (Page, aplicar_orden, contrato_scope, err, get_company_id,
-                    get_current_user, paginacion, require_contrato, sobre)
+from ..deps import (Page, aplicar_orden, contrato_permitido, contrato_scope, err,
+                    get_company_id, get_current_user, paginacion, sobre)
 from ..models import (
     Actividad, Alerta, Contrato, Documento, DocumentoArchivo, Faena, IaReview,
     Sujeto, User,
@@ -43,6 +43,19 @@ logger = logging.getLogger("acredittia.contratos")
 router = APIRouter(prefix="/contratos", tags=["contratos"])
 
 ESTADOS: tuple[str, ...] = ("vigente", "en_evaluacion", "terminado")
+
+# Unidad de negocio: eje transversal a la faena que agrupa los contratos de una
+# empresa (Transporte de Personal, Mantención, Obras Civiles…). Es un conjunto
+# cerrado y corto, así que vive en el código y no en una tabla.
+UNIDADES_NEGOCIO: tuple[str, ...] = (
+    "Transporte de Personal",
+    "Mantención",
+    "Obras Civiles",
+    "Servicios Generales",
+    "Minería Subterránea",
+    "Explosivos",
+    "Servicios Industriales",
+)
 
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
                    "created_at", "updated_at"}
@@ -58,6 +71,8 @@ class ContratoIn(BaseModel):
     fecha_inicio: date | None = None
     fecha_termino: date | None = None
     renovacion_automatica: bool = False
+    # Unidad de negocio a la que pertenece el contrato (agrupa y da acceso).
+    unidad_negocio: str | None = None
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
@@ -71,6 +86,7 @@ class ContratoPatch(BaseModel):
     fecha_termino: date | None = None
     renovacion_automatica: bool | None = None
     estado: str | None = None
+    unidad_negocio: str | None = None
 
 
 class AnalizarIn(BaseModel):
@@ -83,12 +99,13 @@ class AnalizarIn(BaseModel):
 # ============================================================================
 def _get_contrato(db: Session, cid: uuid.UUID, contrato_id: uuid.UUID,
                   user: User | None = None) -> Contrato:
-    """Contrato de la empresa, o 404. Acota al contract_admin a su contrato."""
-    if user is not None:
-        require_contrato(contrato_id, user)
+    """Contrato de la empresa, o 404. Acota al contract_admin a su contrato
+    o a los de su unidad de negocio (encargado jerárquico)."""
     c = db.get(Contrato, contrato_id)
     if not c or c.company_id != cid:
         raise err(404, "NO_ENCONTRADO", "Contrato no existe")
+    if user is not None and not contrato_permitido(user, c):
+        raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
     return c
 
 
@@ -143,6 +160,7 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
         "renovacion_automatica": c.renovacion_automatica,
+        "unidad_negocio": c.unidad_negocio,
         "origen_ia_review_id": (str(c.origen_ia_review_id)
                                 if c.origen_ia_review_id else None),
         "faena": {"id": str(f.id), "nombre": f.nombre, "mandante": f.mandante,
@@ -156,25 +174,43 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
 # ============================================================================
 # §8.1 — CRUD
 # ============================================================================
+@router.get("/unidades-negocio")
+def unidades_negocio(user: User = Depends(get_current_user)):
+    """Catálogo de unidades de negocio. Va antes que `/{contrato_id}` porque
+    FastAPI resuelve las rutas en orden de declaración."""
+    return {"items": [{"nombre": u} for u in UNIDADES_NEGOCIO]}
+
+
 @router.get("")
 def listar(faena_id: uuid.UUID | None = Query(None),
            estado: str | None = Query(None),
+           unidad_negocio: str | None = Query(None),
            p: Page = Depends(paginacion),
            db: Session = Depends(get_db),
            cid: uuid.UUID = Depends(get_company_id),
            user: User = Depends(get_current_user)):
-    """Contratos de la empresa. Un contract_admin ve únicamente el suyo."""
+    """Contratos de la empresa. Un contract_admin ve únicamente el suyo o los
+    de su unidad de negocio (encargado jerárquico)."""
     if estado and estado not in ESTADOS:
         raise err(400, "ESTADO_INVALIDO",
                   f"Estado debe ser uno de: {', '.join(ESTADOS)}")
     q = select(Contrato).where(Contrato.company_id == cid)
     scope = contrato_scope(user)
-    if scope:
+    unidad = user.unidad_negocio
+    if scope and unidad:
+        # Encargado jerárquico: su contrato + todos los de su unidad.
+        q = q.where(or_(Contrato.id == scope,
+                        Contrato.unidad_negocio == unidad))
+    elif scope:
         q = q.where(Contrato.id == scope)
+    elif unidad:
+        q = q.where(Contrato.unidad_negocio == unidad)
     if faena_id:
         q = q.where(Contrato.faena_id == faena_id)
     if estado:
         q = q.where(Contrato.estado == estado)
+    if unidad_negocio:
+        q = q.where(Contrato.unidad_negocio == unidad_negocio)
     if p.search:
         like = f"%{p.search}%"
         q = q.where(or_(Contrato.nombre.ilike(like), Contrato.codigo.ilike(like)))
@@ -182,6 +218,19 @@ def listar(faena_id: uuid.UUID | None = Query(None),
     q = aplicar_orden(q, Contrato, p.sort, ORDEN_CONTRATOS, "-created_at")
     filas = list(db.scalars(q.offset(p.offset).limit(p.page_size)))
     return sobre([_out(db, c) for c in filas], total, p)
+
+
+def _valida_unidad(unidad: str | None) -> str | None:
+    """Normaliza la unidad de negocio; 400 si no está en el catálogo."""
+    if unidad is None:
+        return None
+    u = unidad.strip()
+    if not u:
+        return None
+    if u not in UNIDADES_NEGOCIO:
+        raise err(400, "UNIDAD_NEGOCIO_INVALIDA",
+                  f"Unidad de negocio debe ser una de: {', '.join(UNIDADES_NEGOCIO)}")
+    return u
 
 
 @router.post("", status_code=201)
@@ -202,6 +251,7 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
     if body.codigo and db.scalar(select(Contrato.id).where(
             Contrato.company_id == cid, Contrato.codigo == body.codigo)):
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+    unidad = _valida_unidad(body.unidad_negocio)
 
     origen = None
     if body.ia_review_id:
@@ -214,6 +264,7 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
                  codigo=body.codigo, fecha_inicio=body.fecha_inicio,
                  fecha_termino=body.fecha_termino,
                  renovacion_automatica=body.renovacion_automatica,
+                 unidad_negocio=unidad,
                  origen_ia_review_id=origen)
     db.add(c)
     try:
@@ -278,6 +329,8 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
                                       Contrato.codigo == data["codigo"],
                                       Contrato.id != c.id)):
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+    if "unidad_negocio" in data:
+        data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
     for k, v in data.items():
         setattr(c, k, v)
     c.updated_at = datetime.now(timezone.utc)

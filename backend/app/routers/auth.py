@@ -131,6 +131,7 @@ def _user_out(u: User, contrato: dict | None = None) -> dict:
         "nombre": u.nombre, "activo": u.activo,
         "contrato_id": str(u.contrato_id) if u.contrato_id else None,
         "contrato": contrato,
+        "unidad_negocio": u.unidad_negocio,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
         "company": {
             "id": str(u.company.id), "nombre": u.company.nombre,

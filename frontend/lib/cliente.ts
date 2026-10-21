@@ -281,8 +281,13 @@ export const cargos = {
 // §4 — contratos
 // ============================================================================
 export const contratos = {
-  listar: (params?: ParamsPagina & { faena_id?: string; estado?: string }) =>
-    api<Pagina<Contrato>>("/contratos", { query: q(params) }),
+  listar: (params?: ParamsPagina & {
+    faena_id?: string; estado?: string; unidad_negocio?: string;
+  }) => api<Pagina<Contrato>>("/contratos", { query: q(params) }),
+
+  /** Catálogo cerrado de unidades de negocio. */
+  unidadesNegocio: () =>
+    api<Conjunto<{ nombre: string }>>("/contratos/unidades-negocio"),
 
   detalle: (id: string) => api<Contrato>(`/contratos/${id}`),
 

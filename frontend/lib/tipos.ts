@@ -105,6 +105,8 @@ export type Usuario = {
   contrato_id: string | null;
   /** Solo viene poblado para roles acotados (`contract_admin`, `visor`). */
   contrato: ContratoResumen | null;
+  /** Unidad de negocio que lidera (encargado jerárquico). */
+  unidad_negocio: string | null;
   last_login_at: string | null;
   company: EmpresaResumen | null;
 };
@@ -363,6 +365,13 @@ export type Proveedor = {
 // ============================================================================
 // Contratos
 // ============================================================================
+
+/** Catálogo cerrado de unidades de negocio (eje transversal a la faena). */
+export type UnidadNegocio =
+  | "Transporte de Personal" | "Mantención" | "Obras Civiles"
+  | "Servicios Generales" | "Minería Subterránea" | "Explosivos"
+  | "Servicios Industriales";
+
 export type StatsContrato = {
   cumplimiento_pct: number;
   personal: { total: number; acreditados: number };
@@ -380,6 +389,8 @@ export type Contrato = {
   fecha_termino: string | null;
   renovacion_automatica: boolean;
   origen_ia_review_id: string | null;
+  /** Unidad de negocio a la que pertenece (agrupa el listado). */
+  unidad_negocio: string | null;
   faena: {
     id: string;
     nombre: string;
@@ -400,6 +411,8 @@ export type ContratoIn = {
   fecha_inicio?: string | null;
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
+  /** Unidad de negocio a la que pertenece el contrato. */
+  unidad_negocio?: string | null;
   /** Job de `POST /contratos/analizar` que originó el alta. */
   ia_review_id?: string | null;
   /** Requisitos propios del contrato fijados por el asistente o a mano (C2a). */
@@ -418,6 +431,7 @@ export type ContratoPatch = {
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
   estado?: EstadoContrato;
+  unidad_negocio?: string | null;
 };
 
 export type CeldaMatriz = {
@@ -890,6 +904,8 @@ export type UsuarioEmpresa = {
   status: EstadoEmpresa;
   contrato_id: string | null;
   contrato?: ContratoResumen | null;
+  /** Unidad de negocio que lidera (encargado jerárquico). */
+  unidad_negocio?: string | null;
   last_login_at: string | null;
   created_at: string | null;
 };
