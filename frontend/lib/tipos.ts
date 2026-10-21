@@ -362,6 +362,30 @@ export type Proveedor = {
   faena_id: string | null;
 };
 
+export type ConversacionAgente = {
+  id: string;
+  mensaje_usuario: string;
+  respuesta_ia: string;
+  created_at: string | null;
+};
+
+export type AvisoAgente = {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  severidad: Severidad;
+  estado: EstadoAlerta;
+  created_at: string | null;
+};
+
+/** `GET /contratos/{id}/agentes`: interacciones del chatbot y avisos WhatsApp. */
+export type AgentesContrato = {
+  contrato_id: string;
+  conversaciones: ConversacionAgente[];
+  avisos_whatsapp: AvisoAgente[];
+  totales: { conversaciones: number; avisos_whatsapp: number };
+};
+
 // ============================================================================
 // Contratos
 // ============================================================================

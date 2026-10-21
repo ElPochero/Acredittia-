@@ -50,10 +50,10 @@ function infoVigencia(c: Contrato): { texto: string; fondo: string; color: strin
 
 const PLATFORM_LOGOS = [
   { m: 'SIGA',           f: '/plat_siga.png' },
-  { m: 'DIRECTIC',       f: '/plat_directic.png' },
+  { m: 'DIRECTIC',       f: '/directic_logo.png' },
   { m: 'SGES',           f: '/plat_sges.png' },
-  { m: 'ACADEMIA',       f: '/plat_academia.png' },
-  { m: 'EMSIPOR',        f: '/plat_emsipor.png' },
+  { m: 'ACADEMIA',       f: '/academia_mlp.png' },
+  { m: 'EMSIPOR',        f: '/logo_emsipor.png' },
   { m: 'WEBCONTROL',     f: '/plat_webcontrol.png' },
   { m: 'METACONTRATAS',  f: '/plat_metacontratas.png' },
   { m: 'META CONTRATAS', f: '/plat_metacontratas.png' },

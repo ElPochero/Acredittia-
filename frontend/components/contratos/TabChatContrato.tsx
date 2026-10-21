@@ -9,7 +9,7 @@ interface TabChatContratoProps {
   contrato: Contrato;
 }
 
-type Msg = { r: "user" | "bot"; t: string; date?: string; card?: Card; pendiente?: boolean; hecho?: "ok" | "no" };
+type Msg = { r: "user" | "bot"; t: string; date?: string; card?: Card; pendiente?: boolean; hecho?: "ok" | "no"; file?: string };
 type Card = { agregados?: Record<string, string[]>; eliminados?: Record<string, string[]> };
 
 const AMBITOS = ["empresa", "personal", "equipos", "licencia"] as const;
@@ -51,6 +51,7 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
   const [segundos, setSegundos] = useState(0);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const archivoRef = useRef<HTMLInputElement>(null);
   const contexto = `contrato_${contrato.id}`;
 
   useEffect(() => {
@@ -100,7 +101,7 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
 
   const sugs = [...SUGS_BASE, personal[0] ? `¿Qué le falta a ${personal[0].nombre}?` : "¿Qué documentos faltan?"];
 
-  const sendMsg = async (texto?: string) => {
+  const enviar = async (texto?: string) => {
     const msg = (texto ?? chatInput).trim();
     if (!msg || isBusy) return;
     setChatInput("");
@@ -132,6 +133,43 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
     } finally {
       setIsBusy(false);
     }
+  };
+
+  /**
+   * Planilla Excel (o pantallazo) al asistente: `ia.py` extrae el texto del
+   * archivo y devuelve los requisitos en la tarjeta de confirmación.
+   */
+  const adjuntar = (file: File) => {
+    if (isBusy) return;
+    const lector = new FileReader();
+    lector.onload = async () => {
+      setChatMsgs((prev) => [...prev, { r: "user", t: "", file: file.name }]);
+      setIsBusy(true);
+      try {
+        const res = await Api.ia.chat({
+          contexto,
+          mensaje: "Analiza el archivo adjunto y extrae los requisitos.",
+          historial: chatMsgs.slice(-10).map((m) => ({
+            role: m.r === "user" ? "user" : "assistant",
+            content: m.t,
+          })),
+          file_name: file.name,
+          file_b64: String(lector.result),
+        });
+        const card: Card | undefined = res.agregados || res.eliminados
+          ? { agregados: res.agregados, eliminados: res.eliminados }
+          : undefined;
+        setChatMsgs((prev) => [
+          ...prev,
+          { r: "bot", t: res.respuesta || "Requisitos detectados en el archivo.", card, pendiente: hayContenido(card) },
+        ]);
+      } catch {
+        setChatMsgs((prev) => [...prev, { r: "bot", t: "No se pudo leer el archivo adjunto." }]);
+      } finally {
+        setIsBusy(false);
+      }
+    };
+    lector.readAsDataURL(file);
   };
 
   const cuenta = (l: Sujeto[], estados: string[]) => l.filter((s) => estados.includes(s.estado)).length;
@@ -216,6 +254,11 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
               {chatMsgs.map((m, i) => (
                 <div key={i} className={`flex ${m.r === "user" ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[88%] text-[0.82rem] leading-relaxed rounded-[14px] px-3 py-2.5 ${m.r === "user" ? "bg-[#3D62F5] text-white rounded-br-[4px]" : "bg-white text-[#1E293B] border border-slate-200 rounded-bl-[4px]"}`}>
+                    {m.file && (
+                      <div className="bg-white/20 rounded-lg px-2.5 py-1.5 font-semibold text-[0.78rem] mb-1">
+                        {/\.(xlsx|xls|csv)$/i.test(m.file) ? "📊" : /\.pdf$/i.test(m.file) ? "📄" : "🖼️"} {m.file}
+                      </div>
+                    )}
                     {m.t}
                     {m.r === "bot" && m.card && hayContenido(m.card) && (
                       <div>
@@ -267,7 +310,7 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
             <button
               key={t}
               disabled={isBusy}
-              onClick={() => sendMsg(t)}
+              onClick={() => enviar(t)}
               className="text-[0.72rem] bg-[#EEF2FF] text-[#1E40AF] px-2.5 py-1 rounded-[20px] hover:bg-blue-100 transition-colors disabled:opacity-60"
             >
               {t}
@@ -276,17 +319,38 @@ export function TabChatContrato({ contrato }: TabChatContratoProps) {
         </div>
 
         <div className="flex items-center gap-1.5 px-3 py-2.5">
+          <button
+            type="button"
+            aria-label="Adjuntar planilla Excel, PDF o pantallazo"
+            title="Adjuntar planilla Excel, PDF o pantallazo"
+            onClick={() => archivoRef.current?.click()}
+            disabled={isBusy || loadingHistory}
+            className="w-9 h-9 flex items-center justify-center rounded-[10px] border border-slate-200 text-[1rem] bg-slate-50 hover:bg-slate-100 transition-colors disabled:opacity-50"
+          >
+            📎
+          </button>
+          <input
+            ref={archivoRef}
+            type="file"
+            accept=".xlsx,.xls,.csv,.pdf,image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) adjuntar(f);
+            }}
+          />
           <input
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); sendMsg(); } }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enviar(); } }}
             placeholder="Escribe una pregunta o una instrucción para este contrato…"
             className="flex-1 px-3 py-[9px] border border-slate-200 rounded-[10px] text-[0.84rem] outline-none focus:border-blue-500"
             disabled={isBusy || loadingHistory}
           />
           <button
             className="px-[14px] py-[8px] bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors disabled:opacity-50"
-            onClick={() => sendMsg()}
+            onClick={() => enviar()}
             disabled={!chatInput.trim() || isBusy || loadingHistory}
           >
             Enviar

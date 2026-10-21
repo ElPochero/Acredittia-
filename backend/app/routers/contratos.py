@@ -862,6 +862,60 @@ def enviar_mail(contrato_id: uuid.UUID, body: MailIn,
             "modo": modo, "enviados": enviados}
 
 
+@router.get("/{contrato_id}/agentes")
+def agentes_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Historial de interacciones del chatbot con el contrato (pestaña Agentes).
+
+    Lo que la plataforma guarda de verdad son dos fuentes: las conversaciones
+    del asistente (`chat_historial` del contexto del contrato) y los avisos que
+    el canal de WhatsApp dejó en las alertas del contrato. Se devuelven
+    separadas para que la pantalla no mezcle una conversación con un aviso.
+    """
+    from ..models import ChatHistorial
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    conversaciones = list(db.scalars(
+        select(ChatHistorial)
+        .where(ChatHistorial.company_id == cid,
+               ChatHistorial.contexto == f"contrato_{c.id}")
+        .order_by(ChatHistorial.created_at.desc())
+        .limit(100)
+    ))
+
+    avisos = list(db.scalars(
+        select(Alerta)
+        .where(Alerta.company_id == cid, Alerta.contrato_id == c.id,
+               Alerta.plataforma == "whatsapp")
+        .order_by(Alerta.created_at.desc())
+        .limit(100)
+    ))
+
+    return {
+        "contrato_id": str(c.id),
+        "conversaciones": [{
+            "id": str(h.id),
+            "mensaje_usuario": h.mensaje_usuario,
+            "respuesta_ia": h.respuesta_ia,
+            "created_at": h.created_at.isoformat() if h.created_at else None,
+        } for h in conversaciones],
+        "avisos_whatsapp": [{
+            "id": str(a.id),
+            "titulo": a.titulo,
+            "descripcion": a.descripcion,
+            "severidad": a.severidad,
+            "estado": a.estado,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        } for a in avisos],
+        "totales": {
+            "conversaciones": len(conversaciones),
+            "avisos_whatsapp": len(avisos),
+        },
+    }
+
+
 @router.get("/{contrato_id}/historial")
 def historial_contrato(contrato_id: uuid.UUID,
                        modulo: str | None = Query(None),

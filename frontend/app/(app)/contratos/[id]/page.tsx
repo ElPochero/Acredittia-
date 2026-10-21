@@ -20,8 +20,9 @@ import { CorreosContratoModal } from "@/components/contratos/CorreosContratoModa
 import { ContratoLayout } from "@/components/contratos/ContratoLayout";
 import { TabResumen } from "@/components/contratos/TabResumen";
 import { TabChatContrato } from "@/components/contratos/TabChatContrato";
+import { TabAgentesContrato } from "@/components/contratos/TabAgentesContrato";
 
-import { Tab, TABS } from "@/components/contratos/ContratoTabs";
+import { Tab, TABS, slugTab, tabDesdeSlug } from "@/components/contratos/ContratoTabs";
 
 
 export default function ContratoDetalle() {
@@ -29,7 +30,11 @@ export default function ContratoDetalle() {
   const router = useRouter();
   const [c, setC] = useState<Contrato | null>(null);
   const [tab, setTab] = useState<Tab>("Resumen");
-  const [page, setPage] = useState(1);
+  /** Pestañas ya visitadas: se quedan montadas (ocultas) para no perder su estado. */
+  const [vistas, setVistas] = useState<Tab[]>(["Resumen"]);
+  const [pageDocs, setPageDocs] = useState(1);
+  const [pageAlertas, setPageAlertas] = useState(1);
+  const [pageHist, setPageHist] = useState(1);
   const [docs, setDocs] = useState<Pagina<Documento> | null>(null);
   const [plataformas, setPlataformas] = useState<PlataformaContrato[]>([]);
   const [alertas, setAlertas] = useState<Pagina<Alerta> | null>(null);
@@ -54,13 +59,26 @@ export default function ContratoDetalle() {
   useEffect(cargar, [cargar]);
 
   const cargarDocs = useCallback(() => {
-    Api.contratos.documentos(id, { page, page_size: 50 })
+    Api.contratos.documentos(id, { page: pageDocs, page_size: 50 })
       .then(setDocs).catch((e) => setError(Api.mensajeError(e)));
-  }, [id, page]);
+  }, [id, pageDocs]);
 
   const [tipoHist, setTipoHist] = useState("");
   const [moduloHist, setModuloHist] = useState("");
   const [qHist, setQHist] = useState("");
+
+  // La pestaña se refleja en la URL (`?tab=…`): el enlace es compartible y un
+  // recargado vuelve a la misma sección. Se lee del `window` porque la página es
+  // cliente y `useSearchParams` obligaría a envolverla en un `Suspense`.
+  useEffect(() => {
+    const t = tabDesdeSlug(new URLSearchParams(window.location.search).get("tab"));
+    if (t && t !== tab) {
+      setTab(t);
+      setVistas((v) => (v.includes(t) ? v : [...v, t]));
+    }
+    // Solo al montar: después manda el estado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cada pestaña consume su propio endpoint del contrato (§4): ya no hace falta
   // pedir /alertas o /dashboard/actividad y filtrar en el navegador.
@@ -69,17 +87,37 @@ export default function ContratoDetalle() {
     const fallo = (e: unknown) => setError(Api.mensajeError(e));
     Api.plataformas.listar(id).then(res => setPlataformas(res.items || [])).catch(fallo);
     if (tab === "Documentos") cargarDocs();
-    if (tab === "Alertas") Api.contratos.alertas(id, { page, page_size: 50 }).then(setAlertas).catch(fallo);
+    if (tab === "Alertas IA") Api.contratos.alertas(id, { page: pageAlertas, page_size: 50 }).then(setAlertas).catch(fallo);
     if (tab === "Historial") {
       Api.contratos.historial(id, {
-        page, page_size: 20,
+        page: pageHist, page_size: 20,
         ...(tipoHist ? { tipo: tipoHist } : {}),
         ...(moduloHist ? { modulo: moduloHist } : {}),
       }).then(setHist).catch(fallo);
     }
-  }, [tab, id, page, tipoMatriz, tipoHist, moduloHist, cargarDocs]);
+  }, [tab, id, pageAlertas, pageHist, tipoMatriz, tipoHist, moduloHist, cargarDocs]);
 
-  const cambiarTab = (t: Tab) => { setTab(t); setPage(1); };
+  /**
+   * Cambio de pestaña. Las visitadas quedan montadas para no perder su estado
+   * (la conversación del chat, el conductor seleccionado en Licencia Interna…)
+   * y la URL se actualiza con `replaceState`: el router de Next sincroniza
+   * `usePathname`/`useSearchParams` sin volver a pedir la página al servidor.
+   */
+  const cambiarTab = (t: Tab) => {
+    setTab(t);
+    setVistas((v) => (v.includes(t) ? v : [...v, t]));
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", slugTab(t));
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  /** Contenido de una pestaña ya visitada: se oculta en vez de desmontarse. */
+  const panel = (t: Tab, contenido: React.ReactNode) =>
+    vistas.includes(t) ? (
+      <div id={`panel-${slugTab(t)}`} role="tabpanel" aria-label={t} className={tab === t ? "" : "hidden"}>
+        {contenido}
+      </div>
+    ) : null;
 
   /** Subida por SAS + espera del veredicto de la IA (el doc queda `falta`). */
   const subir = async (docId: string, file: File) => {
@@ -136,9 +174,9 @@ export default function ContratoDetalle() {
   };
 
   const cargarAlertas = useCallback(() => {
-    Api.contratos.alertas(id, { page, page_size: 50 })
+    Api.contratos.alertas(id, { page: pageAlertas, page_size: 50 })
       .then(setAlertas).catch((e) => setError(Api.mensajeError(e)));
-  }, [id, page]);
+  }, [id, pageAlertas]);
 
   /** Navega al sujeto: resuelve su tipo a demanda (personal o equipo). */
   const verSujeto = async (sujetoId: string) => {
@@ -206,26 +244,34 @@ export default function ContratoDetalle() {
       {error && <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700 mb-4">{error}</p>}
       {aviso && <p className="rounded-lg bg-sky-50 px-4 py-2 text-sm text-sky-800 mb-4">ℹ️ {aviso}</p>}
 
-      {tab === "Resumen" && (
+      {panel("Resumen", (
         <TabResumen contrato={c} cambiarTab={cambiarTab} plataformas={plataformas} />
-      )}
+      ))}
 
-      {tab === "Documentos" && c && (
+      {panel("Chat", (
+        <TabChatContrato contrato={c} />
+      ))}
+
+      {panel("Documentos", (
         <TabDocumentosContrato contrato={c} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
-      )}
+      ))}
 
-      {tab === "Empresa" && c && (
+      {panel("Empresa", (
         <TabEmpresaContrato contrato={c} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
-      )}
+      ))}
 
-      {tab === "Personal" && c && (
+      {panel("Personal", (
         <TabPersonalContrato contrato={c} plataformas={plataformas} />
-      )}
-      {tab === "Vehículos / Equipos" && c && (
+      ))}
+      {panel("Vehículos / Equipos", (
         <TabEquiposContrato contrato={c} plataformas={plataformas} />
-      )}
+      ))}
 
-      {tab === "Alertas" && (
+      {panel("Agentes", (
+        <TabAgentesContrato contrato={c} />
+      ))}
+
+      {panel("Alertas IA", (
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="m-0 text-[0.78rem] text-slate-500">Alertas activas del contrato con acciones directas.</p>
@@ -269,23 +315,19 @@ export default function ContratoDetalle() {
               </div>
             </div>
           ))}
-          {alertas && <Paginador page={alertas.page} totalPaginas={alertas.total_pages} total={alertas.total} etiqueta="alertas" onPagina={setPage} />}
+          {alertas && <Paginador page={alertas.page} totalPaginas={alertas.total_pages} total={alertas.total} etiqueta="alertas" onPagina={setPageAlertas} />}
           <CorreosContratoModal abierto={showCorreosAlertas} onCerrar={() => setShowCorreosAlertas(false)} contrato={c} />
         </section>
-      )}
-      {tab === "Requisitos" && c && (
+      ))}
+      {panel("Requisitos", (
         <TabRequisitosContrato contrato={c} plataformas={plataformas} onCambio={cargar} />
-      )}
+      ))}
 
-      {tab === "Licencia Interna" && c && (
+      {panel("Licencia Interna", (
         <TabLicenciaInternaContrato contrato={c} cambiarTab={cambiarTab} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
-      )}
+      ))}
 
-      {tab === "Chat" && c && (
-        <TabChatContrato contrato={c} />
-      )}
-
-      {tab === "Historial" && (
+      {panel("Historial", (
         <div>
           <div className="mb-3.5">
             <h3 className="text-[#1E293B] text-[0.95rem] font-bold m-0">Historial del contrato</h3>
@@ -302,7 +344,7 @@ export default function ContratoDetalle() {
               className="view-select"
               aria-label="Tipo de actividad"
               value={tipoHist}
-              onChange={(e) => { setTipoHist(e.target.value); setPage(1); }}
+              onChange={(e) => { setTipoHist(e.target.value); setPageHist(1); }}
             >
               <option value="">Tipo de actividad: Todas</option>
               <option value="creacion">Creación</option>
@@ -317,7 +359,7 @@ export default function ContratoDetalle() {
               className="view-select"
               aria-label="Módulo"
               value={moduloHist}
-              onChange={(e) => { setModuloHist(e.target.value); setPage(1); }}
+              onChange={(e) => { setModuloHist(e.target.value); setPageHist(1); }}
             >
               <option value="">Módulo: Todos</option>
               <option value="contrato">Contrato</option>
@@ -337,11 +379,11 @@ export default function ContratoDetalle() {
             })}
             cargando={!hist}
           />
-          {hist && <Paginador page={hist.page} totalPaginas={hist.total_pages} total={hist.total} etiqueta="movimientos" onPagina={setPage} />}
+          {hist && <Paginador page={hist.page} totalPaginas={hist.total_pages} total={hist.total} etiqueta="movimientos" onPagina={setPageHist} />}
         </div>
-      )}
+      ))}
 
-      {tab === "Documentos Faena" && c && (
+      {panel("Documentos Faena", (
         <TabDocumentosFaena
           contrato={c}
           onVerEquipo={() => cambiarTab("Vehículos / Equipos")}
@@ -349,16 +391,16 @@ export default function ContratoDetalle() {
           subiendo={subiendo}
           analizandoId={analizandoId}
         />
-      )}
+      ))}
 
-      {tab === "Carpeta de Arranque" && c && (
+      {panel("Carpeta de Arranque", (
         <TabCarpetaArranque
           contrato={c}
           onSubir={subir}
           subiendo={subiendo}
           analizandoId={analizandoId}
         />
-      )}
+      ))}
 
       <Modal abierto={!!review} titulo="Revisión IA" onCerrar={() => setReview(null)} ancho="max-w-xl">
         <input

@@ -96,8 +96,7 @@ def test_una_unidad_de_negocio_inventada_se_rechaza(app_cliente, empresa_a,
     assert r.json()["error"]["code"] == "UNIDAD_NEGOCIO_INVALIDA"
 
 
-def test_el_encargado_de_la_unidad_accede_a_sus_contratos(
-        app_cliente, empresa_a, faena_pelambres):
+def test_el_encargado_de_la_unidad_accede_a_sus_contratos(        app_cliente, empresa_a, faena_pelambres):
     """El encargado jerárquico ve su contrato y los de su unidad, no los demás."""
     from tests.conftest import crear_contract_admin
 
@@ -130,6 +129,36 @@ def test_el_encargado_de_la_unidad_accede_a_sus_contratos(
     assert r.status_code == 200, r.text
     r = app_cliente.get(f"{API}/contratos/{otro['id']}", headers=jefe["headers"])
     assert r.status_code == 404
+
+
+# ============================================================================
+# Pestañas del detalle: agentes (chat del asistente) e historial del chat
+# ============================================================================
+def test_los_agentes_devuelven_el_chat_del_contrato(app_cliente, empresa_a,
+                                                    contrato_a):
+    """La pestaña Agentes lee `chat_historial` del contexto del contrato."""
+    from app.models import ChatHistorial
+    from app.database import worker_session
+
+    ctx = f"contrato_{contrato_a['id']}"
+    with worker_session(is_admin=True) as db:
+        db.add(ChatHistorial(company_id=empresa_a["company_id"], user_id=None,
+                             contexto=ctx, mensaje_usuario="¿Qué vence?",
+                             respuesta_ia='{"respuesta": "Nada"}'))
+        db.commit()
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/agentes",
+                        headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["totales"]["conversaciones"] == 1
+    assert d["conversaciones"][0]["mensaje_usuario"] == "¿Qué vence?"
+    assert d["avisos_whatsapp"] == []
+
+    # El historial del chat se lee por contexto: no se rompe al pedirlo.
+    r = app_cliente.get(f"{API}/ia/chat/{ctx}", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert len(r.json()) == 1
 
 
 def test_borrar_el_contrato_purga_sujetos_y_archivos(app_cliente, empresa_a,

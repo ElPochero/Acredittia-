@@ -20,7 +20,7 @@
  */
 import { api, patch, type Query } from "./api";
 import type {
-  AcreditacionesEstado, ActividadFila, AdminStats, Alerta, AlertaPatch,
+  AcreditacionesEstado, ActividadFila, AdminStats, AgentesContrato, Alerta, AlertaPatch,
   Ambito, ArchivoConfirmado, CategoriaEvento, ChecklistSujeto, Conjunto,
   Contrato, ContratoCreado, ContratoIn, ContratoPatch, Credencial,
   CumplimientoContrato, Documento, DocumentoFila, DownloadUrl, Ejemplo, Empresa,
@@ -324,6 +324,9 @@ export const contratos = {
 
   historial: (id: string, params?: ParamsPagina & { modulo?: string; tipo?: string }) =>
     api<Pagina<ActividadFila>>(`/contratos/${id}/historial`, { query: q(params) }),
+
+  /** Pestaña Agentes: interacciones del chatbot y avisos del canal WhatsApp. */
+  agentes: (id: string) => api<AgentesContrato>(`/contratos/${id}/agentes`),
 
   /** Despacha una plantilla de correo del contrato (C22). */
   enviarMail: (id: string, body: { plantilla: string; para?: string; asunto?: string }) =>
