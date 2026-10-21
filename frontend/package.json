@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:landing": "node --test ../tests/landing/*.test.mjs"
   },
   "dependencies": {
     "jsdom": "^29.1.1",

@@ -11,7 +11,7 @@ import { LANDING_SECTIONS } from "./sections";
  * - Todos los href son reales y funcionales (anclas internas, mailto:, enlaces legales).
  * - Cero enlaces de "Sectores" duplicados (H-53).
  * - Aviso de derechos de autor actualizado a "© 2026 ACREDITTIA SpA · Todos los derechos reservados".
- * - Eliminación total del texto de debug "Landing alternativo · v3 · azul + naranja" (H-55).
+ * - Eliminación total del texto de depuración de versión y esquema de color (H-55).
  * - Enlaces directos a /privacidad y /terminos (H-54).
  * 
  * Referencia HTML: líneas 1739-1771.
@@ -141,7 +141,7 @@ export default function LandingFooter() {
           </div>
         </div>
 
-        {/* Barra inferior de copyright (H-55: © 2026 sin "v3 · azul + naranja") */}
+        {/* Barra inferior de copyright (H-55: © 2026 sin cadenas de depuración) */}
         <div className="border-t border-[#333B48] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#6B7686]">
           <span>© 2026 ACREDITTIA SpA · Todos los derechos reservados</span>
           <span className="text-[0.7rem] text-[#4B5563]">
