@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 /**
  * Las 11 secciones del contrato que exige la plataforma, más las dos que ya
@@ -67,6 +67,13 @@ export function ContratoTabs({ currentTab, onTabChange, colorTheme = "bg-blue-60
   // Color del tab activo derivado del tema del mandante (clases completas para el JIT).
   const textColor = colorTheme.replace("bg-", "text-");
   const borderColor = colorTheme.replace("bg-", "border-b-");
+  const activoRef = useRef<HTMLButtonElement>(null);
+
+  // Con trece secciones la barra desborda: la pestaña activa se trae a la vista
+  // para que nunca quede escondida detrás del scroll.
+  useEffect(() => {
+    activoRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [currentTab]);
 
   return (
     <div
@@ -79,6 +86,7 @@ export function ContratoTabs({ currentTab, onTabChange, colorTheme = "bg-blue-60
         return (
           <button
             key={t}
+            ref={isActive ? activoRef : undefined}
             role="tab"
             aria-selected={isActive}
             aria-controls={`panel-${slugTab(t)}`}

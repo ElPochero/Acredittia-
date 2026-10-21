@@ -227,7 +227,7 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
                       <td className="p-3 text-[0.8rem]">{contrato.faena.nombre}</td>
                       <td className="p-3 text-[0.75rem]">
                         {plataformas.map((p) => (
-                          <span key={p.id} className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded mr-1">{p.nombre}</span>
+                          <span key={p.id ?? p.faena_plataforma_id ?? p.nombre} className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded mr-1">{p.nombre}</span>
                         ))}
                       </td>
                       <td className="p-3">

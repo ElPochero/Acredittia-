@@ -161,6 +161,32 @@ def test_los_agentes_devuelven_el_chat_del_contrato(app_cliente, empresa_a,
     assert len(r.json()) == 1
 
 
+def test_licencia_interna_del_contrato_trae_conductores_y_contadores(
+        app_cliente, empresa_a, contrato_a):
+    """La LIM del contrato responde con los conductores y sus cinco contadores."""
+    app_cliente.post(f"{API}/personal", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"], "nombre": "Ana Conduce",
+        "rut": rut_valido(31), "es_conductor": True})
+    # Un trabajador que no conduce no entra en la LIM.
+    app_cliente.post(f"{API}/personal", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"], "nombre": "Beto Comun",
+        "rut": rut_valido(32)})
+
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/licencia-interna",
+                        headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["contadores"]["total"] == 1
+    # Sin documentos cargados el expediente está pendiente: bloqueado.
+    assert d["contadores"]["bloqueados"] == 1
+    assert d["contadores"]["acreditados"] == 0
+    c = d["conductores"][0]
+    assert c["sujeto"]["nombre"] == "Ana Conduce"
+    assert c["contador"] == "bloqueados"
+    assert len(c["checklist"]) == 9          # los nueve requisitos EMSIPOR
+    assert c["resumen"]["total"] == 9
+
+
 def test_borrar_el_contrato_purga_sujetos_y_archivos(app_cliente, empresa_a,
                                                     contrato_a):
     from tests.conftest import subir_archivo

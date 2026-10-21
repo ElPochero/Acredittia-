@@ -697,6 +697,25 @@ export type LicenciaInterna = {
   };
 };
 
+/** Conductor del contrato con el estado que lo resume para los contadores. */
+export type ConductorLIM = LicenciaInterna & {
+  contador: "acreditados" | "vencidos" | "en_proceso" | "bloqueados";
+  licencia_vencida: boolean;
+};
+
+/** `GET /contratos/{id}/licencia-interna`: conductores y contadores de la LIM. */
+export type LimContrato = {
+  contrato_id: string;
+  conductores: ConductorLIM[];
+  contadores: {
+    total: number;
+    acreditados: number;
+    vencidos: number;
+    en_proceso: number;
+    bloqueados: number;
+  };
+};
+
 // ============================================================================
 // Alertas
 // ============================================================================

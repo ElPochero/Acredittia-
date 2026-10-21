@@ -35,7 +35,7 @@ import type {
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
   Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
-  CumplimientoDashboardData,
+  CumplimientoDashboardData, LimContrato,
 } from "./tipos";
 
 export * from "./api";
@@ -509,6 +509,10 @@ export const equipos = {
 export const licencia = {
   detalle: (sujetoId: string) =>
     api<LicenciaInterna>(`/personal/${sujetoId}/licencia-interna`),
+
+  /** Conductores del contrato con su expediente y los contadores de la LIM. */
+  contrato: (contratoId: string) =>
+    api<LimContrato>(`/contratos/${contratoId}/licencia-interna`),
 
   /** `estado` no se acepta: lo deriva el backend de `numero` y `vence`. */
   editar: (sujetoId: string, cambios: { numero?: string | null; vence?: string | null }) =>

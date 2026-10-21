@@ -559,6 +559,64 @@ def run(db: Session) -> None:
                     db.add(arch)
                     db.flush()
 
+    # 15b. Expedientes EMSIPOR de los conductores del demo.
+    # El estado de cada requisito es lo que cuenta la cabecera de la pestaña
+    # Licencia Interna (acreditado / vencido / en proceso / bloqueado), así que
+    # el demo tiene que mostrar los cuatro casos.
+    emsipor_demo = {
+        # Carlos: expediente completo → acreditado
+        "15.842.109-K": {t[0]: ("ok", "ok", today + timedelta(days=365))
+                         for t in REQ_EMSIPOR},
+        # Diego: un requisito vencido y otro por vencer → vencido
+        "17.391.450-4": {
+            "Solicitud AIC Mina": ("ok", "ok", today + timedelta(days=300)),
+            "Fotografía Trabajador": ("ok", "ok", today + timedelta(days=300)),
+            "Licencia Municipal de Conducir": ("ok", "ok", today + timedelta(days=400)),
+            "Hoja de Vida del Conductor": ("ok", "ok", today + timedelta(days=30)),
+            "Psicosensométrico Riguroso": ("ok", "porvenc", today + timedelta(days=12)),
+            "Curso Manejo Defensivo y Alta Montaña": ("ok", "venc", today - timedelta(days=20)),
+            "Examen Práctico Mina": ("ok", "ok", today + timedelta(days=120)),
+            "Anexo Faena": ("ok", "ok", today + timedelta(days=120)),
+            "Anexo Mina": ("falta", "falta", None),
+        },
+        # José: a medias → en proceso
+        "14.510.992-8": {
+            "Solicitud AIC Mina": ("ok", "ok", today + timedelta(days=300)),
+            "Fotografía Trabajador": ("ok", "ok", today + timedelta(days=300)),
+            "Licencia Municipal de Conducir": ("ok", "ok", today + timedelta(days=400)),
+            "Psicosensométrico Riguroso": ("ok", "ok", today + timedelta(days=60)),
+            "Examen Práctico Mina": ("ok", "ok", today + timedelta(days=90)),
+            "Hoja de Vida del Conductor": ("falta", "falta", None),
+            "Curso Manejo Defensivo y Alta Montaña": ("falta", "falta", None),
+            "Anexo Faena": ("falta", "falta", None),
+            "Anexo Mina": ("falta", "falta", None),
+        },
+        # Andrés: sin expediente → bloqueado
+        "16.890.123-5": {t[0]: ("falta", "falta", None) for t in REQ_EMSIPOR},
+    }
+    for ref_rut, estados_rut in emsipor_demo.items():
+        sj_target = sujetos_map.get(ref_rut)
+        if not sj_target:
+            continue
+        for titulo_doc, (est_db, est_calc, v_date) in estados_rut.items():
+            tmpl_obj = tmpl_by_title.get(titulo_doc)
+            doc = db.scalar(select(Documento).where(
+                (Documento.sujeto_id == sj_target.id) & (Documento.titulo == titulo_doc)))
+            if doc is None:
+                db.add(Documento(
+                    company_id=demo_company.id,
+                    template_id=tmpl_obj.id if tmpl_obj else None,
+                    sujeto_id=sj_target.id, contrato_id=None,
+                    titulo=titulo_doc, obligatorio=True, estado=est_db,
+                    vence=v_date, estado_calc=est_calc, es_emsipor=True))
+                db.flush()
+            else:
+                doc.estado = est_db
+                doc.estado_calc = est_calc
+                doc.vence = v_date
+                doc.es_emsipor = True
+        db.flush()
+
     # 16. Revisiones de Inteligencia Artificial (IA)
     if created_docs and not db.scalar(select(IaReview.id).limit(1)):
         sample_doc = created_docs[0]

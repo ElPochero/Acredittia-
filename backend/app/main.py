@@ -190,6 +190,7 @@ app.include_router(periodos_laborales.router, prefix=API)
 # --- Sujetos e identidad --------------------------------------------------
 app.include_router(sujetos.router, prefix=API)
 app.include_router(licencia_interna.router, prefix=API)
+app.include_router(licencia_interna.router_contrato, prefix=API)
 app.include_router(personas.router, prefix=API)
 app.include_router(personas.router_flota, prefix=API)
 
