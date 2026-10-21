@@ -14,7 +14,7 @@ import { LANDING_SECTIONS } from "./sections";
  */
 export default function LandingNav() {
   return (
-    <nav className="sticky top-0 z-50 px-[6%] py-3.5 sm:py-4 bg-white/95 backdrop-blur-[10px] border-b border-landing-linea">
+    <nav className="sticky top-0 z-50 px-[4%] sm:px-[6%] py-3 sm:py-3.5 bg-white/95 backdrop-blur-[10px] border-b border-landing-linea">
       <div className="max-w-[1180px] mx-auto w-full flex items-center justify-between">
         <div className="logo flex items-center">
           <Link href="/" aria-label="Ir al inicio de Acredittia">
