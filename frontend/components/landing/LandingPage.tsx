@@ -13,12 +13,15 @@ import LandingIndustrias from "./LandingIndustrias";
 import LandingFlujo from "./LandingFlujo";
 import LandingFaenas from "./LandingFaenas";
 import LandingAgentes from "./LandingAgentes";
+import LandingCtaFinal from "./LandingCtaFinal";
+import LandingContacto from "./LandingContacto";
+import LandingFooter from "./LandingFooter";
 import { LANDING_SECTIONS } from "./sections";
 
 /**
- * LandingPage — Orquestador de la landing con diseño alternativo (Día 3).
+ * LandingPage — Orquestador de la landing con diseño alternativo (Día 4).
  * Integra Nav, Hero, Problema, Plataforma, ParaQuién, Stats, Funciones, Alertas,
- * Industrias, Faenas y Agentes.
+ * Industrias, Flujo, Faenas, Agentes, CTA Final, Contacto y Footer.
  */
 export default function LandingPage() {
   return (
@@ -33,16 +36,17 @@ export default function LandingPage() {
         <LandingFunciones />
         <LandingAlertas />
         <LandingIndustrias />
-
         <LandingFlujo />
-
         <LandingFaenas />
         <LandingAgentes />
 
-        {/* Puntos de ancla para enlaces de navegación durante el desarrollo incremental (Días 4 y 5) */}
+        {/* Punto de ancla para beneficiados durante desarrollo incremental (Día 5) */}
         <div id={LANDING_SECTIONS.BENEFICIADOS} className="scroll-mt-20" />
-        <div id={LANDING_SECTIONS.CONTACT} className="scroll-mt-20" />
+
+        <LandingCtaFinal />
+        <LandingContacto />
       </main>
+      <LandingFooter />
     </div>
   );
 }
