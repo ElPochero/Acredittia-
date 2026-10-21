@@ -10,6 +10,7 @@ import LandingStats from "./LandingStats";
 import LandingFunciones from "./LandingFunciones";
 import LandingAlertas from "./LandingAlertas";
 import LandingIndustrias from "./LandingIndustrias";
+import LandingFlujo from "./LandingFlujo";
 import LandingFaenas from "./LandingFaenas";
 import LandingAgentes from "./LandingAgentes";
 import { LANDING_SECTIONS } from "./sections";
@@ -33,8 +34,7 @@ export default function LandingPage() {
         <LandingAlertas />
         <LandingIndustrias />
 
-        {/* Punto de ancla para flujo (se implementa el Día 4) */}
-        <div id={LANDING_SECTIONS.FLUJO} className="scroll-mt-20" />
+        <LandingFlujo />
 
         <LandingFaenas />
         <LandingAgentes />
