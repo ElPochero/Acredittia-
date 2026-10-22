@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { toast } from "sonner";
 import * as Api from "@/lib/cliente";
 import { abrirDescarga } from "@/lib/api";
+import { Modal, Paginador, Stepper } from "@/components/ui";
 import type { RequisitoFila, Ambito, TipoRequisito, EstadoCalc } from "@/lib/tipos";
 
 type RequisitoFilaExt = RequisitoFila & {
@@ -30,6 +32,7 @@ export default function RequisitosPage() {
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Modal de Detalle / Nuevo / Editar Requisito
   const [selectedReq, setSelectedReq] = useState<RequisitoFilaExt | null>(null);
@@ -40,7 +43,7 @@ export default function RequisitosPage() {
   const [nuevoObligatorio, setNuevoObligatorio] = useState(true);
   const [nuevoArchivoEjemplo, setNuevoArchivoEjemplo] = useState<File | null>(null);
   const [nuevoCodigo, setNuevoCodigo] = useState("");
-  const [nuevoVigencia, setNuevoVigencia] = useState("");
+  const [nuevoVigencia, setNuevoVigencia] = useState(0);
   const [nuevoPlataforma, setNuevoPlataforma] = useState("");
   const [nuevoAplicaA, setNuevoAplicaA] = useState("");
 
@@ -53,7 +56,7 @@ export default function RequisitosPage() {
   const [editArchivoEjemplo, setEditArchivoEjemplo] = useState<File | null>(null);
   const [editArchivoEjemploRuta, setEditArchivoEjemploRuta] = useState<string | null>(null);
   const [editCodigo, setEditCodigo] = useState("");
-  const [editVigencia, setEditVigencia] = useState("");
+  const [editVigencia, setEditVigencia] = useState(0);
   const [editPlataforma, setEditPlataforma] = useState("");
   const [editAplicaA, setEditAplicaA] = useState("");
 
@@ -74,6 +77,7 @@ export default function RequisitosPage() {
       const res = await Api.requisitos.listar(params);
       setRequisitosList(res.items || []);
       setTotalCount(res.total || (res.items || []).length);
+      setTotalPages(res.total_pages || 1);
       if (res.kpis) {
         setKpis({
           total: Number(res.kpis.total || 0),
@@ -175,30 +179,22 @@ export default function RequisitosPage() {
   };
 
   const uploadEjemplo = async (file: File): Promise<string> => {
-    // 1. Obtener SAS
-    const res = await fetch(`${Api.getBaseUrl()}/api/v1/requisitos/templates/upload-url`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${localStorage.getItem("token") || ""}`,
-      },
-      body: JSON.stringify({
-        filename: file.name,
-        size_bytes: file.size,
-        content_type: file.type,
-      })
+    // 1. SAS con el cliente (lleva el token de sesión; antes se leía una clave
+    //    que no existe en localStorage y la petición salía sin autenticar).
+    const sas = await Api.requisitos.subirEjemplo({
+      filename: file.name,
+      size_bytes: file.size,
+      content_type: file.type || undefined,
     });
-    if (!res.ok) throw new Error("No se pudo obtener URL de subida");
-    const { upload_url, blob_path, headers } = await res.json();
 
-    // 2. Subir archivo
-    const putRes = await fetch(upload_url, {
+    // 2. Subida del binario contra la URL firmada (sin Authorization).
+    const putRes = await fetch(sas.upload_url, {
       method: "PUT",
-      headers: { ...headers, "Content-Type": file.type },
-      body: file
+      headers: sas.headers,
+      body: file,
     });
-    if (!putRes.ok) throw new Error("No se pudo subir el archivo");
-    return blob_path;
+    if (!putRes.ok) throw new Error("No se pudo subir el archivo de ejemplo");
+    return sas.blob_path;
   };
 
   const handleCrearRequisito = async () => {
@@ -217,7 +213,7 @@ export default function RequisitosPage() {
           obligatorio: nuevoObligatorio,
           archivo_ejemplo,
           codigo: nuevoCodigo.trim() || undefined,
-          vigencia_meses: nuevoVigencia ? parseInt(nuevoVigencia, 10) : undefined,
+          vigencia_meses: nuevoVigencia > 0 ? nuevoVigencia : undefined,
           plataforma: nuevoPlataforma.trim() || undefined,
           aplica_a: nuevoAplicaA.trim() || undefined,
         });
@@ -229,7 +225,7 @@ export default function RequisitosPage() {
           obligatorio: nuevoObligatorio,
           archivo_ejemplo,
           codigo: nuevoCodigo.trim() || undefined,
-          vigencia_meses: nuevoVigencia ? parseInt(nuevoVigencia, 10) : undefined,
+          vigencia_meses: nuevoVigencia > 0 ? nuevoVigencia : undefined,
           plataforma: nuevoPlataforma.trim() || undefined,
           aplica_a: nuevoAplicaA.trim() || undefined,
         });
@@ -238,15 +234,15 @@ export default function RequisitosPage() {
       setNuevoTitulo("");
       setNuevoArchivoEjemplo(null);
       setNuevoCodigo("");
-      setNuevoVigencia("");
+      setNuevoVigencia(0);
       setNuevoPlataforma("");
       setNuevoAplicaA("");
       fetchRequisitos();
-      if (typeof window !== "undefined" && (window as any).toast) {
-        (window as any).toast("Requisito creado exitosamente para tu empresa");
-      }
+      toast.success("Requisito creado exitosamente para tu empresa");
     } catch (err: any) {
-      alert(err.message || "Error al crear plantilla de requisito");
+      toast.error("No se pudo crear el requisito", {
+        description: err.message || "Error al crear plantilla de requisito",
+      });
     }
   };
 
@@ -259,7 +255,7 @@ export default function RequisitosPage() {
     setEditArchivoEjemplo(null);
     setEditArchivoEjemploRuta(r.archivo_ejemplo || null);
     setEditCodigo(r.codigo || "");
-    setEditVigencia(r.vigencia_meses ? String(r.vigencia_meses) : "");
+    setEditVigencia(r.vigencia_meses || 0);
     setEditPlataforma(r.plataforma || "");
     setEditAplicaA(r.aplica_a || "");
   };
@@ -280,7 +276,7 @@ export default function RequisitosPage() {
           obligatorio: editObligatorio,
           archivo_ejemplo: archivo_ejemplo || undefined,
           codigo: editCodigo.trim() || undefined,
-          vigencia_meses: editVigencia ? parseInt(editVigencia, 10) : undefined,
+          vigencia_meses: editVigencia > 0 ? editVigencia : undefined,
           plataforma: editPlataforma.trim() || undefined,
           aplica_a: editAplicaA.trim() || undefined,
         });
@@ -292,18 +288,18 @@ export default function RequisitosPage() {
           obligatorio: editObligatorio,
           archivo_ejemplo: archivo_ejemplo || undefined,
           codigo: editCodigo.trim() || undefined,
-          vigencia_meses: editVigencia ? parseInt(editVigencia, 10) : undefined,
+          vigencia_meses: editVigencia > 0 ? editVigencia : undefined,
           plataforma: editPlataforma.trim() || undefined,
           aplica_a: editAplicaA.trim() || undefined,
         });
       }
       setEditingReq(null);
       fetchRequisitos();
-      if (typeof window !== "undefined" && (window as any).toast) {
-        (window as any).toast("Requisito actualizado exitosamente");
-      }
+      toast.success("Requisito actualizado exitosamente");
     } catch (err: any) {
-      alert(err.message || "Error al actualizar el requisito");
+      toast.error("No se pudo actualizar el requisito", {
+        description: err.message || "Error al actualizar el requisito",
+      });
     }
   };
 
@@ -316,11 +312,11 @@ export default function RequisitosPage() {
           await Api.admin.eliminarPlantilla(r.template_id);
         }
         fetchRequisitos();
-        if (typeof window !== "undefined" && (window as any).toast) {
-          (window as any).toast("Requisito eliminado exitosamente");
-        }
+        toast.success("Requisito eliminado exitosamente");
       } catch (err: any) {
-        alert(err.message || "Error al eliminar el requisito");
+        toast.error("No se pudo eliminar el requisito", {
+          description: err.message || "Error al eliminar el requisito",
+        });
       }
     }
   };
@@ -343,9 +339,6 @@ export default function RequisitosPage() {
       (window as any).toast?.(err.message || "Error al generar la exportación");
     }
   };
-
-  const startIndex = (currentPage - 1) * pageSize + 1;
-  const endIndex = Math.min(currentPage * pageSize, totalCount);
 
   return (
     <div className="w-full space-y-6 text-slate-800">
@@ -573,9 +566,13 @@ export default function RequisitosPage() {
 
         {/* 5. Pie de Tabla / Paginación */}
         <div className="p-3.5 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Mostrando {totalCount > 0 ? startIndex : 0} a {endIndex} de {totalCount} requisitos
-          </div>
+          <Paginador
+            page={currentPage}
+            totalPaginas={totalPages}
+            total={totalCount}
+            etiqueta="requisitos"
+            onPagina={setCurrentPage}
+          />
           <div className="flex items-center gap-3">
             <select
               value={pageSize}
@@ -595,19 +592,13 @@ export default function RequisitosPage() {
 
       {/* Modal de Detalle Requisito */}
       {selectedReq && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-base text-slate-900">{selectedReq.titulo}</h3>
-              <button
-                onClick={() => setSelectedReq(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs text-slate-600">
+      <Modal
+        abierto={!!selectedReq}
+        titulo={selectedReq.titulo}
+        onCerrar={() => setSelectedReq(null)}
+        ancho="max-w-md"
+      >
+        <div className="space-y-2 text-xs text-slate-600">
               <div className="flex justify-between py-1 border-b border-slate-50">
                 <span className="font-medium text-slate-400">Ámbito:</span>
                 <span className="font-bold text-slate-800">{formatearAmbitoLabel(selectedReq.ambito)}</span>
@@ -660,25 +651,17 @@ export default function RequisitosPage() {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+      </Modal>
       )}
 
-      {/* Modal Nuevo Requisito */}
-      {showNuevoModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-base text-slate-900">+ Nuevo Requisito</h3>
-              <button
-                onClick={() => setShowNuevoModal(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
+      {/* Modal Nuevo Requisito: el `Modal` común da botón X, Escape y foco. */}
+      <Modal
+        abierto={showNuevoModal}
+        titulo="+ Nuevo Requisito"
+        onCerrar={() => setShowNuevoModal(false)}
+        ancho="max-w-md"
+      >
+        <div className="space-y-3 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Nombre del Requisito</label>
                 <input
@@ -732,13 +715,15 @@ export default function RequisitosPage() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Vigencia (Meses)</label>
-                  <input
-                    type="number"
-                    value={nuevoVigencia}
-                    onChange={(e) => setNuevoVigencia(e.target.value)}
-                    placeholder="Ej: 12"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  <Stepper
+                    valor={nuevoVigencia}
+                    onChange={setNuevoVigencia}
+                    min={0}
+                    etiqueta="Vigencia en meses"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    0 = sin vencimiento fijo.
+                  </p>
                 </div>
               </div>
 
@@ -802,25 +787,16 @@ export default function RequisitosPage() {
                 Guardar Requisito
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Modal Editar Requisito */}
-      {editingReq && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-base text-slate-900">✏️ Editar Requisito</h3>
-              <button
-                onClick={() => setEditingReq(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
+      <Modal
+        abierto={!!editingReq}
+        titulo="✏️ Editar Requisito"
+        onCerrar={() => setEditingReq(null)}
+        ancho="max-w-md"
+      >
+        <div className="space-y-3 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Nombre del Requisito</label>
                 <input
@@ -873,13 +849,15 @@ export default function RequisitosPage() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Vigencia (Meses)</label>
-                  <input
-                    type="number"
-                    value={editVigencia}
-                    onChange={(e) => setEditVigencia(e.target.value)}
-                    placeholder="Ej: 12"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  <Stepper
+                    valor={editVigencia}
+                    onChange={setEditVigencia}
+                    min={0}
+                    etiqueta="Vigencia en meses"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    0 = sin vencimiento fijo.
+                  </p>
                 </div>
               </div>
 
@@ -948,9 +926,7 @@ export default function RequisitosPage() {
                 Guardar Cambios
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

@@ -93,15 +93,22 @@ export function TabRequisitosContrato({ contrato, plataformas, onCambio }: TabRe
     setGuardando(true);
     try {
       const cargo = cargos.find((c) => c.nombre === formCargo);
-      await Api.contratos.crearRequisitos(contrato.id, {
-        vinculo_tipo: modalVinculo.tipo,
-        vinculo_ref: modalVinculo.tipo === 'plataforma' ? modalVinculo.key : null,
-        ambito: modalAmbito,
-        titulo: formName.trim(),
-        obligatorio: formExigencia === 'obligatorio',
-        cargo_id: modalAmbito === 'personal' ? cargo?.id || null : null,
-        origen: 'custom'
-      });
+      await Api.contratos.crearRequisitos(
+        contrato.id,
+        {
+          vinculo_tipo: modalVinculo.tipo,
+          vinculo_ref: modalVinculo.tipo === 'plataforma' ? modalVinculo.key : null,
+          ambito: modalAmbito,
+          titulo: formName.trim(),
+          obligatorio: formExigencia === 'obligatorio',
+          cargo_id: modalAmbito === 'personal' ? cargo?.id || null : null,
+          origen: 'custom'
+        },
+        // El requisito tiene que verse de inmediato en el checklist de los
+        // trabajadores que ya están en el contrato, no solo en los que se
+        // agreguen después (Feedback punto 8).
+        { aplicar_retroactivo: true },
+      );
       setModalAbierto(false);
       setFormName('');
       await cargarReqs();
@@ -172,7 +179,7 @@ export function TabRequisitosContrato({ contrato, plataformas, onCambio }: TabRe
     if (!items.length) return;
     setArrGuardando(true);
     try {
-      await Api.contratos.crearRequisitos(contrato.id, items, { bulk: true });
+      await Api.contratos.crearRequisitos(contrato.id, items, { bulk: true, aplicar_retroactivo: true });
       setArrFase("idle");
       setArrProp({ empresa: [], personal: [], equipo: [] });
       await cargarReqs();

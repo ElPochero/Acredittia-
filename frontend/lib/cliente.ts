@@ -232,6 +232,11 @@ export const requisitos = {
   plantillas: (params?: ParamsPagina & { ambito?: Ambito; faena_id?: string }) =>
     api<Pagina<PlantillaRequisito>>("/requisitos/templates", { query: q(params) }),
 
+  /** SAS de escritura para el archivo de ejemplo de una plantilla. */
+  subirEjemplo: (body: {
+    filename: string; content_type?: string; size_bytes?: number;
+  }) => api<UploadUrl>("/requisitos/templates/upload-url", { body }),
+
   crearPlantilla: (body: {
     ambito: Ambito; titulo: string; codigo?: string; tipo?: TipoRequisito;
     obligatorio?: boolean; faena_id?: string; vigencia_meses?: number;
