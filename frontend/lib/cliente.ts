@@ -157,7 +157,7 @@ export const empresa = {
 
   invitar: (body: {
     nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
-    contrato_id?: string | null;
+    contrato_id?: string | null; unidad_negocio?: string | null;
   }) => api<UsuarioEmpresa & { activacion?: Record<string, unknown> }>(
     "/company/usuarios", { body }),
 

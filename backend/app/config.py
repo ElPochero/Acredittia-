@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     sas_upload_ttl_min: int = 15
     sas_download_ttl_min: int = 15
     public_base_url: str = "http://localhost:8000"  # para URLs locales de subida
+    # Base del FRONTEND (Vercel en producción). Es la que va en los correos de
+    # invitación: el enlace tiene que apuntar a la aplicación, no a la API.
+    app_url: str = "http://localhost:3000"
 
     # --- Cola de trabajos: celery | inproc --------------------------------
     queue_backend: str = "inproc"
