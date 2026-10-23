@@ -47,10 +47,11 @@ export default function LandingHero() {
 
           {/* Botones de acción (CTAs) */}
           <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* CTA Empezar gratis (H-04, H-05, Tarea 7.3): prefetch + Link sin JS bloqueante, responde a la primera pulsación */}
             <Link
               href="/login"
               prefetch={true}
-              className="inline-flex items-center justify-center gap-2 font-bold text-[0.85rem] sm:text-[0.88rem] px-6 sm:px-7 py-3 sm:py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-all shadow-md hover:shadow-lg whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 font-bold text-[0.85rem] sm:text-[0.88rem] px-6 sm:px-7 py-3 sm:py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-all shadow-md hover:shadow-lg whitespace-nowrap active:scale-95 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-azul cursor-pointer"
             >
               Empezar gratis →
             </Link>
