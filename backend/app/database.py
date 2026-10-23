@@ -314,6 +314,12 @@ def apply_schema(schema_dir: str | None = None) -> int:
                         END IF;
                     END $$;
                 """)
+            cur.execute("""
+                ALTER TABLE contratos ADD COLUMN IF NOT EXISTS unidad_negocio TEXT;
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS unidad_negocio TEXT;
+                CREATE INDEX IF NOT EXISTS ix_contratos_unidad_negocio ON contratos (unidad_negocio);
+                CREATE INDEX IF NOT EXISTS ix_users_unidad_negocio ON users (unidad_negocio);
+            """)
         finally:
             raw.close()
         Base.metadata.create_all(engine)
