@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Contrato } from "@/lib/tipos";
 
 interface ContratosTableProps {
@@ -10,6 +10,8 @@ interface ContratosTableProps {
   total: number;
   onDelete: (id: string, nombre: string) => void;
   viewMode?: "table" | "grid";
+  /** Oculta el pie «Mostrando X de Y» cuando la tabla se pinta por grupo. */
+  pie?: boolean;
 }
 
 /** Estado de vigencia del contrato, derivado de sus fechas (checklist C1 → `ctVig`). */
@@ -59,7 +61,24 @@ function fmtFecha(iso: string | null): string {
   return new Date(iso + "T00:00:00").toLocaleDateString("es-CL").replace(/\//g, "-");
 }
 
-export function ContratosTable({ contratos, loading, total, onDelete, viewMode = "table" }: ContratosTableProps) {
+export function ContratosTable({ contratos, loading, total, onDelete, viewMode = "table", pie = true }: ContratosTableProps) {
+  const router = useRouter();
+
+  /**
+   * Navegación al detalle del contrato (H-17).
+   *
+   * El enlace es un `<a>` real para que se pueda abrir en otra pestaña, pero la
+   * navegación la hace el router y no el `<Link>` de Next: con el layout actual
+   * —que monta todos los módulos de la plataforma a la vez— el prefetch del
+   * `<Link>` se queda colgado y el clic no llega a navegar. Con `router.push`
+   * la navegación es directa y siempre aterriza en el detalle.
+   */
+  const verContrato = (e: React.MouseEvent, id: string) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    router.push(`/contratos/${id}`);
+  };
+
   if (viewMode === "grid") {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -85,12 +104,21 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <ChipVig estado={vig} />
-                    <Link href={`/contratos/${c.id}`} className="block font-bold text-[#1e293b] hover:text-blue-600 hover:underline text-[1.1rem] leading-tight mt-2 mb-1">
+                    <a
+                      href={`/contratos/${c.id}`}
+                      onClick={(e) => verContrato(e, c.id)}
+                      className="block font-bold text-[#1e293b] hover:text-blue-600 hover:underline text-[1.1rem] leading-tight mt-2 mb-1 cursor-pointer"
+                    >
                       {c.nombre}
-                    </Link>
-                    <div className="text-[0.75rem] text-slate-500 flex items-center gap-1.5">
+                    </a>
+                    <div className="text-[0.75rem] text-slate-500 flex items-center gap-1.5 flex-wrap">
                       <span className="w-4 h-4 bg-slate-100 flex items-center justify-center rounded text-[0.6rem]" aria-hidden="true">🏢</span>
                       {c.faena?.nombre}
+                      {c.unidad_negocio && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 px-2 py-[1px] text-[0.68rem] font-bold">
+                          🏗 {c.unidad_negocio}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {alCt > 0 && (
@@ -149,6 +177,7 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
             <tr className="bg-slate-50 border-b border-slate-200 text-left text-[0.68rem] text-slate-500 font-bold uppercase tracking-wider">
               <th className="py-3 px-4">Contrato</th>
               <th className="py-3 px-4">Faena</th>
+              <th className="py-3 px-4">Unidad de negocio</th>
               <th className="py-3 px-4">Inicio</th>
               <th className="py-3 px-4">Término</th>
               <th className="py-3 px-4">Estado</th>
@@ -162,13 +191,13 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="p-8 text-center text-slate-400 text-[0.85rem]">
+                <td colSpan={11} className="p-8 text-center text-slate-400 text-[0.85rem]">
                   Cargando contratos...
                 </td>
               </tr>
             ) : contratos.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-8 text-center text-slate-400 text-[0.85rem]">
+                <td colSpan={11} className="p-8 text-center text-slate-400 text-[0.85rem]">
                   No se encontraron contratos con los filtros actuales.
                 </td>
               </tr>
@@ -185,15 +214,25 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
                 return (
                   <tr key={c.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 transition-colors">
                     <td className="py-3 px-4 align-middle">
-                      <Link
+                      <a
                         href={`/contratos/${c.id}`}
-                        className="inline-block rounded-md bg-indigo-50 px-2.5 py-0.5 font-semibold text-blue-700 hover:bg-indigo-100 text-[0.85rem]"
+                        onClick={(e) => verContrato(e, c.id)}
+                        className="inline-block rounded-md bg-indigo-50 px-2.5 py-0.5 font-semibold text-blue-700 hover:bg-indigo-100 text-[0.85rem] cursor-pointer"
                       >
                         • {c.nombre}
-                      </Link>
+                      </a>
                       <div className="text-[0.76rem] text-slate-500 mt-0.5">{c.faena?.nombre}</div>
                     </td>
                     <td className="py-3 px-4 align-middle text-[0.8rem] text-slate-500">{c.faena?.nombre}</td>
+                    <td className="py-3 px-4 align-middle">
+                      {c.unidad_negocio ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 px-2 py-[2px] text-[0.7rem] font-bold whitespace-nowrap">
+                          🏗 {c.unidad_negocio}
+                        </span>
+                      ) : (
+                        <span className="text-[0.76rem] text-slate-400">Sin unidad</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4 align-middle text-[0.8rem] text-slate-500 whitespace-nowrap">{fmtFecha(c.fecha_inicio)}</td>
                     <td className="py-3 px-4 align-middle text-[0.8rem] text-slate-500 whitespace-nowrap">{c.fecha_termino ? fmtFecha(c.fecha_termino) : "Sin término"}</td>
                     <td className="py-3 px-4 align-middle">
@@ -221,13 +260,15 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
                     </td>
                     <td className="py-3 px-4 align-middle">
                       <div className="flex items-center gap-1.5">
-                        <Link
+                        <a
                           href={`/contratos/${c.id}`}
+                          onClick={(e) => verContrato(e, c.id)}
                           aria-label={`Ver contrato ${c.nombre}`}
-                          className="w-[30px] h-[30px] inline-grid place-items-center rounded-lg bg-slate-100 border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-blue-700 text-[0.85rem]"
+                          title={`Ver contrato ${c.nombre}`}
+                          className="w-[30px] h-[30px] inline-grid place-items-center rounded-lg bg-slate-100 border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-blue-700 text-[0.85rem] cursor-pointer"
                         >
                           👁
-                        </Link>
+                        </a>
                         <button
                           onClick={() => onDelete(c.id, c.nombre)}
                           aria-label={`Eliminar contrato ${c.nombre}`}
@@ -244,10 +285,12 @@ export function ContratosTable({ contratos, loading, total, onDelete, viewMode =
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-3 border-t border-slate-200 text-[0.75rem] font-medium text-slate-500 flex justify-between items-center bg-slate-50">
-        <span>Mostrando 1 a {contratos.length} de {total} contratos</span>
-        <span className="text-blue-600 font-bold">10 por página</span>
-      </div>
+      {pie && (
+        <div className="px-4 py-3 border-t border-slate-200 text-[0.75rem] font-medium text-slate-500 flex justify-between items-center bg-slate-50">
+          <span>Mostrando 1 a {contratos.length} de {total} contratos</span>
+          <span className="text-blue-600 font-bold">10 por página</span>
+        </div>
+      )}
     </div>
   );
 }

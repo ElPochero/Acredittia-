@@ -45,6 +45,11 @@ logger = logging.getLogger("acredittia.licencia_interna")
 router = APIRouter(prefix="/personal/{sid}/licencia-interna",
                    tags=["licencia interna"])
 
+# Vista por contrato: los conductores del contrato con su expediente EMSIPOR y
+# los contadores de la cabecera (pestaña Licencia Interna del contrato).
+router_contrato = APIRouter(prefix="/contratos/{contrato_id}/licencia-interna",
+                             tags=["licencia interna"])
+
 MSG_NO_APLICA = ("El trabajador no requiere Licencia Interna de Manejo: su cargo "
                  "no lo exige y no está marcado como conductor")
 
@@ -119,11 +124,22 @@ def _asegurar_licencia(db: Session, s: Sujeto) -> LicenciaInterna:
 
     Puede faltar si el cargo pasó a exigir EMSIPOR después del alta: se crea aquí
     con los nueve documentos en vez de obligar a un PATCH previo del sujeto.
+
+    También se completa un expediente que exista pero tenga los documentos
+    vacíos (semillas antiguas o un reinicio a medias): sin ellos el detalle
+    que ve el usuario sería una lista vacía y el contador de requisitos, cero.
     """
     lim = db.scalar(select(LicenciaInterna).where(
         LicenciaInterna.company_id == s.company_id,
         LicenciaInterna.sujeto_id == s.id))
     if lim is not None:
+        if not _docs_emsipor(db, s):
+            from ..services.checklist import instanciar_docs
+
+            instanciar_docs(db, s.company_id, "emsipor", sujeto_id=s.id,
+                            contrato_plantilla_id=s.contrato_id)
+            db.flush()
+            logger.info("expediente EMSIPOR completado sujeto=%s", s.id)
         return lim
     from ..services.checklist import crear_expediente_conductor
 
@@ -176,6 +192,63 @@ def _sincronizar(db: Session, s: Sujeto, lim: LicenciaInterna) -> None:
 
 
 # ------------------------------------------------------------------ endpoints
+@router_contrato.get("")
+def conductores_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                         cid: uuid.UUID = Depends(get_company_id),
+                         user: User = Depends(get_current_user)):
+    """Conductores del contrato con su expediente EMSIPOR y los contadores.
+
+    Una sola respuesta con todo: la cabecera necesita los cinco contadores y la
+    lista el detalle de cada expediente, así que pedirlos por separado obligaba
+    a N+1 peticiones (una por conductor) y a que cada fila mostrara su propio
+    «cargando».
+
+    Los contadores son excluyentes y suman el total: un conductor con un
+    documento vencido cuenta como **vencido** aunque su expediente esté a medias.
+    """
+    from ..deps import contrato_permitido
+    from ..models import Contrato
+
+    c = db.get(Contrato, contrato_id)
+    if not c or c.company_id != cid:
+        raise err(404, "NO_ENCONTRADO", "Contrato no existe")
+    if not contrato_permitido(user, c):
+        raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
+
+    sujetos = list(db.scalars(
+        select(Sujeto).where(
+            Sujeto.company_id == cid, Sujeto.contrato_id == c.id,
+            Sujeto.tipo == "trabajador", Sujeto.es_conductor.is_(True),
+            Sujeto.estado != "baja")
+        .order_by(Sujeto.nombre)))
+
+    conductores = []
+    contadores = {"total": 0, "acreditados": 0, "vencidos": 0,
+                  "en_proceso": 0, "bloqueados": 0}
+    for s in sujetos:
+        lim = _asegurar_licencia(db, s)
+        _sincronizar(db, s, lim)
+        datos = _out(db, s, lim)
+        vencida = bool(lim.vence and lim.vence < date.today())
+        if vencida or any(d["estado_calc"] == "venc" for d in datos["checklist"]):
+            estado = "vencidos"
+        elif lim.emsipor_estado == "aprobado":
+            estado = "acreditados"
+        elif lim.emsipor_estado == "parcial":
+            estado = "en_proceso"
+        else:
+            estado = "bloqueados"
+        contadores[estado] += 1
+        datos["contador"] = estado
+        datos["licencia_vencida"] = vencida
+        conductores.append(datos)
+    contadores["total"] = len(conductores)
+    db.commit()
+
+    return {"contrato_id": str(c.id), "conductores": conductores,
+            "contadores": contadores}
+
+
 @router.get("")
 def detalle(sid: uuid.UUID, db: Session = Depends(get_db),
             cid: uuid.UUID = Depends(get_company_id),

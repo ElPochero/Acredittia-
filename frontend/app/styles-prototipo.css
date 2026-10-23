@@ -342,36 +342,13 @@
   .snavi{display:flex;align-items:center;justify-content:center;width:48px;height:44px;padding:0;border-radius:10px;color:rgba(255,255,255,.55);font-weight:500;font-size:0;cursor:pointer;transition:.15s;position:relative}
   .snavi .ico{font-size:1.2rem;width:20px;text-align:center;filter:none}
   .snavi:hover{background:rgba(255,255,255,.08);color:#fff}
-  .snavi[data-tooltip]:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    left: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-left: 10px;
-    background: #0F172A;
-    color: #F8FAFC;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15);
-    z-index: 9999;
-    pointer-events: none;
-  }
-  .snavi[data-tooltip]:hover::before {
-    content: "";
-    position: absolute;
-    left: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-left: 4px;
-    border-width: 5px 6px 5px 0;
-    border-style: solid;
-    border-color: transparent #0F172A transparent transparent;
-    z-index: 9999;
-    pointer-events: none;
+  /* Tooltip con portal en Sidebar.tsx (.snav-tip); el pseudo-elemento anterior
+     se recortaba contra el overflow del carril (H-02) */
+  .snav-tip{
+    background:#0F172A;color:#F8FAFC;padding:6px 12px;border-radius:8px;
+    font-size:0.82rem;font-weight:600;white-space:nowrap;transform:translateY(-50%);
+    box-shadow:0 10px 25px -5px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.15);
+    z-index:9999;pointer-events:none;
   }
   .snavi:active{transform:scale(0.92);opacity:.85;transition:transform .05s ease}
   .snavi.active{background:var(--cyan);color:#fff;font-weight:700}
@@ -1251,9 +1228,6 @@
 
     /* Map grid */
     .mapgrid{grid-template-columns:1fr}
-
-    /* Faena grid */
-    .grid{grid-template-columns:1fr 1fr}
   }
 
   @media(max-width:480px){
@@ -1261,7 +1235,6 @@
     .dkpi{padding:14px}
     .dkpi .ic{width:44px;height:44px;font-size:1.1rem}
     .dkpi .kn{font-size:1.5rem}
-    .grid{grid-template-columns:1fr}
     .cats{grid-template-columns:1fr}
     .ptkpis{grid-template-columns:1fr 1fr}
     .fbottom{grid-template-columns:1fr}

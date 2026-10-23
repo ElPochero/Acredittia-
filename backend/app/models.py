@@ -171,6 +171,9 @@ class User(Base):
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id"))
     # Solo para role=contract_admin/visor: acota el acceso a un único contrato.
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contratos.id"))
+    # Unidad de negocio que el usuario lidera (encargado jerárquico). Da acceso
+    # automático a todos los contratos de esa unidad (v14).
+    unidad_negocio: Mapped[str | None] = mapped_column(Text)
     nombre: Mapped[str | None] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(pg_enum("account_status"), default="pending")
@@ -377,6 +380,9 @@ class Contrato(Base):
     estado: Mapped[str] = mapped_column(pg_enum("contrato_estado"), default="vigente")
     origen_ia_review_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     hereda_plataformas: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Unidad de negocio a la que pertenece el contrato (v14). Es lo que agrupa
+    # el listado y lo que da acceso a los encargados jerárquicos de la unidad.
+    unidad_negocio: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

@@ -18,9 +18,9 @@
  *   están igualmente aquí, con sus tipos, para que quien haga esas pantallas no
  *   tenga que escribir el cliente.
  */
-import { api, patch, type Query } from "./api";
+import { api, descargarBlob, patch, type Query } from "./api";
 import type {
-  AcreditacionesEstado, ActividadFila, AdminStats, Alerta, AlertaPatch,
+  AcreditacionesEstado, ActividadFila, AdminStats, AgentesContrato, Alerta, AlertaPatch,
   Ambito, ArchivoConfirmado, CategoriaEvento, ChecklistSujeto, Conjunto,
   Contrato, ContratoCreado, ContratoIn, ContratoPatch, Credencial,
   CumplimientoContrato, Documento, DocumentoFila, DownloadUrl, Ejemplo, Empresa,
@@ -35,7 +35,8 @@ import type {
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
   Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
-  CumplimientoDashboardData,
+  CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
+  SeccionExport,
 } from "./tipos";
 
 export * from "./api";
@@ -157,7 +158,7 @@ export const empresa = {
 
   invitar: (body: {
     nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
-    contrato_id?: string | null;
+    contrato_id?: string | null; unidad_negocio?: string | null;
   }) => api<UsuarioEmpresa & { activacion?: Record<string, unknown> }>(
     "/company/usuarios", { body }),
 
@@ -232,6 +233,11 @@ export const requisitos = {
   plantillas: (params?: ParamsPagina & { ambito?: Ambito; faena_id?: string }) =>
     api<Pagina<PlantillaRequisito>>("/requisitos/templates", { query: q(params) }),
 
+  /** SAS de escritura para el archivo de ejemplo de una plantilla. */
+  subirEjemplo: (body: {
+    filename: string; content_type?: string; size_bytes?: number;
+  }) => api<UploadUrl>("/requisitos/templates/upload-url", { body }),
+
   crearPlantilla: (body: {
     ambito: Ambito; titulo: string; codigo?: string; tipo?: TipoRequisito;
     obligatorio?: boolean; faena_id?: string; vigencia_meses?: number;
@@ -281,8 +287,13 @@ export const cargos = {
 // §4 — contratos
 // ============================================================================
 export const contratos = {
-  listar: (params?: ParamsPagina & { faena_id?: string; estado?: string }) =>
-    api<Pagina<Contrato>>("/contratos", { query: q(params) }),
+  listar: (params?: ParamsPagina & {
+    faena_id?: string; estado?: string; unidad_negocio?: string;
+  }) => api<Pagina<Contrato>>("/contratos", { query: q(params) }),
+
+  /** Catálogo cerrado de unidades de negocio. */
+  unidadesNegocio: () =>
+    api<Conjunto<{ nombre: string }>>("/contratos/unidades-negocio"),
 
   detalle: (id: string) => api<Contrato>(`/contratos/${id}`),
 
@@ -308,12 +319,20 @@ export const contratos = {
     api<{ importados: number; documentos_creados: number }>(
       `/contratos/${id}/equipos/importar`, { body: { sujetos_ids } }),
 
+  /** Reasigna personal de la empresa a este contrato; reutiliza documentos vigentes. */
+  importarPersonal: (id: string, sujetos_ids: string[]) =>
+    api<{ importados: number; documentos_creados: number; documentos_reutilizados: number }>(
+      `/contratos/${id}/personal/importar`, { body: { sujetos_ids } }),
+
   alertas: (id: string, params?: ParamsPagina & {
     severidad?: string; origen?: string; solo_activas?: boolean;
   }) => api<Pagina<Alerta>>(`/contratos/${id}/alertas`, { query: q(params) }),
 
   historial: (id: string, params?: ParamsPagina & { modulo?: string; tipo?: string }) =>
     api<Pagina<ActividadFila>>(`/contratos/${id}/historial`, { query: q(params) }),
+
+  /** Pestaña Agentes: interacciones del chatbot y avisos del canal WhatsApp. */
+  agentes: (id: string) => api<AgentesContrato>(`/contratos/${id}/agentes`),
 
   /** Despacha una plantilla de correo del contrato (C22). */
   enviarMail: (id: string, body: { plantilla: string; para?: string; asunto?: string }) =>
@@ -496,6 +515,10 @@ export const equipos = {
 export const licencia = {
   detalle: (sujetoId: string) =>
     api<LicenciaInterna>(`/personal/${sujetoId}/licencia-interna`),
+
+  /** Conductores del contrato con su expediente y los contadores de la LIM. */
+  contrato: (contratoId: string) =>
+    api<LimContrato>(`/contratos/${contratoId}/licencia-interna`),
 
   /** `estado` no se acepta: lo deriva el backend de `numero` y `vence`. */
   editar: (sujetoId: string, cambios: { numero?: string | null; vence?: string | null }) =>
@@ -736,6 +759,27 @@ export const exportaciones = {
     recurso: RecursoExport; filtros?: Record<string, unknown>;
     formato?: "excel" | "csv";
   }) => api<Exportacion>("/exportaciones", { body }),
+};
+
+export type ParamsExportar = {
+  contrato_id?: string;
+  plataforma?: string;
+  incluir?: string;
+  estructura?: string;
+  solo_vigentes?: boolean;
+};
+
+/**
+ * Exportación documental en ZIP por plataforma de destino (H-20, H-29).
+ *
+ * `arbol()` alimenta la vista previa y `zip()` descarga exactamente ese mismo
+ * plan: ambos endpoints comparten el constructor en el backend.
+ */
+export const exportar = {
+  arbol: (params: ParamsExportar) =>
+    api<ArbolExportacion>("/exportar/arbol", { query: q(params) }),
+
+  zip: (params: ParamsExportar) => descargarBlob("/exportar/zip", q(params)),
 };
 
 // ============================================================================

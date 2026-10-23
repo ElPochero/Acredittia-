@@ -976,7 +976,6 @@ def get_chat_historial(
 ):
     """Recupera el historial de chat para un contexto específico."""
     from sqlalchemy import select
-    from .shared import _iso
 
     historial = (
         db.execute(

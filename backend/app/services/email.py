@@ -175,6 +175,119 @@ def enviar_email(to_email: str, subject: str, html_body: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Invitación de usuarios con credenciales temporales
+# ---------------------------------------------------------------------------
+def _html_invitacion(nombre: str | None, correo: str, clave: str, rol: str,
+                     contrato_nombre: str | None,
+                     enlace: str | None) -> str:
+    """Correo de invitación: credenciales temporales y contrato al que entra."""
+    ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    saludo = f"Hola {nombre}," if nombre else "Hola,"
+
+    fila_contrato = ""
+    if contrato_nombre:
+        fila_contrato = f"""
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;font-size:13px;">Contrato:</td>
+          <td style="padding:6px 0;font-weight:bold;color:#111827;font-size:13px;">{contrato_nombre}</td>
+        </tr>"""
+
+    cta = ""
+    if enlace:
+        cta = f"""
+      <div style="text-align:center;margin:24px 0;">
+        <a href="{enlace}"
+           style="display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);
+                  color:#ffffff;text-decoration:none;padding:12px 28px;
+                  border-radius:8px;font-size:14px;font-weight:bold;">
+          Entrar al contrato →
+        </a>
+      </div>"""
+
+    return f"""
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,sans-serif;">
+  <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:12px;
+              box-shadow:0 4px 16px rgba(0,0,0,0.08);overflow:hidden;">
+    <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:24px 32px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td>
+            <span style="color:#60a5fa;font-size:11px;font-weight:bold;
+                         letter-spacing:2px;text-transform:uppercase;">ACREDITTIA</span>
+            <div style="color:#ffffff;font-size:20px;font-weight:bold;margin-top:4px;">
+              Te invitaron a ACREDITTIA
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="padding:24px 32px;">
+      <p style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.6;">{saludo}</p>
+      <p style="margin:0 0 20px;font-size:14px;color:#374151;line-height:1.6;">
+        Te creamos una cuenta con acceso a ACREDITTIA. Estas son tus credenciales
+        temporales: entra con tu correo y cámbialas al primer ingreso.
+      </p>
+
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;
+                  padding:16px 20px;margin-bottom:24px;">
+        <div style="font-size:12px;font-weight:bold;color:#6b7280;
+                    text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Credenciales</div>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;font-size:13px;">Usuario:</td>
+            <td style="padding:6px 0;font-weight:bold;color:#111827;font-size:13px;">{correo}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;font-size:13px;">Contraseña temporal:</td>
+            <td style="padding:6px 0;font-weight:bold;color:#111827;font-size:13px;
+                       font-family:monospace;">{clave}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;font-size:13px;">Permiso:</td>
+            <td style="padding:6px 0;font-weight:bold;color:#111827;font-size:13px;">{rol}</td>
+          </tr>
+          {fila_contrato}
+        </table>
+      </div>
+      {cta}
+    </div>
+
+    <div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#9ca3af;">
+        Generado automáticamente el {ahora} · Acredittia — Plataforma de Acreditación
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def enviar_invitacion(*, to_email: str, nombre: str | None, clave: str,
+                       rol: str, contrato_nombre: str | None = None,
+                       enlace: str | None = None) -> None:
+    """Encola el correo de invitación con las credenciales temporales.
+
+    El enlace lo construye el servidor (`settings.app_url`): si viniera del
+    cliente, un `Origin` manipulado podría mandar al invitado a una página
+    ajena y quedarse con su contraseña temporal.
+    """
+    from .jobs import enqueue
+
+    asunto = "Te invitaron a ACREDITTIA"
+    if contrato_nombre:
+        asunto += f" · {contrato_nombre}"
+    enqueue("enviar_email", to_email=to_email, subject=asunto,
+            html_body=_html_invitacion(nombre, to_email, clave, rol,
+                                       contrato_nombre, enlace))
+    log.info("invitación enviada a %s (%s)", to_email, rol)
+
+
+# ---------------------------------------------------------------------------
 # Despacho inteligente (respeta preferencias de la empresa)
 # ---------------------------------------------------------------------------
 

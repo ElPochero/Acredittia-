@@ -102,13 +102,7 @@ export default function CertificacionLaboralPage() {
   return (
     <div className="space-y-6">
       {/* View Header */}
-      <div className="view-head">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">📊 Certificación Laboral</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Gestión de períodos laborales, matriz documental por trabajador y auditoría de cumplimiento.
-          </p>
-        </div>
+      <div className="view-head" style={{ justifyContent: "flex-end" }}>
         <div className="view-head-actions">
           <button
             onClick={() => setModalCrearAbierto(true)}

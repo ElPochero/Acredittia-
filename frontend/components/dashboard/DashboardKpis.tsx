@@ -31,7 +31,7 @@ export default function DashboardKpis({ kpis, tendencia, loading }: Props) {
   const delta = tendencia?.delta_pct;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
       <KpiCard icon="📋" iconCls="bg-blue-50 text-blue-600" label="Contratos activos"
         value={ph ?? String(kpis?.contratos_activos ?? 0)}
         sub={ph ?? `de ${kpis?.contratos_activos ?? 0} contratos totales`} />

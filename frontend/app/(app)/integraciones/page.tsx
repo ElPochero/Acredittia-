@@ -27,14 +27,7 @@ export default function IntegracionesPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Integraciones & Sistemas Conectados</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Conexión con plataformas de mandantes (WebControl, SIGA, SUCAL, DirectIC).
-          </p>
-        </div>
-      </div>
+      {/* Título único en AppHeader; sin cabecera duplicada */}
 
       {!loading && total === 0 && (
         <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-4 flex items-start gap-3 shadow-sm">

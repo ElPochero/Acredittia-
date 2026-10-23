@@ -85,6 +85,23 @@ export type RecursoExport =
   | "requisitos" | "alertas" | "contratos" | "matriz";
 
 // ============================================================================
+// Exportación documental (ZIP por plataforma de destino)
+// ============================================================================
+export type SeccionExport = "empresa" | "personal" | "equipos" | "licencia";
+export type EstructuraExport = "sueltos" | "carpetas" | "pdf";
+
+export type ArbolExportacion = {
+  nombre_zip: string;
+  plataforma: string;
+  total_archivos: number;
+  total_carpetas: number;
+  secciones: { clave: SeccionExport; titulo: string; archivos: number }[];
+  rutas: string[];
+  truncado: boolean;
+  excluidos: { vencidos: number; sin_archivo: number };
+};
+
+// ============================================================================
 // Autenticación y usuario
 // ============================================================================
 export type EmpresaResumen = { id: string; nombre: string; rut: string };
@@ -105,6 +122,8 @@ export type Usuario = {
   contrato_id: string | null;
   /** Solo viene poblado para roles acotados (`contract_admin`, `visor`). */
   contrato: ContratoResumen | null;
+  /** Unidad de negocio que lidera (encargado jerárquico). */
+  unidad_negocio: string | null;
   last_login_at: string | null;
   company: EmpresaResumen | null;
 };
@@ -360,9 +379,40 @@ export type Proveedor = {
   faena_id: string | null;
 };
 
+export type ConversacionAgente = {
+  id: string;
+  mensaje_usuario: string;
+  respuesta_ia: string;
+  created_at: string | null;
+};
+
+export type AvisoAgente = {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  severidad: Severidad;
+  estado: EstadoAlerta;
+  created_at: string | null;
+};
+
+/** `GET /contratos/{id}/agentes`: interacciones del chatbot y avisos WhatsApp. */
+export type AgentesContrato = {
+  contrato_id: string;
+  conversaciones: ConversacionAgente[];
+  avisos_whatsapp: AvisoAgente[];
+  totales: { conversaciones: number; avisos_whatsapp: number };
+};
+
 // ============================================================================
 // Contratos
 // ============================================================================
+
+/** Catálogo cerrado de unidades de negocio (eje transversal a la faena). */
+export type UnidadNegocio =
+  | "Transporte de Personal" | "Mantención" | "Obras Civiles"
+  | "Servicios Generales" | "Minería Subterránea" | "Explosivos"
+  | "Servicios Industriales";
+
 export type StatsContrato = {
   cumplimiento_pct: number;
   personal: { total: number; acreditados: number };
@@ -380,6 +430,8 @@ export type Contrato = {
   fecha_termino: string | null;
   renovacion_automatica: boolean;
   origen_ia_review_id: string | null;
+  /** Unidad de negocio a la que pertenece (agrupa el listado). */
+  unidad_negocio: string | null;
   faena: {
     id: string;
     nombre: string;
@@ -400,6 +452,8 @@ export type ContratoIn = {
   fecha_inicio?: string | null;
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
+  /** Unidad de negocio a la que pertenece el contrato. */
+  unidad_negocio?: string | null;
   /** Job de `POST /contratos/analizar` que originó el alta. */
   ia_review_id?: string | null;
   /** Requisitos propios del contrato fijados por el asistente o a mano (C2a). */
@@ -418,6 +472,7 @@ export type ContratoPatch = {
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
   estado?: EstadoContrato;
+  unidad_negocio?: string | null;
 };
 
 export type CeldaMatriz = {
@@ -659,6 +714,25 @@ export type LicenciaInterna = {
   };
 };
 
+/** Conductor del contrato con el estado que lo resume para los contadores. */
+export type ConductorLIM = LicenciaInterna & {
+  contador: "acreditados" | "vencidos" | "en_proceso" | "bloqueados";
+  licencia_vencida: boolean;
+};
+
+/** `GET /contratos/{id}/licencia-interna`: conductores y contadores de la LIM. */
+export type LimContrato = {
+  contrato_id: string;
+  conductores: ConductorLIM[];
+  contadores: {
+    total: number;
+    acreditados: number;
+    vencidos: number;
+    en_proceso: number;
+    bloqueados: number;
+  };
+};
+
 // ============================================================================
 // Alertas
 // ============================================================================
@@ -890,6 +964,8 @@ export type UsuarioEmpresa = {
   status: EstadoEmpresa;
   contrato_id: string | null;
   contrato?: ContratoResumen | null;
+  /** Unidad de negocio que lidera (encargado jerárquico). */
+  unidad_negocio?: string | null;
   last_login_at: string | null;
   created_at: string | null;
 };

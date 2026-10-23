@@ -18,6 +18,7 @@ página; solo después se cargan los registros y documentos de esa página.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date
 
@@ -70,7 +71,16 @@ def _consulta_grupos(cid: uuid.UUID, tipo: str, clave,
         q = q.where(or_(Contrato.estado == "terminado", Sujeto.estado == "baja"))
     if search:
         like = f"%{search}%"
-        q = q.where(or_(Sujeto.nombre.ilike(like), clave.ilike(like)))
+        # RUT/patente: exacto o por prefijo. Para el RUT se comparan los
+        # dígitos sin separadores: «1911246» encuentra a «19.112.466-9».
+        por_clave = [clave.ilike(f"{search}%")]
+        if tipo == "trabajador":
+            digitos = re.sub(r"\D", "", search)
+            if digitos:
+                por_clave.append(
+                    func.regexp_replace(Sujeto.rut, "[^0-9Kk]", "", "g")
+                    .ilike(f"{digitos}%"))
+        q = q.where(or_(Sujeto.nombre.ilike(like), *por_clave))
     return q
 
 
@@ -295,7 +305,9 @@ def ficha_persona(rut: str, db: Session = Depends(get_db),
                   cid: uuid.UUID = Depends(get_company_id),
                   user: User = Depends(get_current_user)):
     """Ficha consolidada de la persona: todos sus registros y su licencia."""
-    return _ficha(db, cid, "trabajador", Sujeto.rut, rut.strip(),
+    from ..security import normalizar_rut
+    valor = normalizar_rut(rut) or rut.strip()
+    return _ficha(db, cid, "trabajador", Sujeto.rut, valor,
                   contrato_scope(user))
 
 

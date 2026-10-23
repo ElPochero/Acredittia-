@@ -28,8 +28,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..deps import (Page, aplicar_orden, contrato_scope, err, get_company_id,
-                    get_current_user, paginacion, require_contrato, sobre)
+from ..deps import (Page, aplicar_orden, contrato_permitido, contrato_scope, err,
+                    get_company_id, get_current_user, paginacion, sobre)
 from ..models import (
     Actividad, Alerta, Contrato, Documento, DocumentoArchivo, Faena, IaReview,
     Sujeto, User,
@@ -43,6 +43,19 @@ logger = logging.getLogger("acredittia.contratos")
 router = APIRouter(prefix="/contratos", tags=["contratos"])
 
 ESTADOS: tuple[str, ...] = ("vigente", "en_evaluacion", "terminado")
+
+# Unidad de negocio: eje transversal a la faena que agrupa los contratos de una
+# empresa (Transporte de Personal, Mantención, Obras Civiles…). Es un conjunto
+# cerrado y corto, así que vive en el código y no en una tabla.
+UNIDADES_NEGOCIO: tuple[str, ...] = (
+    "Transporte de Personal",
+    "Mantención",
+    "Obras Civiles",
+    "Servicios Generales",
+    "Minería Subterránea",
+    "Explosivos",
+    "Servicios Industriales",
+)
 
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
                    "created_at", "updated_at"}
@@ -58,6 +71,8 @@ class ContratoIn(BaseModel):
     fecha_inicio: date | None = None
     fecha_termino: date | None = None
     renovacion_automatica: bool = False
+    # Unidad de negocio a la que pertenece el contrato (agrupa y da acceso).
+    unidad_negocio: str | None = None
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
@@ -71,6 +86,7 @@ class ContratoPatch(BaseModel):
     fecha_termino: date | None = None
     renovacion_automatica: bool | None = None
     estado: str | None = None
+    unidad_negocio: str | None = None
 
 
 class AnalizarIn(BaseModel):
@@ -83,12 +99,13 @@ class AnalizarIn(BaseModel):
 # ============================================================================
 def _get_contrato(db: Session, cid: uuid.UUID, contrato_id: uuid.UUID,
                   user: User | None = None) -> Contrato:
-    """Contrato de la empresa, o 404. Acota al contract_admin a su contrato."""
-    if user is not None:
-        require_contrato(contrato_id, user)
+    """Contrato de la empresa, o 404. Acota al contract_admin a su contrato
+    o a los de su unidad de negocio (encargado jerárquico)."""
     c = db.get(Contrato, contrato_id)
     if not c or c.company_id != cid:
         raise err(404, "NO_ENCONTRADO", "Contrato no existe")
+    if user is not None and not contrato_permitido(user, c):
+        raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
     return c
 
 
@@ -143,6 +160,7 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
         "renovacion_automatica": c.renovacion_automatica,
+        "unidad_negocio": c.unidad_negocio,
         "origen_ia_review_id": (str(c.origen_ia_review_id)
                                 if c.origen_ia_review_id else None),
         "faena": {"id": str(f.id), "nombre": f.nombre, "mandante": f.mandante,
@@ -156,25 +174,43 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
 # ============================================================================
 # §8.1 — CRUD
 # ============================================================================
+@router.get("/unidades-negocio")
+def unidades_negocio(user: User = Depends(get_current_user)):
+    """Catálogo de unidades de negocio. Va antes que `/{contrato_id}` porque
+    FastAPI resuelve las rutas en orden de declaración."""
+    return {"items": [{"nombre": u} for u in UNIDADES_NEGOCIO]}
+
+
 @router.get("")
 def listar(faena_id: uuid.UUID | None = Query(None),
            estado: str | None = Query(None),
+           unidad_negocio: str | None = Query(None),
            p: Page = Depends(paginacion),
            db: Session = Depends(get_db),
            cid: uuid.UUID = Depends(get_company_id),
            user: User = Depends(get_current_user)):
-    """Contratos de la empresa. Un contract_admin ve únicamente el suyo."""
+    """Contratos de la empresa. Un contract_admin ve únicamente el suyo o los
+    de su unidad de negocio (encargado jerárquico)."""
     if estado and estado not in ESTADOS:
         raise err(400, "ESTADO_INVALIDO",
                   f"Estado debe ser uno de: {', '.join(ESTADOS)}")
     q = select(Contrato).where(Contrato.company_id == cid)
     scope = contrato_scope(user)
-    if scope:
+    unidad = user.unidad_negocio
+    if scope and unidad:
+        # Encargado jerárquico: su contrato + todos los de su unidad.
+        q = q.where(or_(Contrato.id == scope,
+                        Contrato.unidad_negocio == unidad))
+    elif scope:
         q = q.where(Contrato.id == scope)
+    elif unidad:
+        q = q.where(Contrato.unidad_negocio == unidad)
     if faena_id:
         q = q.where(Contrato.faena_id == faena_id)
     if estado:
         q = q.where(Contrato.estado == estado)
+    if unidad_negocio:
+        q = q.where(Contrato.unidad_negocio == unidad_negocio)
     if p.search:
         like = f"%{p.search}%"
         q = q.where(or_(Contrato.nombre.ilike(like), Contrato.codigo.ilike(like)))
@@ -182,6 +218,19 @@ def listar(faena_id: uuid.UUID | None = Query(None),
     q = aplicar_orden(q, Contrato, p.sort, ORDEN_CONTRATOS, "-created_at")
     filas = list(db.scalars(q.offset(p.offset).limit(p.page_size)))
     return sobre([_out(db, c) for c in filas], total, p)
+
+
+def _valida_unidad(unidad: str | None) -> str | None:
+    """Normaliza la unidad de negocio; 400 si no está en el catálogo."""
+    if unidad is None:
+        return None
+    u = unidad.strip()
+    if not u:
+        return None
+    if u not in UNIDADES_NEGOCIO:
+        raise err(400, "UNIDAD_NEGOCIO_INVALIDA",
+                  f"Unidad de negocio debe ser una de: {', '.join(UNIDADES_NEGOCIO)}")
+    return u
 
 
 @router.post("", status_code=201)
@@ -202,6 +251,7 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
     if body.codigo and db.scalar(select(Contrato.id).where(
             Contrato.company_id == cid, Contrato.codigo == body.codigo)):
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+    unidad = _valida_unidad(body.unidad_negocio)
 
     origen = None
     if body.ia_review_id:
@@ -214,6 +264,7 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
                  codigo=body.codigo, fecha_inicio=body.fecha_inicio,
                  fecha_termino=body.fecha_termino,
                  renovacion_automatica=body.renovacion_automatica,
+                 unidad_negocio=unidad,
                  origen_ia_review_id=origen)
     db.add(c)
     try:
@@ -278,6 +329,8 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
                                       Contrato.codigo == data["codigo"],
                                       Contrato.id != c.id)):
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+    if "unidad_negocio" in data:
+        data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
     for k, v in data.items():
         setattr(c, k, v)
     c.updated_at = datetime.now(timezone.utc)
@@ -409,6 +462,74 @@ class ImportarPersonalIn(BaseModel):
     sujetos_ids: list[uuid.UUID]
 
 
+def _reutilizar_documentos(db: Session, cid: uuid.UUID, s_new: Sujeto) -> int:
+    """Feedback 17-10 punto 2: los documentos obligatorios VIGENTES de la persona
+    en otros contratos quedan ligados y validados en el registro nuevo, sin que
+    nadie vuelva a subir el archivo.
+
+    Cada copia integra el `documento_destino` del checklist nuevo: el blob se
+    duplica server-side (el índice UNIQUE de `blob_path` impide compartir la
+    fila) pero el contenido es idéntico y el usuario no repite la subida.
+    """
+    from ..models import DocumentoArchivo
+    from ..services.checklist import calc_estado_doc
+    from ..services.storage import get_storage, make_blob_path
+
+    # autoflush=False en `SessionLocal`: los documentos recién instanciados son
+    # pendientes; sin flush explícito la consulta los vería como inexistentes.
+    db.flush()
+
+    faltantes = {
+        d.template_id: d
+        for d in db.scalars(select(Documento).where(
+            Documento.sujeto_id == s_new.id, Documento.template_id.is_not(None),
+            Documento.es_emsipor.is_(False), Documento.estado == "falta"))
+        if d.template_id
+    }
+    if not faltantes:
+        return 0
+
+    otros = select(Sujeto.id).where(
+        Sujeto.company_id == cid, Sujeto.tipo == "trabajador",
+        Sujeto.rut == s_new.rut, Sujeto.id != s_new.id)
+    # El más actualizado por plantilla: si la persona tira dos registros con el
+    # mismo documento, gana la versión más reciente.
+    fuentes: dict[uuid.UUID, Documento] = {}
+    for d in db.scalars(select(Documento).join(DocumentoArchivo,
+            Documento.id == DocumentoArchivo.documento_id).where(
+            Documento.sujeto_id.in_(otros),
+            Documento.template_id.in_(list(faltantes)),
+            Documento.estado == "ok").order_by(Documento.updated_at.desc())):
+        fuentes.setdefault(d.template_id, d)
+    if not fuentes:
+        return 0
+
+    storage = get_storage()
+    ahora = datetime.now(timezone.utc)
+    usados = 0
+    for tid, fuente in fuentes.items():
+        dest = faltantes[tid]
+        # Sólo copiamos si los bytes del archivo fuente existen: los datos
+        # semilla pueden marcar documentos `ok` con un blob_path sin archivo
+        # real, y fallar aquí rompería la importación completa.
+        filas = [(a, make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename))
+                 for a in fuente.archivos if storage.exists(a.blob_path)]
+        if not filas:
+            continue
+        dest.estado = "ok"
+        dest.vence = fuente.vence
+        dest.updated_at = ahora
+        dest.estado_calc = calc_estado_doc(dest)
+        for a, ruta in filas:
+            storage.save(ruta, storage.read(a.blob_path))
+            db.add(DocumentoArchivo(
+                company_id=cid, documento_id=dest.id, filename=a.filename,
+                blob_path=ruta, content_type=a.content_type,
+                size_bytes=a.size_bytes, uploaded_by=a.uploaded_by))
+        usados += 1
+    return usados
+
+
 @router.post("/{contrato_id}/personal/importar")
 def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
                       db: Session = Depends(get_db),
@@ -416,17 +537,18 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
                       user: User = Depends(get_current_user)):
     """Importa personal desde nómina u otro contrato copiando el sujeto."""
     from ..services.checklist import instanciar_docs
-    
+
     c = _get_contrato(db, cid, contrato_id, user)
-    
+
     sujetos = db.scalars(select(Sujeto).where(
         Sujeto.company_id == cid,
         Sujeto.id.in_(body.sujetos_ids),
         Sujeto.tipo == "trabajador"
     )).all()
-    
+
     importados = 0
     docs_creados = 0
+    docs_reutilizados = 0
     for s_old in sujetos:
         existe = db.scalar(select(Sujeto.id).where(
             Sujeto.company_id == cid,
@@ -436,7 +558,7 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
         ))
         if existe:
             continue
-            
+
         s_new = Sujeto(
             company_id=cid,
             contrato_id=c.id,
@@ -450,18 +572,20 @@ def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
         )
         db.add(s_new)
         db.flush()
-        
+
         n = instanciar_docs(db, cid, "personal", sujeto_id=s_new.id,
                             faena_id=c.faena_id, cargo_id=s_new.cargo_id,
                             contrato_plantilla_id=c.id)
         docs_creados += n
+        docs_reutilizados += _reutilizar_documentos(db, cid, s_new)
         importados += 1
-        
+
     actividad.log(db, cid, "creacion", "personal",
                   f"Importados {importados} trabajadores al contrato '{c.nombre}'",
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
     db.commit()
-    return {"importados": importados, "documentos_creados": docs_creados}
+    return {"importados": importados, "documentos_creados": docs_creados,
+            "documentos_reutilizados": docs_reutilizados}
 
 
 @router.get("/{contrato_id}/personal/{sujeto_id}/docs-reutilizables")
@@ -736,6 +860,60 @@ def enviar_mail(contrato_id: uuid.UUID, body: MailIn,
     db.commit()
     return {"plantilla": body.plantilla, "asunto": asunto,
             "modo": modo, "enviados": enviados}
+
+
+@router.get("/{contrato_id}/agentes")
+def agentes_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Historial de interacciones del chatbot con el contrato (pestaña Agentes).
+
+    Lo que la plataforma guarda de verdad son dos fuentes: las conversaciones
+    del asistente (`chat_historial` del contexto del contrato) y los avisos que
+    el canal de WhatsApp dejó en las alertas del contrato. Se devuelven
+    separadas para que la pantalla no mezcle una conversación con un aviso.
+    """
+    from ..models import ChatHistorial
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    conversaciones = list(db.scalars(
+        select(ChatHistorial)
+        .where(ChatHistorial.company_id == cid,
+               ChatHistorial.contexto == f"contrato_{c.id}")
+        .order_by(ChatHistorial.created_at.desc())
+        .limit(100)
+    ))
+
+    avisos = list(db.scalars(
+        select(Alerta)
+        .where(Alerta.company_id == cid, Alerta.contrato_id == c.id,
+               Alerta.plataforma == "whatsapp")
+        .order_by(Alerta.created_at.desc())
+        .limit(100)
+    ))
+
+    return {
+        "contrato_id": str(c.id),
+        "conversaciones": [{
+            "id": str(h.id),
+            "mensaje_usuario": h.mensaje_usuario,
+            "respuesta_ia": h.respuesta_ia,
+            "created_at": h.created_at.isoformat() if h.created_at else None,
+        } for h in conversaciones],
+        "avisos_whatsapp": [{
+            "id": str(a.id),
+            "titulo": a.titulo,
+            "descripcion": a.descripcion,
+            "severidad": a.severidad,
+            "estado": a.estado,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        } for a in avisos],
+        "totales": {
+            "conversaciones": len(conversaciones),
+            "avisos_whatsapp": len(avisos),
+        },
+    }
 
 
 @router.get("/{contrato_id}/historial")

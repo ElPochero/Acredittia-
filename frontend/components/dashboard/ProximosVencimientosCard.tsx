@@ -5,12 +5,15 @@ import type { ProximoVencimiento } from "@/lib/tipos";
 
 type Props = { vencimientos: ProximoVencimiento[]; loading: boolean };
 
-function badge(fechaIso: string): { dia: string | number; mes: string } {
+function badge(fechaIso: string): { dia: string | number; mes: string; full: string } {
   const d = new Date(fechaIso);
-  if (isNaN(d.getTime())) return { dia: "--", mes: "---" };
+  if (isNaN(d.getTime())) return { dia: "--", mes: "---", full: "--/--/----" };
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
   return {
-    dia: d.getDate(),
+    dia: dd,
     mes: d.toLocaleString("es-CL", { month: "short" }).toUpperCase(),
+    full: `${dd}/${mm}/${d.getFullYear()}`,
   };
 }
 
@@ -36,7 +39,7 @@ export default function ProximosVencimientosCard({ vencimientos, loading }: Prop
         ) : (
           <div className="space-y-2.5 text-xs">
             {vencimientos.map((v) => {
-              const { dia, mes } = badge(v.vence);
+              const { dia, mes, full } = badge(v.vence);
               const vencido = v.dias < 0;
               return (
                 <div key={v.documento_id} className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-between gap-3">
@@ -47,7 +50,10 @@ export default function ProximosVencimientosCard({ vencimientos, loading }: Prop
                     </div>
                     <div className="min-w-0">
                       <div className="font-bold text-slate-800 truncate">{v.titulo}</div>
-                      {v.sujeto && <div className="text-[11px] text-slate-500 truncate">{v.sujeto}</div>}
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {v.sujeto && <span className="mr-1">{v.sujeto} ·</span>}
+                        <span>{full}</span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
