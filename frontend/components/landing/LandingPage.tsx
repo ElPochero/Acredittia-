@@ -1,68 +1,60 @@
 "use client";
-import React from "react";
-import { useRouter } from "next/navigation";
 
+import React from "react";
 import LandingNav from "./LandingNav";
 import LandingHero from "./LandingHero";
-import LandingTarget from "./LandingTarget";
-import LandingFaenasScroll from "./LandingFaenasScroll";
-import LandingAgentePanel from "./LandingAgentePanel";
-import LandingOrbit from "./LandingOrbit";
-import LandingAgentesIA from "./LandingAgentesIA";
-import LandingFlujoVivo from "./LandingFlujoVivo";
-import LandingProveedores from "./LandingProveedores";
-import LandingHub from "./LandingHub";
-import LandingStats from "./LandingStats";
-import LandingVideoTrabajadores from "./LandingVideoTrabajadores";
-import LandingVideoPitch from "./LandingVideoPitch";
-import LandingIADocs from "./LandingIADocs";
-import LandingRiesgos from "./LandingRiesgos";
-import LandingFeatures from "./LandingFeatures";
 import LandingProblema from "./LandingProblema";
-import LandingVs from "./LandingVs";
-import LandingIndustries from "./LandingIndustries";
-import LandingIAOscura from "./LandingIAOscura";
-import LandingEquipos from "./LandingEquipos";
-import LandingDiferenciador from "./LandingDiferenciador";
-import LandingAQuienAyudamos from "./LandingAQuienAyudamos";
-import LandingMapa from "./LandingMapa";
-import LandingExcel from "./LandingExcel";
-import LandingVideoSeq from "./LandingVideoSeq";
-import LandingFAQ from "./LandingFAQ";
-import LandingCTA from "./LandingCTA";
+import LandingPlataforma from "./LandingPlataforma";
+import LandingParaQuien from "./LandingParaQuien";
+import LandingStats from "./LandingStats";
+import LandingFunciones from "./LandingFunciones";
+import LandingAlertas from "./LandingAlertas";
+import LandingIndustrias from "./LandingIndustrias";
+import LandingFlujo from "./LandingFlujo";
+import LandingCarpetas from "./LandingCarpetas";
+import LandingEcosistema from "./LandingEcosistema";
+import LandingPlanilla from "./LandingPlanilla";
+import LandingFaenas from "./LandingFaenas";
+import LandingAgentes from "./LandingAgentes";
+import LandingImpacto from "./LandingImpacto";
+import LandingBeneficiados from "./LandingBeneficiados";
+import LandingTrust from "./LandingTrust";
+import LandingCtaFinal from "./LandingCtaFinal";
+import LandingContacto from "./LandingContacto";
 import LandingFooter from "./LandingFooter";
 
+/**
+ * LandingPage — Orquestador de la landing con diseño alternativo (Día 6).
+ * Integra las 18 secciones de contenido completas según el diseño de referencia:
+ * Nav, Hero, Problema, Plataforma, ParaQuién, Stats, Funciones, Alertas, Industrias,
+ * Flujo, Carpetas, Ecosistema, Planilla, Faenas, Agentes, Impacto, Beneficiados,
+ * Trust, CTA Final, Contacto y Footer.
+ */
 export default function LandingPage() {
   return (
-    <div id="landing">
+    <div id="landing" className="min-h-screen bg-white text-landing-ink font-landing-sans antialiased">
       <LandingNav />
-      <LandingHero />
-      <LandingTarget />
-      <LandingFaenasScroll />
-      <LandingAgentePanel />
-      <LandingOrbit />
-      <LandingAgentesIA />
-      <LandingFlujoVivo />
-      <LandingProveedores />
-      <LandingHub />
-      <LandingStats />
-      <LandingVideoTrabajadores />
-      <LandingVideoPitch />
-      <LandingIADocs />
-      <LandingRiesgos />
-      <LandingFeatures />
-      <LandingProblema />
-      <LandingVs />
-      <LandingIndustries />
-      <LandingIAOscura />
-      <LandingEquipos />
-      <LandingDiferenciador />
-      <LandingAQuienAyudamos />
-      <LandingMapa />
-      <LandingExcel />
-      <LandingVideoSeq />
-      <LandingFAQ />
-      <LandingCTA />
+      <main>
+        <LandingHero />
+        <LandingProblema />
+        <LandingPlataforma />
+        <LandingParaQuien />
+        <LandingStats />
+        <LandingFunciones />
+        <LandingAlertas />
+        <LandingIndustrias />
+        <LandingFlujo />
+        <LandingCarpetas />
+        <LandingEcosistema />
+        <LandingPlanilla />
+        <LandingFaenas />
+        <LandingAgentes />
+        <LandingImpacto />
+        <LandingBeneficiados />
+        <LandingTrust />
+        <LandingCtaFinal />
+        <LandingContacto />
+      </main>
       <LandingFooter />
     </div>
   );

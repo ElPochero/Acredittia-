@@ -1,271 +1,77 @@
 "use client";
-import React from "react";
-import { useRouter } from "next/navigation";
 
+import React from "react";
+import useReveal from "./useReveal";
+
+interface ProblemCard {
+  icon: string;
+  title: string;
+  description: string;
+}
+
+const PROBLEMS: ProblemCard[] = [
+  {
+    icon: "🗂️",
+    title: "5+ sistemas distintos",
+    description: "SIGA, Webcontrol, Sucal, Metacontratas, planillas Excel — cada uno con su propio inicio de sesión y formato.",
+  },
+  {
+    icon: "⏱️",
+    title: "Horas armando reportes a mano",
+    description: "Antes de cada ingreso a faena, alguien revisa carpeta por carpeta qué está vigente y qué no.",
+  },
+  {
+    icon: "🚧",
+    title: "Riesgo de atraso en la faena",
+    description: "Un solo documento vencido puede dejar a un trabajador o un equipo fuera, justo el día que debía entrar.",
+  },
+];
+
+/**
+ * LandingProblema — Sección de diagnóstico y puntos de dolor (Día 2, líneas 781-805).
+ * - 3 tarjetas explicativas con íconos representativos.
+ * - Animación sutil con useReveal.
+ */
 export default function LandingProblema() {
-  const router = useRouter();
+  const revealRef = useReveal<HTMLDivElement>();
+
   return (
-    <>
-      {/* EL PROBLEMA */}
-      <section
-        style={
-          {
-            background:
-              "linear-gradient(135deg,#080E1C 0%,#0F172A 60%,#162240 100%)",
-            padding: "80px 6%",
-            position: "relative",
-            overflow: "hidden",
-          } as any
-        }
-      >
-        <img
-          src="/los_pelambres.jpeg"
-          alt=""
-          style={
-            {
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              opacity: ".24",
-            } as any
-          }
-          onError={() => {}}
-        />
-        <div
-          style={
-            {
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(135deg,rgba(8,14,28,.94) 0%,rgba(15,23,42,.9) 55%,rgba(22,34,64,.94) 100%)",
-            } as any
-          }
-        />
-        <div
-          style={
-            {
-              maxWidth: 960,
-              margin: "0 auto",
-              textAlign: "center",
-              position: "relative",
-              zIndex: 1,
-            } as any
-          }
-        >
-          <span
-            data-i18n="prob.label"
-            style={
-              {
-                fontSize: ".7rem",
-                fontWeight: 700,
-                letterSpacing: ".14em",
-                textTransform: "uppercase",
-                color: "#06B6D4",
-                display: "block",
-                marginBottom: 16,
-              } as any
-            }
-          >
-            EL PROBLEMA
-          </span>
-          <h2
-            data-i18n="prob.h2"
-            style={
-              {
-                fontSize: "2.4rem",
-                fontWeight: 900,
-                color: "#F1F5F9",
-                lineHeight: "1.15",
-                marginBottom: 20,
-              } as any
-            }
-          >
-            Atrapados entre el Excel y un equipo de 3 a 4 personas.
-          </h2>
-          <p
-            data-i18n="prob.p"
-            style={
-              {
-                color: "#94A3B8",
-                fontSize: "1.05rem",
-                lineHeight: "1.7",
-                maxWidth: 720,
-                margin: "0 auto 48px",
-              } as any
-            }
-          >
-            Cada faena exige un proceso de acreditación distinto, en una
-            plataforma distinta, con requisitos que cambian sin aviso. Una
-            empresa proveedora con varios contratos activos no tiene alternativa
-            real: o arma un equipo interno que solo persigue papeles, o paga por
-            proceso a una acreditadora tradicional que desaparece apenas termina
-            el trámite.
-          </p>
-          <div
-            style={
-              {
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))",
-                gap: 20,
-                textAlign: "left",
-                maxWidth: 920,
-                margin: "0 auto",
-              } as any
-            }
-          >
-            <div
-              style={
-                {
-                  background: "rgba(255,255,255,.05)",
-                  border: "1px solid rgba(139,170,255,.15)",
-                  borderRadius: 16,
-                  padding: "24px 22px",
-                } as any
-              }
-            >
-              <div
-                style={
-                  {
-                    fontSize: "1.7rem",
-                    fontWeight: 900,
-                    color: "#fff",
-                    marginBottom: 8,
-                  } as any
-                }
-              >
-                240.000+
-              </div>
-              <p
-                data-i18n="prob.s1"
-                style={
-                  {
-                    color: "#64748B",
-                    fontSize: ".82rem",
-                    lineHeight: "1.6",
-                    margin: 0,
-                  } as any
-                }
-              >
-                Trabajadores contratistas en faenas mineras chilenas — más de 3x
-                la dotación propia de las mineras (SERNAGEOMIN)
-              </p>
-            </div>
-            <div
-              style={
-                {
-                  background: "rgba(255,255,255,.05)",
-                  border: "1px solid rgba(139,170,255,.15)",
-                  borderRadius: 16,
-                  padding: "24px 22px",
-                } as any
-              }
-            >
-              <div
-                style={
-                  {
-                    fontSize: "1.7rem",
-                    fontWeight: 900,
-                    color: "#fff",
-                    marginBottom: 8,
-                  } as any
-                }
-              >
-                8.000+
-              </div>
-              <p
-                data-i18n="prob.s2"
-                style={
-                  {
-                    color: "#64748B",
-                    fontSize: ".82rem",
-                    lineHeight: "1.6",
-                    margin: 0,
-                  } as any
-                }
-              >
-                Empresas proveedoras activas en la minería chilena que enfrentan
-                este mismo problema (APRIMIN / Consejo Minero)
-              </p>
-            </div>
-            <div
-              style={
-                {
-                  background: "rgba(255,255,255,.05)",
-                  border: "1px solid rgba(139,170,255,.15)",
-                  borderRadius: 16,
-                  padding: "24px 22px",
-                } as any
-              }
-            >
-              <div
-                style={
-                  {
-                    fontSize: "1.7rem",
-                    fontWeight: 900,
-                    color: "#fff",
-                    marginBottom: 8,
-                  } as any
-                }
-              >
-                3-4
-              </div>
-              <p
-                data-i18n="prob.s3"
-                style={
-                  {
-                    color: "#64748B",
-                    fontSize: ".82rem",
-                    lineHeight: "1.6",
-                    margin: 0,
-                  } as any
-                }
-              >
-                Personas dedicadas solo a gestionar acreditación en una
-                contratista con varios contratos activos
-              </p>
-            </div>
-            <div
-              style={
-                {
-                  background: "rgba(255,255,255,.05)",
-                  border: "1px solid rgba(139,170,255,.15)",
-                  borderRadius: 16,
-                  padding: "24px 22px",
-                } as any
-              }
-            >
-              <div
-                style={
-                  {
-                    fontSize: "1.7rem",
-                    fontWeight: 900,
-                    color: "#fff",
-                    marginBottom: 8,
-                  } as any
-                }
-              >
-                CLP 1,2-1,8M
-              </div>
-              <p
-                data-i18n="prob.s4"
-                style={
-                  {
-                    color: "#64748B",
-                    fontSize: ".82rem",
-                    lineHeight: "1.6",
-                    margin: 0,
-                  } as any
-                }
-              >
-                Cuesta cada encargado de acreditación al mes — sin garantía de
-                que no se le escape un documento
-              </p>
-            </div>
+    <section className="py-20 lg:py-28 px-[6%] bg-white border-b border-landing-linea">
+      <div className="max-w-[1080px] mx-auto" ref={revealRef}>
+        {/* Encabezado */}
+        <div className="max-w-[640px] mx-auto text-center mb-12 sm:mb-16">
+          <div className="inline-flex items-center gap-2 text-landing-azul font-bold text-[0.82rem] tracking-wider uppercase mb-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-landing-azul" />
+            <span>EL PROBLEMA</span>
           </div>
+          <h2 className="text-3xl sm:text-4xl lg:text-[2.5rem] font-extrabold tracking-[-0.01em] text-landing-ink mb-4 font-landing-sans leading-[1.2]">
+            Tu dotación está lista. Tu documentación, no.
+          </h2>
+          <p className="text-landing-gris text-base sm:text-[1.02rem] leading-[1.6]">
+            Los documentos viven repartidos entre planillas, correos y la plataforma de cada mandante. Nadie sabe con certeza quién puede entrar a la faena hoy.
+          </p>
         </div>
-      </section>
-    </>
+
+        {/* Grilla de 3 tarjetas */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {PROBLEMS.map((problem) => (
+            <div
+              key={problem.title}
+              className="bg-landing-soft rounded-2xl p-6 sm:p-7 border border-landing-linea hover:shadow-landing-card transition-all"
+            >
+              <div className="w-11 h-11 rounded-xl bg-white border border-landing-linea flex items-center justify-center text-xl mb-4 shadow-sm">
+                {problem.icon}
+              </div>
+              <b className="block text-[1.05rem] font-extrabold text-landing-ink mb-2">
+                {problem.title}
+              </b>
+              <span className="block text-sm text-landing-gris leading-[1.6]">
+                {problem.description}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
