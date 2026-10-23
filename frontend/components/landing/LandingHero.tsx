@@ -57,7 +57,7 @@ export default function LandingHero() {
             </Link>
             <a
               href={`#${LANDING_SECTIONS.FLUJO}`}
-              className="inline-flex items-center justify-center gap-2 font-bold text-[0.85rem] sm:text-[0.88rem] px-6 sm:px-7 py-3 sm:py-3.5 rounded-full border-[1.5px] border-landing-linea text-landing-ink bg-transparent hover:border-landing-ink transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-2 font-bold text-[0.85rem] sm:text-[0.88rem] px-6 sm:px-7 py-3 sm:py-3.5 rounded-full border-[1.5px] border-landing-linea text-landing-ink bg-transparent hover:border-landing-ink transition-colors whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-azul"
             >
               Ver cómo funciona
             </a>

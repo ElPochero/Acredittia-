@@ -32,7 +32,7 @@ export default function LandingCtaFinal() {
         <div>
           <a
             href={`#${LANDING_SECTIONS.CONTACT}`}
-            className="inline-flex items-center justify-center gap-2 font-bold text-sm sm:text-base px-8 py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-colors shadow-md hover:shadow-lg"
+            className="inline-flex items-center justify-center gap-2 font-bold text-sm sm:text-base px-8 py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-colors shadow-md hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-azul"
           >
             Agendar mi demo →
           </a>

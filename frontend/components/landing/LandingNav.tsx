@@ -73,7 +73,7 @@ export default function LandingNav() {
           </Link>
           <a
             href={`#${LANDING_SECTIONS.CONTACT}`}
-            className="inline-flex items-center justify-center gap-2 font-bold text-[0.84rem] sm:text-[0.88rem] px-3.5 py-1.5 sm:px-5 sm:py-2.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-colors whitespace-nowrap shadow-sm"
+            className="inline-flex items-center justify-center gap-2 font-bold text-[0.84rem] sm:text-[0.88rem] px-3.5 py-1.5 sm:px-5 sm:py-2.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d transition-colors whitespace-nowrap shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-azul"
           >
             Agendar demo →
           </a>
