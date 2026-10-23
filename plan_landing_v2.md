@@ -346,10 +346,10 @@ Todo bajo `@media (prefers-reduced-motion: no-preference)`; con `reduce` activo,
 > `vitest` + `@testing-library/react` quedan **fuera** de este plan a propósito (R10). Si el Día 8 hay margen y el dev quiere tests de interacción reales, se agregan 2 devDeps y se portan los contratos: se decide en el PR, no antes.
 
 **Criterios de aceptación del Día 8**
-- [ ] La página es usable con teclado de inicio a fin (sin trampas de foco, foco visible en todo elemento interactivo).
-- [ ] `axe DevTools` / Lighthouse a11y sin errores críticos.
-- [ ] Los 14 puntos interactivos funcionan en los 4 navegadores.
-- [ ] `node --test tests/landing` cubre: anclas, activos, idioma, legales, videos, `disabled`, cifras.
+- [x] La página es usable con teclado de inicio a fin (sin trampas de foco, foco visible en todo elemento interactivo).
+- [x] `axe DevTools` / Lighthouse a11y sin errores críticos.
+- [x] Los 14 puntos interactivos funcionan en los 4 navegadores.
+- [x] `node --test tests/landing` cubre: anclas, activos, idioma, legales, videos, `disabled`, cifras.
 
 ---
 
