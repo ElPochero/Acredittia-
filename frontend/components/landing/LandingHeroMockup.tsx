@@ -113,14 +113,19 @@ export default function LandingHeroMockup() {
     setActiveIndex((prev) => (prev + 1) % DATASETS.length);
   }, []);
 
+  // Carga y diferimiento de rotación al cliente tras el render inicial (H-01, Tarea 7.2)
   useEffect(() => {
     if (!shouldAutoplay) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
 
-    timerRef.current = setInterval(nextTab, 3200);
+    const timeout = setTimeout(() => {
+      timerRef.current = setInterval(nextTab, 3200);
+    }, 1000);
+
     return () => {
+      clearTimeout(timeout);
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [shouldAutoplay, nextTab]);

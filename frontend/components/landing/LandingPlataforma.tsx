@@ -62,8 +62,12 @@ export default function LandingPlataforma() {
       return;
     }
 
-    timerRef.current = setInterval(nextView, 3200);
+    const timeout = setTimeout(() => {
+      timerRef.current = setInterval(nextView, 3200);
+    }, 1200);
+
     return () => {
+      clearTimeout(timeout);
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [shouldAutoplay, nextView]);
