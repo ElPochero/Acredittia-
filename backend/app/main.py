@@ -26,7 +26,7 @@ from .models import User
 from .security import decode_access_token
 from .routers import (actividad, admin, alertas, auth, blobs, calendario, cargos,
                       company, contrato_requisitos, contratos, dashboard,
-                      documentos, faenas, ia, integraciones, licencia_interna,
+                      documentos, exportar, faenas, ia, integraciones, licencia_interna,
                       notificaciones, periodos_laborales, personas, plataformas, reportes,
                       requisitos, sujetos, suscripcion, webhooks)
 # Importar los módulos de tareas registra las entradas de TAREAS que usa la cola.
@@ -88,6 +88,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # El nombre del ZIP de exportación viaja en Content-Disposition; sin esto
+    # el navegador no puede leerlo en una respuesta cross-origin.
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -207,6 +210,7 @@ app.include_router(actividad.router, prefix=API)
 app.include_router(notificaciones.router, prefix=API)
 app.include_router(reportes.router, prefix=API)
 app.include_router(reportes.router_export, prefix=API)
+app.include_router(exportar.router, prefix=API)
 app.include_router(integraciones.router, prefix=API)
 
 # --- Comercial y webhooks -------------------------------------------------

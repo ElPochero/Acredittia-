@@ -18,7 +18,7 @@
  *   están igualmente aquí, con sus tipos, para que quien haga esas pantallas no
  *   tenga que escribir el cliente.
  */
-import { api, patch, type Query } from "./api";
+import { api, descargarBlob, patch, type Query } from "./api";
 import type {
   AcreditacionesEstado, ActividadFila, AdminStats, AgentesContrato, Alerta, AlertaPatch,
   Ambito, ArchivoConfirmado, CategoriaEvento, ChecklistSujeto, Conjunto,
@@ -35,7 +35,8 @@ import type {
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
   Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
-  CumplimientoDashboardData, LimContrato,
+  CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
+  SeccionExport,
 } from "./tipos";
 
 export * from "./api";
@@ -758,6 +759,27 @@ export const exportaciones = {
     recurso: RecursoExport; filtros?: Record<string, unknown>;
     formato?: "excel" | "csv";
   }) => api<Exportacion>("/exportaciones", { body }),
+};
+
+export type ParamsExportar = {
+  contrato_id?: string;
+  plataforma?: string;
+  incluir?: string;
+  estructura?: string;
+  solo_vigentes?: boolean;
+};
+
+/**
+ * Exportación documental en ZIP por plataforma de destino (H-20, H-29).
+ *
+ * `arbol()` alimenta la vista previa y `zip()` descarga exactamente ese mismo
+ * plan: ambos endpoints comparten el constructor en el backend.
+ */
+export const exportar = {
+  arbol: (params: ParamsExportar) =>
+    api<ArbolExportacion>("/exportar/arbol", { query: q(params) }),
+
+  zip: (params: ParamsExportar) => descargarBlob("/exportar/zip", q(params)),
 };
 
 // ============================================================================

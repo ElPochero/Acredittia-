@@ -85,6 +85,23 @@ export type RecursoExport =
   | "requisitos" | "alertas" | "contratos" | "matriz";
 
 // ============================================================================
+// Exportación documental (ZIP por plataforma de destino)
+// ============================================================================
+export type SeccionExport = "empresa" | "personal" | "equipos" | "licencia";
+export type EstructuraExport = "sueltos" | "carpetas" | "pdf";
+
+export type ArbolExportacion = {
+  nombre_zip: string;
+  plataforma: string;
+  total_archivos: number;
+  total_carpetas: number;
+  secciones: { clave: SeccionExport; titulo: string; archivos: number }[];
+  rutas: string[];
+  truncado: boolean;
+  excluidos: { vencidos: number; sin_archivo: number };
+};
+
+// ============================================================================
 // Autenticación y usuario
 // ============================================================================
 export type EmpresaResumen = { id: string; nombre: string; rut: string };

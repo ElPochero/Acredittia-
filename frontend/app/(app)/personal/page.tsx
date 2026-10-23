@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import * as Api from "@/lib/cliente";
 import type { Sujeto } from "@/lib/tipos";
+import { ExportarDocumentosModal } from "@/components/ExportarDocumentosModal";
 import { normalizarRut, validarRut } from "@/lib/rut";
 
 export default function PersonasPage() {
@@ -13,6 +14,7 @@ export default function PersonasPage() {
   
   // Modals state
   const [showModal, setShowModal] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -156,7 +158,7 @@ export default function PersonasPage() {
       {/* Header único (título en AppHeader) */}
       <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
-          <button className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
+          <button onClick={() => setExportando(true)} className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar
           </button>
           <button onClick={handleOpenNuevo} className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
@@ -387,6 +389,11 @@ export default function PersonasPage() {
           </div>
         </div>
       )}
+
+      <ExportarDocumentosModal
+        abierto={exportando}
+        onCerrar={() => setExportando(false)}
+      />
     </div>
   );
 }

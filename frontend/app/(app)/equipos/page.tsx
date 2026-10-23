@@ -4,11 +4,13 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import * as Api from "@/lib/cliente";
 import type { Sujeto } from "@/lib/tipos";
+import { ExportarDocumentosModal } from "@/components/ExportarDocumentosModal";
 
 export default function EquiposPage() {
   const [loading, setLoading] = useState(true);
   const [equiposList, setEquiposList] = useState<Sujeto[]>([]);
   const [search, setSearch] = useState("");
+  const [exportando, setExportando] = useState(false);
 
   useEffect(() => {
     async function fetchEquipos() {
@@ -45,7 +47,7 @@ export default function EquiposPage() {
       {/* Header único (título en AppHeader) */}
       <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
-          <button className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
+          <button onClick={() => setExportando(true)} className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar
           </button>
           <button className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
@@ -179,6 +181,11 @@ export default function EquiposPage() {
           </tbody>
         </table>
       </div>
+
+      <ExportarDocumentosModal
+        abierto={exportando}
+        onCerrar={() => setExportando(false)}
+      />
     </div>
   );
 }

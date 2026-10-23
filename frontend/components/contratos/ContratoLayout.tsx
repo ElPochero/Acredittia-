@@ -6,7 +6,7 @@ import { Contrato, PlataformaContrato } from "@/lib/tipos";
 import { ContratoTabs, Tab } from "./ContratoTabs";
 import { ReporteContratoModal } from "./ReporteContratoModal";
 import { CompartirContratoModal } from "./CompartirContratoModal";
-import { ExportarContratoModal } from "./ExportarContratoModal";
+import { ExportarDocumentosModal } from "../ExportarDocumentosModal";
 import { CorreosContratoModal } from "./CorreosContratoModal";
 import { DetallePlataformaModal } from "../PlataformaModals";
 
@@ -305,7 +305,7 @@ export function ContratoLayout({
         onCerrar={() => setModalReporte(false)}
         contrato={c}
       />
-      <ExportarContratoModal
+      <ExportarDocumentosModal
         abierto={modalExportar}
         onCerrar={() => setModalExportar(false)}
         contrato={c}
