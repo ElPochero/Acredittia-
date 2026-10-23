@@ -51,22 +51,34 @@ def hash_refresh(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def validar_rut(rut: str) -> bool:
-    """Valida formato 99.999.999-K y dígito verificador (módulo 11)."""
+def normalizar_rut(entrada: str) -> str | None:
+    """Acepta `19.112.466-K`, `19112466-K` o `19112466K` y devuelve en formato
+    canónico con puntos, o None si el formato o el dígito verificador no
+    corresponden (Módulo 11).
+
+    Es la única fuente de la escritura del RUT: los routers guardan el valor
+    aquí devuelto para que la unicidad por empresa no dependa de cómo lo
+    escribió el usuario. En el formato sin guión, 8 caracteres son cuerpo de 7
+    + DV y 9 caracteres son cuerpo de 8 + DV.
+    """
     import re
-    rut = (rut or "").strip()
-    if re.fullmatch(r"\d{7,8}-[\dkK]", rut):
-        c = rut[:-2]
-        rut = f"{c[:-6]}.{c[-6:-3]}.{c[-3:]}-{rut[-1]}"
-    if not re.fullmatch(r"\d{1,2}\.\d{3}\.\d{3}-[\dkK]", rut):
-        return False
-    cuerpo = rut.split("-")[0].replace(".", "")
-    dv = rut.split("-")[1].lower()
+    raw = (entrada or "").strip().upper().replace(".", "").replace(" ", "")
+    m = re.fullmatch(r"(\d{7,8})-?([\dK])", raw)
+    if not m:
+        return None
+    cuerpo, dv = m.group(1), m.group(2)
     suma, factor = 0, 2
     for c in reversed(cuerpo):
         suma += int(c) * factor
         factor = 2 if factor == 7 else factor + 1
     resto = 11 - (suma % 11)
-    esperado = "0" if resto == 11 else "k" if resto == 10 else str(resto)
-    return dv == esperado
+    esperado = "0" if resto == 11 else "K" if resto == 10 else str(resto)
+    if dv != esperado:
+        return None
+    return f"{cuerpo[:-6]}.{cuerpo[-6:-3]}.{cuerpo[-3:]}-{dv}"
+
+
+def validar_rut(rut: str) -> bool:
+    """True si el RUT es válido en cualquiera de los formatos aceptados."""
+    return normalizar_rut(rut) is not None
 

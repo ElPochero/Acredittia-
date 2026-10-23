@@ -4,6 +4,8 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import * as Api from "@/lib/cliente";
 import type { Sujeto } from "@/lib/tipos";
+import { ExportarDocumentosModal } from "@/components/ExportarDocumentosModal";
+import { normalizarRut, validarRut } from "@/lib/rut";
 
 export default function PersonasPage() {
   const [loading, setLoading] = useState(true);
@@ -12,6 +14,7 @@ export default function PersonasPage() {
   
   // Modals state
   const [showModal, setShowModal] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -21,6 +24,10 @@ export default function PersonasPage() {
   const [rut, setRut] = useState("");
   const [cargo, setCargo] = useState("");
   const [estado, setEstado] = useState("proc"); // proc = Pendiente, ok = Activo, baja = Inactivo
+
+  // Errores de validación inline bajo cada campo (reemplazan alertas nativas).
+  const [errorRut, setErrorRut] = useState<string | null>(null);
+  const [errorForm, setErrorForm] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPersonal();
@@ -45,6 +52,8 @@ export default function PersonasPage() {
     setRut("");
     setCargo("");
     setEstado("proc"); // Pendiente por defecto
+    setErrorRut(null);
+    setErrorForm(null);
     setShowModal(true);
   };
 
@@ -59,7 +68,17 @@ export default function PersonasPage() {
   };
 
   const handleGuardar = async () => {
-    if (!nombre || !rut) return alert("Nombre y RUT son requeridos");
+    setErrorRut(null);
+    setErrorForm(null);
+    if (!nombre || !rut) {
+      setErrorForm("Nombre y RUT son requeridos");
+      return;
+    }
+    if (!validarRut(rut)) {
+      setErrorRut("RUT inválido. Puede escribir «19.112.466-9», «19112466-9» o «191124669»");
+      return;
+    }
+    const rutNorm = normalizarRut(rut) || rut.trim();
 
     setSaving(true);
     try {
@@ -73,7 +92,7 @@ export default function PersonasPage() {
         await Api.personal.crear({
           contrato_id: null,
           nombre,
-          rut,
+          rut: rutNorm,
           cargo: cargo || null,
           estado
         });
@@ -85,7 +104,13 @@ export default function PersonasPage() {
       }
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Ocurrió un error al guardar");
+      if (error.code === "RUT_DUPLICADO" || error.code === "RUT_INVALIDO") {
+        setErrorRut(error.code === "RUT_DUPLICADO"
+          ? "Ese RUT ya está registrado en la empresa"
+          : error.message || "RUT inválido");
+      } else {
+        setErrorForm(error.message || "Ocurrió un error al guardar");
+      }
     } finally {
       setSaving(false);
     }
@@ -100,7 +125,9 @@ export default function PersonasPage() {
           (window as any).toast("Trabajador eliminado exitosamente");
         }
       } catch (error: any) {
-        alert(error.message || "Error al eliminar");
+        if (typeof window !== "undefined" && (window as any).toast) {
+          (window as any).toast(error.message || "Error al eliminar");
+        }
       }
     }
   };
@@ -115,6 +142,12 @@ export default function PersonasPage() {
     );
   });
 
+  // Listado maestro: cuántos contratos tiene asignados cada RUT único.
+  const registrosPorRut = new Map<string, number>();
+  for (const p of personalList) {
+    if (p.rut) registrosPorRut.set(p.rut, (registrosPorRut.get(p.rut) || 0) + 1);
+  }
+
   const total = personalList.length;
   const acreditados = personalList.filter((p) => p.estado === "ok").length;
   const pendientes = personalList.filter((p) => p.estado === "proc" || p.estado === "falta").length;
@@ -122,16 +155,10 @@ export default function PersonasPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Personal</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Gestiona y supervisa a todo el personal de tu empresa en sus diferentes faenas.
-          </p>
-        </div>
+      {/* Header único (título en AppHeader) */}
+      <div className="flex flex-col md:flex-row md:justify-end gap-4">
         <div className="flex items-center gap-3">
-          <button className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
+          <button onClick={() => setExportando(true)} className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar
           </button>
           <button onClick={handleOpenNuevo} className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
@@ -218,6 +245,7 @@ export default function PersonasPage() {
               <th className="p-3.5">Trabajador</th>
               <th className="p-3.5">RUT</th>
               <th className="p-3.5">Cargo</th>
+              <th className="p-3.5">Contratos</th>
               <th className="p-3.5">Estado</th>
               <th className="p-3.5 text-right">Acciones</th>
             </tr>
@@ -241,6 +269,11 @@ export default function PersonasPage() {
                   <td className="p-3.5 font-bold text-slate-800">{p.nombre}</td>
                   <td className="p-3.5 text-slate-500">{p.rut || "Sin RUT"}</td>
                   <td className="p-3.5 text-slate-700">{p.cargo || "Sin cargo"}</td>
+                  <td className="p-3.5">
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-600">
+                      {p.rut ? `${registrosPorRut.get(p.rut) || 1} contrato${(registrosPorRut.get(p.rut) || 1) === 1 ? "" : "s"}` : "—"}
+                    </span>
+                  </td>
                   <td className="p-3.5">
                     <span
                       className={`px-2 py-0.5 text-[10px] font-bold rounded ${
@@ -291,15 +324,26 @@ export default function PersonasPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">RUT</label>
-                <input 
-                  type="text" 
+                <label htmlFor="rut_root" className="block text-xs font-semibold text-slate-700 mb-1">RUT *</label>
+                <input
+                  id="rut_root"
+                  type="text"
+                  aria-invalid={!!errorRut || undefined}
+                  aria-describedby={errorRut ? "rut_root_error" : undefined}
                   value={rut}
-                  onChange={(e) => setRut(e.target.value)}
+                  onChange={(e) => { setErrorRut(null); setRut(e.target.value); }}
                   disabled={isEditing}
-                  placeholder="Ej: 12.345.678-9"
-                  className="w-full p-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                  placeholder="Ej. 19.112.466-9, 19112466-9 o 191124669"
+                  className={`w-full p-2.5 text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 ${errorRut ? "border-red-400 ring-1 ring-red-200" : "border-slate-300"} focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400`}
                 />
+                {errorRut && (
+                  <p id="rut_root_error" role="alert" className="mt-1 text-[0.7rem] font-semibold text-red-600">
+                    ⚠ {errorRut}
+                  </p>
+                )}
+                {errorForm && (
+                  <p role="alert" className="mt-1 text-[0.7rem] font-semibold text-red-600">⚠ {errorForm}</p>
+                )}
               </div>
 
               <div>
@@ -345,6 +389,11 @@ export default function PersonasPage() {
           </div>
         </div>
       )}
+
+      <ExportarDocumentosModal
+        abierto={exportando}
+        onCerrar={() => setExportando(false)}
+      />
     </div>
   );
 }

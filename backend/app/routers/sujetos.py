@@ -25,6 +25,7 @@ Un contract_admin solo opera dentro de su contrato: los listados se filtran con
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -39,7 +40,7 @@ from ..database import get_db
 from ..deps import (Page, aplicar_orden, contrato_scope, err, get_company_id,
                     get_current_user, paginacion, require_contrato, sobre)
 from ..models import Cargo, Contrato, Documento, LicenciaInterna, Sujeto, User
-from ..security import validar_rut
+from ..security import normalizar_rut
 from ..services import actividad
 from ..services.checklist import (crear_expediente_conductor, instanciar_docs,
                                   requiere_emsipor, resolver_cargo,
@@ -221,8 +222,17 @@ def listar_sujetos(db: Session, cid: uuid.UUID, tipo: str, p: Page, *,
         q = q.where(Sujeto.tipo_equipo == tipo_equipo)
     if p.search:
         like = f"%{p.search}%"
-        q = q.where(or_(Sujeto.nombre.ilike(like), Sujeto.rut.ilike(like),
-                        Sujeto.patente.ilike(like)))
+        # El RUT se busca exacto o por prefijo (never en medio del número):
+        # comparar los dígitos sin separadores permite que «1911246» encuentre
+        # a «19.112.466-9».
+        digitos = re.sub(r"\D", "", p.search)
+        condiciones_rut = [Sujeto.rut.ilike(f"{p.search}%")]
+        if digitos:
+            condiciones_rut.append(
+                func.regexp_replace(Sujeto.rut, "[^0-9Kk]", "", "g")
+                .ilike(f"{digitos}%"))
+        q = q.where(or_(Sujeto.nombre.ilike(like), Sujeto.patente.ilike(like),
+                        *condiciones_rut))
 
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
     defecto = "nombre" if tipo == "trabajador" else "patente"
@@ -303,12 +313,16 @@ def crear_trabajador(body: TrabajadorIn, db: Session = Depends(get_db),
     if body.contrato_id:
         c = _validar_contrato(db, cid, body.contrato_id, user)
         
-    if not validar_rut(body.rut):
-        raise err(422, "RUT_INVALIDO", "RUT inválido; use formato 12.345.678-5")
-        
+    # El RUT se guarda SIEMPRE normalizado: así «19.112.466-1», «19112466-1» y
+    # «191124661» son la misma persona y la unicidad no se burle con puntos.
+    rut = normalizar_rut(body.rut)
+    if rut is None:
+        raise err(422, "RUT_INVALIDO",
+                  "RUT inválido; use 12.345.678-5, 12345678-5 o 123456785")
+
     query = select(Sujeto.id).where(
             Sujeto.company_id == cid,
-            Sujeto.rut == body.rut, Sujeto.tipo == "trabajador",
+            Sujeto.rut == rut, Sujeto.tipo == "trabajador",
             Sujeto.estado != "baja")
     if c:
         query = query.where(Sujeto.contrato_id == c.id)
@@ -322,7 +336,7 @@ def crear_trabajador(body: TrabajadorIn, db: Session = Depends(get_db),
     cargo, cargo_creado = _resolver_cargo_entrada(db, cid, body.cargo_id,
                                                   body.cargo)
     s = Sujeto(company_id=cid, contrato_id=c.id if c else None, tipo="trabajador",
-               nombre=body.nombre.strip(), rut=body.rut,
+               nombre=body.nombre.strip(), rut=rut,
                cargo=cargo.nombre if cargo else (body.cargo or None),
                cargo_id=cargo.id if cargo else None,
                es_conductor=body.es_conductor,

@@ -94,16 +94,18 @@ export default function AlertasPage() {
 
   return (
     <div className="p-8 space-y-6 bg-slate-50 min-h-screen">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-2">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Alertas</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Supervisa y gestiona las alertas críticas y preventivas que requieren atención.
-          </p>
-        </div>
+      {/* Header único (título en AppHeader) */}
+      <div className="flex justify-end items-center mb-2">
         <button className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
           <SettingsIcon /> Configurar notificaciones
+        </button>
+      </div>
+      <div className="mb-2">
+        <button
+          onClick={(e) => { e.preventDefault(); (window as any).setAppRoute?.("/dashboard"); }}
+          className="text-sm font-semibold text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          ← Volver a Inicio
         </button>
       </div>
 

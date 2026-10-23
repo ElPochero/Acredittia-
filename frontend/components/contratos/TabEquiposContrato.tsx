@@ -27,6 +27,7 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
   });
   const [creando, setCreando] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showFiltros, setShowFiltros] = useState(true);
   const [qFlota, setQFlota] = useState("");
   const [flota, setFlota] = useState<Sujeto[]>([]);
   const [buscando, setBuscando] = useState(false);
@@ -160,11 +161,11 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
             <button onClick={() => { setShowPicker(true); setFlota([]); setQFlota(""); setSelIds([]); }} className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm">
               ⧉ Desde flota
             </button>
-            <label className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium cursor-pointer hover:bg-slate-50 transition-colors shadow-sm bg-white">
+            <label className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium cursor-pointer hover:bg-slate-50 transition-colors shadow-sm bg-white" onClick={() => toast.info("Próximamente", { description: "La subida masiva de documentos llegará pronto." })}>
               ↑ Subir documento
               <input type="file" className="hidden" />
             </label>
-            <button className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm bg-white">
+            <button onClick={() => setShowFiltros(v => !v)} className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm bg-white">
               🔽 Filtros
             </button>
           </div>
@@ -183,7 +184,7 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-2.5 mb-4 items-center">
+        <div className={`flex flex-wrap gap-2.5 mb-4 items-center ${showFiltros ? "" : "hidden"}`}>
           <input className="flex-1 min-w-[200px] max-w-[360px] bg-white border border-slate-200 rounded-[10px] px-3.5 py-2.5 text-[0.88rem] text-slate-800 placeholder-slate-400 outline-none shadow-sm" placeholder="Buscar por patente, tipo o marca..." />
           <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Tipo: Todos</option></select>
           <select className="bg-white border border-slate-200 rounded-[10px] px-3 py-2.5 text-[0.82rem] text-slate-500 cursor-pointer outline-none shadow-sm"><option>Estado: Todos</option></select>
@@ -225,7 +226,9 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
                       <td className="p-3 text-[0.8rem]">{s.marca || '—'} {s.modelo || ''}</td>
                       <td className="p-3 text-[0.8rem]">{contrato.faena.nombre}</td>
                       <td className="p-3 text-[0.75rem]">
-                        <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">WC</span>
+                        {plataformas.map((p) => (
+                          <span key={p.id ?? p.faena_plataforma_id ?? p.nombre} className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded mr-1">{p.nombre}</span>
+                        ))}
                       </td>
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold ${
@@ -243,7 +246,7 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
                           {acredLbl} ({pct}%)
                         </span>
                       </td>
-                      <td className="p-3 text-[0.72rem] text-slate-500">Hoy</td>
+                      <td className="p-3 text-[0.72rem] text-slate-500">—</td>
                       <td className="p-3 text-[0.8rem] text-right">
                         <Link href={`/equipos/${s.id}`} className="text-blue-600 font-semibold hover:underline">Ver detalle</Link>
                       </td>

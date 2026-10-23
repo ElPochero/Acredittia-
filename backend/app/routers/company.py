@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import string
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -24,12 +25,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..deps import (Page, aplicar_orden, contrato_scope, err, get_company_id,
                     get_current_user, get_db, paginacion, require_company, sobre)
 from ..models import (Company, Contrato, Documento, PasswordResetToken,
                       RefreshToken, Sujeto, User)
 from ..security import hash_password
 from ..services import actividad
+from ..services.email import enviar_invitacion
+from .contratos import UNIDADES_NEGOCIO
 
 logger = logging.getLogger("acredittia.company")
 
@@ -42,6 +46,13 @@ ACTIVACION_TTL_HORAS = 72
 
 ROLES_INVITABLES = ("company", "contract_admin", "visor")
 ORDEN_USUARIOS = {"nombre", "email", "role", "created_at", "last_login_at", "activo"}
+
+# Cómo se le explica el permiso al invitado (va en el correo).
+_ROL_ETIQUETA = {
+    "company": "Administrador — acceso a toda la empresa",
+    "contract_admin": "Editor — puede ver y modificar este contrato",
+    "visor": "Visor — solo lectura",
+}
 
 
 # ------------------------------------------------------------------ entradas
@@ -58,6 +69,9 @@ class UsuarioIn(BaseModel):
     email: EmailStr
     role: str = "company"
     contrato_id: uuid.UUID | None = None
+    # Unidad de negocio que lidera (encargado jerárquico). Da acceso automático
+    # a todos los contratos de esa unidad.
+    unidad_negocio: str | None = None
 
 
 class UsuarioPatch(BaseModel):
@@ -65,6 +79,7 @@ class UsuarioPatch(BaseModel):
     role: str | None = None
     contrato_id: uuid.UUID | None = None
     activo: bool | None = None
+    unidad_negocio: str | None = None
 
 
 # ------------------------------------------------------------------ helpers
@@ -80,6 +95,19 @@ def _nuevo_token_activacion() -> tuple[str, str, datetime]:
     h = hashlib.sha256(raw.encode()).hexdigest()
     exp = datetime.now(timezone.utc) + timedelta(hours=ACTIVACION_TTL_HORAS)
     return raw, h, exp
+
+
+def _clave_temporal() -> str:
+    """Contraseña temporal legible que cumple la política de `auth` (8+, A-Z, 0-9).
+
+    Se manda por correo y el invitado la cambia al primer ingreso; nunca se
+    guarda en claro ni se devuelve en la respuesta (salvo en desarrollo, para
+    poder probarlo sin SMTP).
+    """
+    return (secrets.choice(string.ascii_uppercase)
+            + secrets.choice(string.ascii_lowercase)
+            + secrets.choice(string.digits)
+            + secrets.token_urlsafe(9))
 
 
 def _cumplimiento_empresa(db: Session, cid: uuid.UUID,
@@ -125,10 +153,24 @@ def _usuario_out(u: User, contrato_nombre: str | None = None) -> dict:
         "id": str(u.id), "nombre": u.nombre, "email": u.email, "role": u.role,
         "contrato_id": str(u.contrato_id) if u.contrato_id else None,
         "contrato_nombre": contrato_nombre,
+        "unidad_negocio": u.unidad_negocio,
         "activo": u.activo, "status": u.status,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
         "created_at": u.created_at.isoformat(),
     }
+
+
+def _valida_unidad(unidad: str | None) -> str | None:
+    """Normaliza la unidad de negocio del usuario; 400 si no está en el catálogo."""
+    if unidad is None:
+        return None
+    u = unidad.strip()
+    if not u:
+        return None
+    if u not in UNIDADES_NEGOCIO:
+        raise err(400, "UNIDAD_NEGOCIO_INVALIDA",
+                  f"Unidad de negocio debe ser una de: {', '.join(UNIDADES_NEGOCIO)}")
+    return u
 
 
 def _get_company(db: Session, cid: uuid.UUID) -> Company:
@@ -258,8 +300,11 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
                     user: User = Depends(require_company)):
     """Invita un usuario a la empresa.
 
-    No se fija contraseña: se guarda un secreto aleatorio inservible y se emite
-    un token de activación de un solo uso, que el invitado canjea por su clave.
+    Se genera una contraseña temporal que se envía por correo junto con el
+    enlace al contrato (o a la empresa). El invitado la cambia al primer
+    ingreso. También se emite un token de activación de un solo uso, por si
+    pierde el correo: el enlace de restablecimiento lo genera `auth`.
+
     El usuario hereda el `status` de la empresa para que la aprobación de la
     cuenta siga siendo una decisión única del admin de plataforma.
     """
@@ -270,18 +315,22 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
     _valida_rol(body.role, body.contrato_id)
     if body.contrato_id:
         _valida_contrato(db, cid, body.contrato_id)
+    unidad = _valida_unidad(body.unidad_negocio)
     # El email es único a nivel de plataforma. La comprobación previa solo
     # alcanza a los usuarios visibles por RLS (la propia empresa); para el resto
     # el 409 lo produce el IntegrityError de más abajo.
     if db.scalar(select(User).where(User.email == body.email)):
         raise err(409, "USUARIO_DUPLICADO", "El email ya está registrado")
 
+    clave_temporal = _clave_temporal()
     u = User(
         email=str(body.email), nombre=body.nombre, role=body.role,
         company_id=cid, contrato_id=body.contrato_id,
-        # Contraseña aleatoria que nadie conoce: la cuenta solo se puede usar
-        # después de canjear el token de activación.
-        password_hash=hash_password(secrets.token_urlsafe(32)),
+        unidad_negocio=unidad,
+        # Contraseña temporal: se envía por correo y el invitado la cambia al
+        # entrar. Antes era un secreto aleatorio inservible, que dejaba al
+        # invitado sin forma de entrar (y sin correo que lo avisara).
+        password_hash=hash_password(clave_temporal),
         activo=True, status=c.status,
     )
     db.add(u)
@@ -298,12 +347,29 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
                   f"Usuario {u.email} invitado con rol {u.role}",
                   user_id=user.id, entidad_tipo="usuario", entidad_id=u.id)
     db.commit()
-    # TODO(coordinador): enviar el email de invitación con el token en claro
-    # (`raw` de _nuevo_token_activacion) cuando exista services/notificaciones.
-    # El token en claro NO se devuelve en la respuesta a propósito.
+
+    # Correo de invitación con las credenciales temporales. El enlace lo arma
+    # el servidor (`settings.app_url`), nunca el cliente.
+    contrato_nombre = None
+    enlace = None
+    if body.contrato_id:
+        cto = db.get(Contrato, body.contrato_id)
+        contrato_nombre = cto.nombre if cto else None
+        enlace = f"{settings.app_url.rstrip('/')}/contratos/{body.contrato_id}"
+    else:
+        enlace = f"{settings.app_url.rstrip('/')}/login"
+    enviar_invitacion(to_email=u.email, nombre=u.nombre, clave=clave_temporal,
+                      rol=_ROL_ETIQUETA.get(body.role, body.role),
+                      contrato_nombre=contrato_nombre, enlace=enlace)
+
     logger.info("usuario invitado id=%s role=%s", u.id, u.role)
-    return {"id": str(u.id), "email": u.email, "role": u.role,
-            "activacion_expira_at": expira.isoformat()}
+    salida = {"id": str(u.id), "email": u.email, "role": u.role,
+              "activacion_expira_at": expira.isoformat()}
+    if settings.jwt_secret.startswith("dev-"):
+        # Solo con el secreto de desarrollo por defecto: en producción la
+        # clave viaja únicamente por el correo.
+        salida["_dev_clave"] = clave_temporal
+    return salida
 
 
 @router.patch("/usuarios/{uid}")
@@ -338,6 +404,8 @@ def editar_usuario(uid: uuid.UUID, body: UsuarioPatch,
         u.nombre = data["nombre"]
     if "activo" in data:
         u.activo = data["activo"]
+    if "unidad_negocio" in data:
+        u.unidad_negocio = _valida_unidad(data["unidad_negocio"])
     u.role = role
     u.contrato_id = contrato_id
     u.updated_at = datetime.now(timezone.utc)

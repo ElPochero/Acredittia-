@@ -21,7 +21,7 @@ import uuid
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import distinct, func, or_, select
+from sqlalchemy import String, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..deps import (Page, aplicar_orden, contrato_scope, err, get_company_id,
@@ -237,9 +237,12 @@ def listar(ambito: str | None = Query(None),
         q = q.where(RequisitoTemplate.obligatorio.is_(obligatorio))
     if p.search:
         like = f"%{p.search}%"
+        # `tipo` es un ENUM: se busca sobre su texto porque el placeholder del
+        # buscador promete «nombre, código o tipo» (H-37).
         q = q.where(or_(RequisitoTemplate.titulo.ilike(like),
                         RequisitoTemplate.codigo.ilike(like),
-                        RequisitoTemplate.plataforma.ilike(like)))
+                        RequisitoTemplate.plataforma.ilike(like),
+                        RequisitoTemplate.tipo.cast(String).ilike(like)))
 
     plantillas = list(db.scalars(q))
     conteos = _conteos_por_template(db, cid, [t.id for t in plantillas], scope)
@@ -280,9 +283,12 @@ def listar_templates(ambito: str | None = Query(None),
         q = q.where(or_(RequisitoTemplate.faena_id.is_(None), RequisitoTemplate.faena_id == faena_id))
     if p.search:
         like = f"%{p.search}%"
+        # `tipo` es un ENUM: se busca sobre su texto porque el placeholder del
+        # buscador promete «nombre, código o tipo» (H-37).
         q = q.where(or_(RequisitoTemplate.titulo.ilike(like),
                         RequisitoTemplate.codigo.ilike(like),
-                        RequisitoTemplate.plataforma.ilike(like)))
+                        RequisitoTemplate.plataforma.ilike(like),
+                        RequisitoTemplate.tipo.cast(String).ilike(like)))
 
     q = aplicar_orden(q, RequisitoTemplate, p.sort, ORDEN_TEMPLATES, "titulo")
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
@@ -354,8 +360,14 @@ def upload_url_template(body: TemplateUploadUrlIn,
 
 @router.post("/templates")
 def crear_template(data: TemplateIn,
-                   db: Session = Depends(get_db)):
-    """Crea una nueva plantilla de requisito en el catálogo de requisitos."""
+                   db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    """Crea una nueva plantilla de requisito en el catálogo de requisitos.
+
+    Exige sesión: el catálogo es global y sin autenticación cualquiera podía
+    escribir en él (el RLS de producción lo frena, pero en desarrollo la API
+    corre con el rol dueño y la política no se aplica).
+    """
     if data.ambito not in AMBITOS:
         raise err(400, "AMBITO_INVALIDO", f"Ámbito debe ser uno de: {', '.join(AMBITOS)}")
     if data.tipo and data.tipo not in TIPOS:
@@ -381,11 +393,12 @@ def crear_template(data: TemplateIn,
     return _template_out(t)
 
 
-@router.put("/templates/{template_id}")
+@router.patch("/templates/{template_id}")
 def editar_template(template_id: uuid.UUID,
                     data: TemplatePatch,
-                    db: Session = Depends(get_db)):
-    """Edita una plantilla existente."""
+                    db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Edita una plantilla existente. Requiere sesión (ver `crear_template`)."""
     t = db.get(RequisitoTemplate, template_id)
     if not t or not t.activo:
         raise err(404, "NO_ENCONTRADO", "Plantilla de requisito no existe")
@@ -422,7 +435,8 @@ def editar_template(template_id: uuid.UUID,
 
 @router.delete("/templates/{template_id}")
 def eliminar_template(template_id: uuid.UUID,
-                      db: Session = Depends(get_db)):
+                      db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
     """Desactiva (soft delete) una plantilla de requisito."""
     t = db.get(RequisitoTemplate, template_id)
     if not t or not t.activo:

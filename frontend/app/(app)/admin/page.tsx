@@ -1,12 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import * as Api from "@/lib/cliente";
 import type { AdminStats, Empresa } from "@/lib/tipos";
 import { Chip, Kpi, Spinner } from "@/components/ui";
 
 export default function AdminPage() {
   const router = useRouter();
+  const path = usePathname();
   const [companies, setCompanies] = useState<Empresa[] | null>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [error, setError] = useState("");
@@ -20,10 +21,14 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
+    // El layout monta esta página oculta en TODAS las rutas (pre-carga de
+    // módulos); sin este guarda de ruta el guard de rol redirigía a
+    // /dashboard desde cualquier deep-link (H: rutas de ficha/detalle roto).
+    if (path && !path.startsWith("/admin")) return;
     if (Api.currentUser()?.role !== "admin") { router.replace("/dashboard"); return; }
     sessionStorage.clear();
     cargar();
-  }, [cargar, router]);
+  }, [cargar, router, path]);
 
   const conAviso = async (accion: () => Promise<string>) => {
     setError(""); setAviso("");

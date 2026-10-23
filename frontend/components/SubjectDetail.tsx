@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import * as Api from "@/lib/cliente";
 import type {
   Archivo,
@@ -210,8 +211,14 @@ export default function SubjectDetail({
         setSubiendo({ docId: doc.id, pct, texto });
       });
       jobId = res.job_id;
+      toast.success("Documento subido", {
+        description: `${file.name} quedó registrado en el expediente.`,
+      });
       cargar();
     } catch (e) {
+      toast.error("No se pudo subir el documento", {
+        description: Api.mensajeError(e),
+      });
       setError(Api.mensajeError(e));
       return;
     } finally {

@@ -41,6 +41,12 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
   const [faenaId, setFaenaId] = useState("");
   const [faenasList, setFaenasList] = useState<Faena[]>([]);
   const [creando, setCreando] = useState(false);
+  // Unidad de negocio: agrupa el contrato y da acceso a los encargados de la unidad.
+  const [unidad, setUnidad] = useState("");
+  const [unidades, setUnidades] = useState<string[]>([]);
+  // Errores de validación en línea: el `alert()` nativo bloquea la pantalla y
+  // el usuario no ve qué campo corregir (H-16).
+  const [error, setError] = useState("");
 
   // Faena no integrada
   const [customFaenaNombre, setCustomFaenaNombre] = useState("");
@@ -75,12 +81,16 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
   useEffect(() => {
     if (!abierto) return;
     setFechaInicio(hoyIso());
+    setError("");
     Api.faenas.listar({ page_size: 100 })
       .then((res) => {
         setFaenasList(res.items || []);
         setFaenaId(res.items?.length ? res.items[0].id : "");
       })
       .catch(console.error);
+    Api.contratos.unidadesNegocio()
+      .then((res) => setUnidades((res.items || []).map((u) => u.nombre)))
+      .catch(() => setUnidades([]));
   }, [abierto]);
 
   useEffect(() => {
@@ -179,17 +189,17 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
   };
 
   const handleCrear = async () => {
-    if (!nombre.trim()) return alert("Ingresa el nombre del contrato");
-    if (!faenaId) return alert("Selecciona una faena");
-    if (isCustom && !customFaenaNombre.trim()) return alert("Ingresa el nombre de la faena");
-    if (!sinVigencia && !fechaTermino) return alert("Indica la fecha de término del contrato o marca «sin vigencia»");
-    if (!sinVigencia && fechaTermino < fechaInicio) return alert("La fecha de término debe ser posterior al inicio");
+    setError("");
+    if (!nombre.trim()) return setError("Ingresa el nombre del contrato");
+    if (!faenaId) return setError("Selecciona una faena");
+    if (isCustom && !customFaenaNombre.trim()) return setError("Ingresa el nombre de la faena");
+    if (!sinVigencia && !fechaTermino) return setError("Indica la fecha de término del contrato o marca «sin vigencia»");
+    if (!sinVigencia && fechaTermino < fechaInicio) return setError("La fecha de término debe ser posterior al inicio");
 
     setCreando(true);
     try {
       let finalFaenaId = faenaId;
       if (isCustom) {
-        alert("Nota: para el prototipo se guardará en la primera faena integrada.");
         finalFaenaId = faenasList[0]?.id || "";
       }
 
@@ -199,6 +209,7 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
         faena_id: finalFaenaId,
         fecha_inicio: fechaInicio || null,
         fecha_termino: sinVigencia ? null : fechaTermino || null,
+        unidad_negocio: unidad || null,
         requisitos_custom: {
           empresa: reqsEmpresa,
           personal: reqsPersonal,
@@ -210,7 +221,7 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
       onCreado?.();
       router.push(`/contratos/${c.id}`);
     } catch (e) {
-      alert(Api.mensajeError(e));
+      setError(Api.mensajeError(e));
     } finally {
       setCreando(false);
     }
@@ -288,6 +299,24 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
               {faenasList.map((f) => <option key={f.id} value={f.id}>{f.nombre} ({f.mandante})</option>)}
               <option value="__otra">➕ Otra faena (no integrada)</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1" htmlFor="unidad-negocio">
+              Unidad de negocio
+            </label>
+            <select
+              id="unidad-negocio"
+              value={unidad}
+              onChange={(e) => setUnidad(e.target.value)}
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
+            >
+              <option value="">Sin unidad (elige una)</option>
+              {unidades.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <p className="text-[0.72rem] text-slate-500 mt-1">
+              Agrupa el contrato en el listado y da acceso automático a los encargados de la unidad.
+            </p>
           </div>
 
           {isCustom && (
@@ -530,7 +559,12 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
         </div>
       </div>
 
-      <div className="flex justify-end gap-2.5 mt-3.5 pt-3.5 border-t border-slate-100">
+      <div className="flex justify-end gap-2.5 mt-3.5 pt-3.5 border-t border-slate-100 items-center">
+        {error && (
+          <p role="alert" className="m-0 mr-auto text-[0.8rem] font-semibold text-red-600">
+            ⚠ {error}
+          </p>
+        )}
         <button className="px-4 py-2 text-[0.85rem] font-semibold text-slate-600 hover:bg-slate-100 rounded-[8px] transition-colors" onClick={onCerrar}>
           Cancelar
         </button>

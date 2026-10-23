@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode, useEffect, useId } from "react";
+import { ReactNode, useEffect, useId, useState } from "react";
 
 export const ESTADO_LABEL: Record<string, string> = {
   ok: "Vigente",
@@ -303,6 +303,90 @@ export function Paginador({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Control numérico con botones de incremento y decremento.
+ *
+ * El mínimo es 0 y se aplica **al escribir**, no al salir: `Number("-0")` es
+ * `-0`, que NO es `< 0` pero sigue siendo un valor negativo en la práctica.
+ * `Math.max(0, -0)` devuelve `+0`, así que normalizar con el máximo resuelve
+ * los dos casos de un tirón (`-0` y los negativos).
+ *
+ * Los botones van dentro del mismo contenedor que el input y con `h-full`, así
+ * quedan alineados con él en vez de flotar según el alto de la línea.
+ */
+export function Stepper({
+  valor,
+  onChange,
+  min = 0,
+  max,
+  disabled,
+  etiqueta,
+}: {
+  valor: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  etiqueta?: string;
+}) {
+  const [texto, setTexto] = useState(String(valor));
+  useEffect(() => setTexto(String(valor)), [valor]);
+
+  const acotar = (n: number) =>
+    Math.min(max ?? Infinity, Math.max(min, Math.floor(n)));
+
+  /**
+   * El texto del input se escribe YA acotado: si se dejara el valor crudo,
+   * «-0» o «-12» se quedarían en pantalla cuando el modelo no cambia (el
+   * valor acotado ya era 0 y el efecto de sincronización no se dispara).
+   */
+  const escribir = (raw: string) => {
+    const n = Number(raw);
+    const v = Number.isFinite(n) ? acotar(n) : min;
+    setTexto(String(v));
+    onChange(v);
+  };
+
+  return (
+    <div
+      className={`inline-flex items-stretch h-[38px] rounded-lg border border-slate-300 bg-white overflow-hidden ${
+        disabled ? "opacity-60" : ""
+      }`}
+    >
+      <button
+        type="button"
+        aria-label="Disminuir"
+        disabled={disabled || valor <= min}
+        onClick={() => onChange(acotar(valor - 1))}
+        className="w-9 grid place-items-center text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+      >
+        −
+      </button>
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label={etiqueta}
+        min={min}
+        max={max}
+        value={texto}
+        disabled={disabled}
+        onChange={(e) => escribir(e.target.value)}
+        onBlur={() => setTexto(String(valor))}
+        className="w-14 border-x border-slate-200 text-center text-xs outline-none focus:bg-slate-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      <button
+        type="button"
+        aria-label="Aumentar"
+        disabled={disabled || (max !== undefined && valor >= max)}
+        onClick={() => onChange(acotar(valor + 1))}
+        className="w-9 grid place-items-center text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+      >
+        +
+      </button>
     </div>
   );
 }

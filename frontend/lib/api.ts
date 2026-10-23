@@ -482,3 +482,33 @@ export async function descargarArchivo(docId: string, archivoId: string) {
   const dl = await urlDescarga(docId, archivoId);
   abrirDescarga(dl.download_url, dl.filename);
 }
+
+/**
+ * Descarga binaria autenticada (ZIP de exportación).
+ *
+ * Un enlace normal no puede llevar el header `Authorization`, así que el
+ * archivo se pide con `fetch` y se entrega como blob. Devuelve también el
+ * nombre que fijó el backend en `Content-Disposition`.
+ */
+export async function descargarBlob(
+  path: string, query?: Query,
+): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = {};
+  const t = token();
+  if (t) headers["Authorization"] = `Bearer ${t}`;
+  const companyId = typeof window !== "undefined"
+    ? sessionStorage.getItem("impersonar") : null;
+  if (companyId) headers["X-Company-Id"] = companyId;
+
+  const res = await fetch(`${getBaseUrl()}/api/v1${path}${qs(query)}`, {
+    headers, cache: "no-store",
+  });
+  if (!res.ok) {
+    const e = (safeJson(await res.text()) as any)?.error;
+    throw new ApiError(e?.code ?? "ERROR",
+      e?.message ?? `Error ${res.status}`, res.status);
+  }
+  const cd = res.headers.get("content-disposition") ?? "";
+  const nombre = /filename="?([^";]+)"?/.exec(cd)?.[1];
+  return { blob: await res.blob(), filename: nombre ?? "exportacion.zip" };
+}

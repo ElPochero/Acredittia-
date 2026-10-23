@@ -342,30 +342,43 @@ def run(db: Session) -> None:
     # 11. Contratos para DEMO SpA
     contratos_map = {}
     contratos_def = [
-        ("CTR-2026-088", "Servicios de Transporte y Operaciones Mineras MLP", faena_pelambres, today - timedelta(days=120), today + timedelta(days=245), "vigente"),
-        ("CTR-2026-092", "Mantenimiento Electromecánico Planta Andina", faena_andina, today - timedelta(days=90), today + timedelta(days=275), "vigente"),
-        ("CTR-2026-105", "Servicio de Movimiento de Tierra y Rigger Centinela", faena_centinela, today - timedelta(days=60), today + timedelta(days=300), "vigente"),
+        ("CTR-2026-088", "Servicios de Transporte y Operaciones Mineras MLP", faena_pelambres, today - timedelta(days=120), today + timedelta(days=245), "vigente", "Transporte de Personal"),
+        ("CTR-2026-092", "Mantenimiento Electromecánico Planta Andina", faena_andina, today - timedelta(days=90), today + timedelta(days=275), "vigente", "Mantención"),
+        ("CTR-2026-105", "Servicio de Movimiento de Tierra y Rigger Centinela", faena_centinela, today - timedelta(days=60), today + timedelta(days=300), "vigente", "Obras Civiles"),
     ]
-    for cod_c, nom_c, faena_obj, f_ini, f_fin, est_c in contratos_def:
+    for cod_c, nom_c, faena_obj, f_ini, f_fin, est_c, unidad_c in contratos_def:
         ct = db.scalar(select(Contrato).where(Contrato.codigo == cod_c))
         if not ct and faena_obj:
             ct = Contrato(company_id=demo_company.id, faena_id=faena_obj.id,
                           nombre=nom_c, codigo=cod_c, fecha_inicio=f_ini,
-                          fecha_termino=f_fin, renovacion_automatica=True, estado=est_c)
+                          fecha_termino=f_fin, renovacion_automatica=True, estado=est_c,
+                          unidad_negocio=unidad_c)
             db.add(ct)
             db.flush()
+        elif ct and not ct.unidad_negocio:
+            # Backfill: los contratos creados antes de la unidad de negocio
+            # quedan sin clasificar y no aparecerían en ningún grupo.
+            ct.unidad_negocio = unidad_c
         if ct:
             contratos_map[cod_c] = ct
 
-    # Usuario de contrato admin
-    if not db.scalar(select(User).where(User.email == "admin.contratos@acredittia.cl")):
+    # Usuario de contrato admin: además de su contrato, es el encargado
+    # jerárquico de la unidad «Transporte de Personal», así que accede
+    # automáticamente a todos los contratos de esa unidad.
+    admin_contratos = db.scalar(select(User).where(User.email == "admin.contratos@acredittia.cl"))
+    if not admin_contratos:
         ct_main = contratos_map.get("CTR-2026-088")
-        db.add(User(email="admin.contratos@acredittia.cl",
-                    password_hash=hash_password("Contrato2026!"),
-                    nombre="Juan Administrador de Contrato",
-                    role="contract_admin", company_id=demo_company.id,
-                    contrato_id=ct_main.id if ct_main else None, status="approved"))
+        admin_contratos = User(email="admin.contratos@acredittia.cl",
+                                password_hash=hash_password("Contrato2026!"),
+                                nombre="Juan Administrador de Contrato",
+                                role="contract_admin", company_id=demo_company.id,
+                                contrato_id=ct_main.id if ct_main else None,
+                                unidad_negocio="Transporte de Personal",
+                                status="approved")
+        db.add(admin_contratos)
         db.flush()
+    elif not admin_contratos.unidad_negocio:
+        admin_contratos.unidad_negocio = "Transporte de Personal"
 
     # 12. Plataformas por Faena y Contrato
     ct_088 = contratos_map.get("CTR-2026-088")
@@ -545,6 +558,64 @@ def run(db: Session) -> None:
                                             uploaded_by=demo_user.id)
                     db.add(arch)
                     db.flush()
+
+    # 15b. Expedientes EMSIPOR de los conductores del demo.
+    # El estado de cada requisito es lo que cuenta la cabecera de la pestaña
+    # Licencia Interna (acreditado / vencido / en proceso / bloqueado), así que
+    # el demo tiene que mostrar los cuatro casos.
+    emsipor_demo = {
+        # Carlos: expediente completo → acreditado
+        "15.842.109-K": {t[0]: ("ok", "ok", today + timedelta(days=365))
+                         for t in REQ_EMSIPOR},
+        # Diego: un requisito vencido y otro por vencer → vencido
+        "17.391.450-4": {
+            "Solicitud AIC Mina": ("ok", "ok", today + timedelta(days=300)),
+            "Fotografía Trabajador": ("ok", "ok", today + timedelta(days=300)),
+            "Licencia Municipal de Conducir": ("ok", "ok", today + timedelta(days=400)),
+            "Hoja de Vida del Conductor": ("ok", "ok", today + timedelta(days=30)),
+            "Psicosensométrico Riguroso": ("ok", "porvenc", today + timedelta(days=12)),
+            "Curso Manejo Defensivo y Alta Montaña": ("ok", "venc", today - timedelta(days=20)),
+            "Examen Práctico Mina": ("ok", "ok", today + timedelta(days=120)),
+            "Anexo Faena": ("ok", "ok", today + timedelta(days=120)),
+            "Anexo Mina": ("falta", "falta", None),
+        },
+        # José: a medias → en proceso
+        "14.510.992-8": {
+            "Solicitud AIC Mina": ("ok", "ok", today + timedelta(days=300)),
+            "Fotografía Trabajador": ("ok", "ok", today + timedelta(days=300)),
+            "Licencia Municipal de Conducir": ("ok", "ok", today + timedelta(days=400)),
+            "Psicosensométrico Riguroso": ("ok", "ok", today + timedelta(days=60)),
+            "Examen Práctico Mina": ("ok", "ok", today + timedelta(days=90)),
+            "Hoja de Vida del Conductor": ("falta", "falta", None),
+            "Curso Manejo Defensivo y Alta Montaña": ("falta", "falta", None),
+            "Anexo Faena": ("falta", "falta", None),
+            "Anexo Mina": ("falta", "falta", None),
+        },
+        # Andrés: sin expediente → bloqueado
+        "16.890.123-5": {t[0]: ("falta", "falta", None) for t in REQ_EMSIPOR},
+    }
+    for ref_rut, estados_rut in emsipor_demo.items():
+        sj_target = sujetos_map.get(ref_rut)
+        if not sj_target:
+            continue
+        for titulo_doc, (est_db, est_calc, v_date) in estados_rut.items():
+            tmpl_obj = tmpl_by_title.get(titulo_doc)
+            doc = db.scalar(select(Documento).where(
+                (Documento.sujeto_id == sj_target.id) & (Documento.titulo == titulo_doc)))
+            if doc is None:
+                db.add(Documento(
+                    company_id=demo_company.id,
+                    template_id=tmpl_obj.id if tmpl_obj else None,
+                    sujeto_id=sj_target.id, contrato_id=None,
+                    titulo=titulo_doc, obligatorio=True, estado=est_db,
+                    vence=v_date, estado_calc=est_calc, es_emsipor=True))
+                db.flush()
+            else:
+                doc.estado = est_db
+                doc.estado_calc = est_calc
+                doc.vence = v_date
+                doc.es_emsipor = True
+        db.flush()
 
     # 16. Revisiones de Inteligencia Artificial (IA)
     if created_docs and not db.scalar(select(IaReview.id).limit(1)):

@@ -109,12 +109,35 @@ def get_company_id(
               "El admin debe indicar X-Company-Id para operar datos de empresa")
 
 
-def require_contrato(contrato_id: uuid.UUID, user: User) -> None:
+def contrato_permitido(user: User, contrato) -> bool:
+    """El usuario puede operar este contrato.
+
+    Tres vías, en este orden:
+    * los roles de empresa ven todos los contratos de su empresa;
+    * un `contract_admin`/`visor` asignado directamente a un contrato;
+    * un `contract_admin`/`visor` **encargado jerárquico** de la unidad de
+      negocio del contrato: ese acceso es automático (v14).
+    """
+    if user.role not in ("contract_admin", "visor"):
+        return True
+    if user.contrato_id == contrato.id:
+        return True
+    unidad = getattr(user, "unidad_negocio", None)
+    return bool(unidad) and unidad == contrato.unidad_negocio
+
+
+def require_contrato(contrato_id: uuid.UUID, user: User, contrato=None) -> None:
     """Un usuario acotado (contract_admin, visor) solo toca su contrato.
 
     Devuelve 404 y no 403 para no filtrar la existencia del recurso (§3.3).
+    `contrato` es opcional: si se pasa el contrato ya cargado, también se
+    acepta el acceso por unidad de negocio.
     """
-    if user.role in ("contract_admin", "visor") and user.contrato_id != contrato_id:
+    if user.role in ("contract_admin", "visor"):
+        if user.contrato_id == contrato_id:
+            return
+        if contrato is not None and contrato_permitido(user, contrato):
+            return
         raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
 
 
@@ -170,6 +193,6 @@ def aplicar_orden(stmt, modelo, sort: str | None, permitidos: set[str], defecto:
 
 __all__ = [
     "err", "get_db", "get_current_user", "require_admin", "require_company",
-    "get_company_id", "require_contrato", "contrato_scope",
+    "get_company_id", "require_contrato", "contrato_permitido", "contrato_scope",
     "Page", "paginacion", "sobre", "aplicar_orden", "Session",
 ]
