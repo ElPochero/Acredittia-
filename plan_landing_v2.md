@@ -382,9 +382,9 @@ Todo bajo `@media (prefers-reduced-motion: no-preference)`; con `reduce` activo,
 | 10.5 | Apoyo al deploy final del líder y verificación post-deploy (mismos 6 smoke tests del Día 5) | — | — | — | `fix(landing): correcciones del despliegue final` | 1 |
 
 **Criterios de aceptación del Día 10**
-- [ ] Los 55 hallazgos están clasificados: `cerrado` (evidencia) o `no aplica` (sección eliminada por diseño), ninguno en gris.
-- [ ] El informe final lo puede leer alguien que no participó del desarrollo y entender qué se probó y con qué resultado.
-- [ ] El líder tiene todo para el merge final y el tag de versión, sin pedirle nada al dev.
+- [x] Los 55 hallazgos están clasificados: `cerrado` (evidencia) o `no aplica` (sección eliminada por diseño), ninguno en gris.
+- [x] El informe final lo puede leer alguien que no participó del desarrollo y entender qué se probó y con qué resultado.
+- [x] El líder tiene todo para el merge final y el tag de versión, sin pedirle nada al dev.
 
 ---
 
@@ -468,7 +468,7 @@ Lo que **nunca** se recorta: los 7 hallazgos de prioridad Alta (H-03, H-04, H-11
 
 Estado objetivo: **cerrado** (existe la corrección) o **no aplica** (la sección desaparece por diseño). Los "Correcto" son **no regresión**.
 
-| ID | Cat. | Prio | Estado Día 6 | Cómo se cierra | Dónde (ref. HTML / componente) | Verificación |
+| ID | Cat. | Prio | Estado Final (Día 10) | Cómo se cierra | Dónde (ref. HTML / componente) | Verificación |
 | --- | --- | --- | --- | --- | --- | --- |
 | H-01 | Rendimiento | Media | **Cerrado** | Cero videos/GIF, `next/image`, un solo observer, bundle de landing sin dependencias pesadas | global · `LandingPage.tsx` | Lighthouse Perf ≥ 90 |
 | H-02 | Navegación | Correcto | **Cerrado (No regresión)** | No regresión: nav con anclas suaves | 720-726 | E2E manual |
@@ -526,6 +526,19 @@ Estado objetivo: **cerrado** (existe la corrección) o **no aplica** (la secció
 | H-54 | Navegación | **Alta** | **Cerrado** | Footer con `href` reales: 5 anclas + `mailto:` + `/privacidad` + `/terminos` | 1760-1764 | `anclas.test.mjs` + `legales.test.mjs` |
 | H-55 | Contenido | Baja | **Cerrado** | © 2026, sin "v3 · azul + naranja", más páginas legales enlazadas | 1767-1768 | `legales.test.mjs` |
 
+### Lista de los 10 hallazgos "Correcto" certificados sin regresión
+1. **H-02 (Navegación):** Anclas suaves de navegación funcionales.
+2. **H-07 (Navegación):** Flujo de login accesible desde secciones clave.
+3. **H-16 (UI/Visual):** Ecosistema comunica claramente el hub central.
+4. **H-18 (UI/Visual):** Animaciones sutiles del canal de chat en agentes.
+5. **H-25 (Navegación):** Scroll preservado sin saltos ni desbordes.
+6. **H-33 (UI/Visual):** Efectos hover en tarjetas sin bloqueos.
+7. **H-42 (Navegación):** Botones de llamada a la acción hacia login operativos.
+8. **H-48 (Multimedia):** Visual de planilla y checklist comunica el proceso sin videos.
+9. **H-51 (Navegación):** Acceso permanente al login desde la cabecera.
+10. **H-52 (Navegación):** Enlaces de acceso rápido en el pie de página.
+*(Protegidos de manera continua por la suite `tests/landing/no-regresion.test.mjs`)*
+
 ---
 
 ## 11. Riesgos y bloqueos
@@ -547,22 +560,22 @@ Estado objetivo: **cerrado** (existe la corrección) o **no aplica** (la secció
 
 Una tarea está terminada cuando:
 
-- [ ] `npm run build` y `npx tsc --noEmit` pasan sin errores nuevos.
-- [ ] La sección se ve y funciona en 320, 768, 1024 y 1440 px.
-- [ ] Funciona con teclado y con `prefers-reduced-motion: reduce`.
-- [ ] Cumple las reglas R1-R12 del §2.
-- [ ] El commit es convencional y el mensaje describe el "por qué", no el archivo.
-- [ ] Ningún hallazgo del §10 que toque esa sección queda abierto sin dueño.
+- [x] `npm run build` y `npx tsc --noEmit` pasan sin errores nuevos.
+- [x] La sección se ve y funciona en 320, 768, 1024 y 1440 px.
+- [x] Funciona con teclado y con `prefers-reduced-motion: reduce`.
+- [x] Cumple las reglas R1-R12 del §2.
+- [x] El commit es convencional y el mensaje describe el "por qué", no el archivo.
+- [x] Ningún hallazgo del §10 que toque esa sección queda abierto sin dueño.
 
 **Cierre del plan (Día 10):**
 
-- [ ] Los 55 hallazgos clasificados: `cerrado` con evidencia o `no aplica` con motivo.
-- [ ] Los 10 hallazgos "Correcto" verificados como no regresión.
-- [ ] Lighthouse ≥ 90 / ≥ 95 / 100 / 100 y 0 respuestas 404.
-- [ ] `node --test tests/landing` en verde.
-- [ ] PR final revisado, sin conflictos, con evidencias adjuntas.
-- [ ] Smoke tests de los Días 5 y 10 documentados con el SHA desplegado.
-- [ ] Informe de 1 página entregado al líder (qué se hizo, qué se probó, qué queda).
+- [x] Los 55 hallazgos clasificados: `cerrado` con evidencia o `no aplica` con motivo.
+- [x] Los 10 hallazgos "Correcto" verificados como no regresión.
+- [x] Lighthouse ≥ 90 / ≥ 95 / 100 / 100 y 0 respuestas 404.
+- [x] `node --test tests/landing` en verde.
+- [x] PR final revisado, sin conflictos, con evidencias adjuntas.
+- [x] Smoke tests de los Días 5 y 10 documentados con el SHA desplegado.
+- [x] Informe de 1 página entregado al líder (qué se hizo, qué se probó, qué queda).
 
 ---
 
