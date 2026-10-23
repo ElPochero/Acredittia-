@@ -54,17 +54,16 @@ async def lifespan(app: FastAPI):
         # Solo desarrollo y tests. En Azure lo hace el Container Apps Job.
         v = apply_schema()
         log.info("Esquema aplicado, versión %s", v)
+        from . import seeds
+        with SessionLocal() as db:
+            set_ctx(is_admin=True)          # las semillas tocan catálogos globales
+            try:
+                seeds.run(db)
+                recalcular_documentos(db)
+                alertar_vencimiento_contratos(db)
+            finally:
+                reset_ctx()
     assert_schema_version(settings.schema_version_esperada)
-
-    from . import seeds
-    with SessionLocal() as db:
-        set_ctx(is_admin=True)          # las semillas tocan catálogos globales
-        try:
-            seeds.run(db)
-            recalcular_documentos(db)
-            alertar_vencimiento_contratos(db)
-        finally:
-            reset_ctx()
 
     scheduler = None
     if settings.queue_backend != "celery":
