@@ -55,7 +55,7 @@
 .animate-xls-warn { animation: xlsWarnPulse 2.2s ease-in-out infinite; }
 .animate-xls-bad { animation: xlsBadPulse 2.2s ease-in-out infinite; }
 
-/* Primitivas de mockup y scroll */
+/* Primitivas de mockup y scroll (H-15, H-40, Tarea 7.4) */
 .carq-bar-fill {
   transition: width 1.4s ease;
 }
@@ -68,12 +68,26 @@
   scrollbar-width: none;
 }
 
-/* Guardrail de accesibilidad: respeto estricto de prefers-reduced-motion */
+/* Margen superior en todas las anclas para evitar solapamiento con la barra de navegación fija */
+[id] {
+  scroll-margin-top: 5rem;
+}
+
+/* Guardrail de accesibilidad y scroll suave condicional a prefers-reduced-motion (H-15, H-40) */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html {
     scroll-behavior: auto !important;
   }
 }

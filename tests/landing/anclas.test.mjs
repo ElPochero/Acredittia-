@@ -82,3 +82,38 @@ test("anclas.test.mjs: todo href='#x' de la landing tiene id='x' y está en sect
     );
   }
 });
+
+test("anclas.test.mjs: scroll restoration, sin overflow-x global y sin transform en root (H-15, H-40)", () => {
+  const landingPageFile = path.join(landingDir, "LandingPage.tsx");
+  const landingPageContent = fs.readFileSync(landingPageFile, "utf-8");
+
+  // El contenedor raíz #landing no debe tener transforms que rompan scroll restoration
+  assert.doesNotMatch(
+    landingPageContent,
+    /id=["']landing["'][^>]*\b(transform|translate|scale)/i,
+    "El contenedor raíz #landing no debe contener transform que rompa la restauración de scroll (H-15, H-40)"
+  );
+
+  // Verificar que globals.css y landing.css no tienen overflow-x: hidden global en html o body
+  const globalsCss = fs.readFileSync(path.join(repoRoot, "frontend/app/globals.css"), "utf-8");
+  const landingCss = fs.readFileSync(path.join(repoRoot, "frontend/app/landing.css"), "utf-8");
+
+  assert.doesNotMatch(
+    globalsCss,
+    /(?:html|body)[^{]*\{[^}]*overflow-x\s*:\s*hidden/i,
+    "globals.css no debe tener overflow-x: hidden en html o body (H-15, H-40)"
+  );
+
+  assert.doesNotMatch(
+    landingCss,
+    /(?:html|body)[^{]*\{[^}]*overflow-x\s*:\s*hidden/i,
+    "landing.css no debe tener overflow-x: hidden en html o body (H-15, H-40)"
+  );
+
+  // landing.css debe definir scroll-margin-top para anclas
+  assert.match(
+    landingCss,
+    /\[id\]\s*\{[^}]*scroll-margin-top/i,
+    "landing.css debe definir scroll-margin-top para [id] (H-15, H-40)"
+  );
+});

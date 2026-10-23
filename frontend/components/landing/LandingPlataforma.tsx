@@ -75,7 +75,7 @@ export default function LandingPlataforma() {
   return (
     <section
       id={LANDING_SECTIONS.PLATAFORMA}
-      className="py-20 lg:py-28 px-[6%] bg-white scroll-mt-14"
+      className="py-20 lg:py-28 px-[6%] bg-white scroll-mt-20"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onFocus={() => setIsFocused(true)}
