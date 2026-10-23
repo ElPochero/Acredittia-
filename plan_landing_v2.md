@@ -326,10 +326,10 @@ Todo bajo `@media (prefers-reduced-motion: no-preference)`; con `reduce` activo,
 | 7.4 | Scroll: sin `overflow-x: hidden` global, `scroll-behavior: smooth` solo si no hay `reduce`, `scroll-margin-top` en todas las anclas, sin `transform` en el contenedor raíz | `landing.css`, `sections.ts` | 32, 608-680 | H-15,H-40 | `fix(landing): restaura la posicion de scroll al volver atras` | 2 |
 
 **Criterios de aceptación del Día 7**
-- [ ] Lighthouse (móvil, producción): Performance ≥ 90, Accessibility ≥ 95, Best Practices 100, SEO 100. Guardar el reporte.
-- [ ] 404 de recursos en Network = **0**.
-- [ ] "Iniciar sesión" responde en < 2 s desde la primera pulsación; "Empezar gratis" nunca requiere doble click.
-- [ ] Volver atrás desde `/login` devuelve **exactamente** a la misma posición de scroll (H-15 y H-40 verificados por separado).
+- [x] Lighthouse (móvil, producción): Performance ≥ 90, Accessibility ≥ 95, Best Practices 100, SEO 100. Guardar el reporte.
+- [x] 404 de recursos en Network = **0**.
+- [x] "Iniciar sesión" responde en < 2 s desde la primera pulsación; "Empezar gratis" nunca requiere doble click.
+- [x] Volver atrás desde `/login` devuelve **exactamente** a la misma posición de scroll (H-15 y H-40 verificados por separado).
 
 ---
 
