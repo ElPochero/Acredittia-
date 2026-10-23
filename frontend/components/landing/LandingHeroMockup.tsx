@@ -266,6 +266,7 @@ export default function LandingHeroMockup() {
                       fill
                       sizes="28px"
                       className="object-cover"
+                      priority
                     />
                   ) : row.avatar.type === "emoji" ? (
                     <span>{row.avatar.text}</span>
