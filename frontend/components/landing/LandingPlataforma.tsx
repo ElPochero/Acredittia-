@@ -123,24 +123,38 @@ export default function LandingPlataforma() {
 
         {/* Cuerpo: Sidebar + Vista principal */}
         <div className="grid grid-cols-1 md:grid-cols-[68px_1fr] min-h-[460px]">
-          {/* Sidebar de 7 vistas navegables */}
+          {/* Sidebar de 7 vistas navegables (WCAG 2.2 AA, Tarea 8.2) */}
           <div
             role="tablist"
             aria-label="Vistas de la plataforma"
             className="flex md:flex-col items-center justify-start gap-1 p-2 bg-[#0F172A] border-r border-landing-linea overflow-x-auto scrollbar-none"
           >
-            {SIDEBAR_ITEMS.map((item) => {
+            {SIDEBAR_ITEMS.map((item, idx) => {
               const isActive = activeView === item.key;
               return (
                 <button
                   key={item.key}
+                  id={`plat-tab-${item.key}`}
                   role="tab"
                   aria-selected={isActive}
+                  aria-controls="plat-tabpanel"
+                  tabIndex={isActive ? 0 : -1}
                   type="button"
                   onClick={() => setActiveView(item.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+                      e.preventDefault();
+                      const next = SIDEBAR_ITEMS[(idx + 1) % SIDEBAR_ITEMS.length].key;
+                      setActiveView(next);
+                    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+                      e.preventDefault();
+                      const prev = SIDEBAR_ITEMS[(idx - 1 + SIDEBAR_ITEMS.length) % SIDEBAR_ITEMS.length].key;
+                      setActiveView(prev);
+                    }
+                  }}
                   title={item.label}
                   aria-label={item.label}
-                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all shrink-0 cursor-pointer ${
+                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-landing-azul ${
                     isActive
                       ? "bg-landing-azul text-white shadow-md scale-105"
                       : "text-slate-400 hover:text-white hover:bg-slate-800"
@@ -152,8 +166,13 @@ export default function LandingPlataforma() {
             })}
           </div>
 
-          {/* Contenedor de la vista activa */}
-          <div className="p-4 sm:p-6 lg:p-7 bg-[#F8FAFC] overflow-x-auto">
+          {/* Contenedor de la vista activa con rol tabpanel accesible */}
+          <div
+            id="plat-tabpanel"
+            role="tabpanel"
+            aria-labelledby={`plat-tab-${activeView}`}
+            className="p-4 sm:p-6 lg:p-7 bg-[#F8FAFC] overflow-x-auto"
+          >
             {/* VISTA 1: HOME / INICIO */}
             {activeView === "home" && (
               <div className="animate-plat-fade">
