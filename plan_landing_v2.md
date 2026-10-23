@@ -365,9 +365,9 @@ Todo bajo `@media (prefers-reduced-motion: no-preference)`; con `reduce` activo,
 | 9.6 | *(opcional, primer recorte si hay atraso)* Limpieza del CSS de la landing anterior en `styles-prototipo.css`, solo con grep en 0 usos y nunca `.btn*` | `app/styles-prototipo.css` | 31-712 (CSS viejo) | H-01 | `chore(landing): elimina css de la landing anterior sin uso` | 1 |
 
 **Criterios de aceptación del Día 9**
-- [ ] Cero conflictos sin resolver; build verde después del merge de `main` en `Dev_4`.
-- [ ] Todo hallazgo abierto tiene dueño y fecha, o está documentado como fuera de alcance con motivo.
-- [ ] El PR final describe qué se probó, en qué navegador y con qué resultado.
+- [x] Cero conflictos sin resolver; build verde después del merge de `main` en `Dev_4`.
+- [x] Todo hallazgo abierto tiene dueño y fecha, o está documentado como fuera de alcance con motivo.
+- [x] El PR final describe qué se probó, en qué navegador y con qué resultado.
 
 ---
 
