@@ -14,6 +14,12 @@ export default function AppHeader({
   const menuRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Precarga los destinos del menú para que el primer clic no espere compilación/carga
+  useEffect(() => {
+    router.prefetch("/alertas");
+    router.prefetch("/config");
+  }, [router]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {

@@ -163,23 +163,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="main">
         <AppHeader onToggleMenu={() => setMenuAbierto(!menuAbierto)} />
         <div className="content" id="view">
-          <div style={{ display: isMatch("/dashboard") ? "block" : "none" }}><DashboardPage /></div>
-          <div style={{ display: isMatch("/contratos") ? "block" : "none" }}><ContratosPage /></div>
-          <div style={{ display: isMatch("/mandantes") ? "block" : "none" }}><MandantesPage /></div>
-          <div style={{ display: isMatch("/faenas") ? "block" : "none" }}><AcreditacionesPage /></div>
-          <div style={{ display: isMatch("/personal") ? "block" : "none" }}><PersonasPage /></div>
-          <div style={{ display: isMatch("/docs-trabajadores") ? "block" : "none" }}><DocsTrabajadoresPage /></div>
-          <div style={{ display: isMatch("/equipos") ? "block" : "none" }}><EquiposPage /></div>
-          <div style={{ display: isMatch("/cargos") ? "block" : "none" }}><CargosPage /></div>
-          <div style={{ display: isMatch("/requisitos") ? "block" : "none" }}><RequisitosPage /></div>
-          <div style={{ display: isMatch("/plantillas") ? "block" : "none" }}><PlantillasPage /></div>
-          <div style={{ display: isMatch("/reportes") ? "block" : "none" }}><ReportesPage /></div>
-          <div style={{ display: isMatch("/alertas") ? "block" : "none" }}><AlertasPage /></div>
-          <div style={{ display: isMatch("/calendario") ? "block" : "none" }}><CalendarioPage /></div>
-          <div style={{ display: isMatch("/integraciones") ? "block" : "none" }}><IntegracionesPage /></div>
-          <div style={{ display: isMatch("/config") ? "block" : "none" }}><ConfigPage /></div>
+          {isMatch("/dashboard") && <DashboardPage />}
+          {isMatch("/contratos") && <ContratosPage />}
+          {isMatch("/mandantes") && <MandantesPage />}
+          {isMatch("/faenas") && <AcreditacionesPage />}
+          {isMatch("/personal") && <PersonasPage />}
+          {isMatch("/docs-trabajadores") && <DocsTrabajadoresPage />}
+          {isMatch("/equipos") && <EquiposPage />}
+          {isMatch("/cargos") && <CargosPage />}
+          {isMatch("/requisitos") && <RequisitosPage />}
+          {isMatch("/plantillas") && <PlantillasPage />}
+          {isMatch("/reportes") && <ReportesPage />}
+          {isMatch("/alertas") && <AlertasPage />}
+          {isMatch("/calendario") && <CalendarioPage />}
+          {isMatch("/integraciones") && <IntegracionesPage />}
+          {isMatch("/config") && <ConfigPage />}
           {isMatch("/admin") && <AdminPage />}
-          <div style={{ display: isMatch("/certificacion-laboral") ? "block" : "none" }}><CertificacionLaboralPage /></div>
+          {isMatch("/certificacion-laboral") && <CertificacionLaboralPage />}
           {!isKnown && children}
         </div>
       </main>
