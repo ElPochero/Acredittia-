@@ -1,178 +1,208 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import * as Api from "@/lib/cliente";
-import type { Alerta, ResumenAlertas } from "@/lib/tipos";
+import type { Alerta, AlertaPatch, ResumenAlertas } from "@/lib/tipos";
+import { Chip, Modal, SEVERIDAD_LABEL } from "@/components/ui";
 
-// Iconos útiles
-const EyeIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-);
-
-const MoreVerticalIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-);
-
-const CheckCircleIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-);
-
-const SettingsIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-);
-
-// Helpers
-const ESTADO_ALERTA_LBL: Record<string, string> = {
-  nueva: "Nueva", en_progreso: "En progreso", bloqueante: "Bloqueante", informativa: "Informativa", resuelta: "Resuelta",
-};
 const ORIGEN_LBL: Record<string, string> = {
   vencimiento: "Vencimiento", ia: "IA", integracion: "Integración", sistema: "Sistema",
 };
-const ambitoDe = (a: Alerta) => (a.sujeto_id ? "Personal" : "Empresa");
-const faenaDe = (a: Alerta) => (a.contrato_id ? "Asociado a Contrato" : "General");
 
-const formatDateStr = (dateStr: string) => {
-  const d = new Date(dateStr);
-  const diffDays = Math.floor((new Date().getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Hoy";
-  if (diffDays === 1) return "Ayer";
-  if (diffDays < 30) return `Hace ${diffDays} días`;
-  return d.toLocaleDateString("es-CL");
-};
+const TABS = ["Todas", "Críticas", "Advertencias", "Informativas", "Resueltas"] as const;
+
+function fecha(iso: string) {
+  return new Date(iso).toLocaleDateString("es-CL", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+}
+
+/** Contador de alertas que siguen abiertas, separado del total histórico. */
+function esActiva(a: Alerta) {
+  return !a.resuelta;
+}
 
 export default function AlertasPage() {
   const [loading, setLoading] = useState(true);
-  const [alertasList, setAlertasList] = useState<Alerta[]>([]);
+  const [lista, setLista] = useState<Alerta[]>([]);
   const [resumen, setResumen] = useState<ResumenAlertas | null>(null);
-  const [filtroTab, setFiltroTab] = useState("Todas");
+  const [tab, setTab] = useState<string>("Todas");
   const [q, setQ] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState("Todos");
-  const [filtroTipo, setFiltroTipo] = useState("Todos");
-  const [filtroAmbito, setFiltroAmbito] = useState("Todos");
-  const [filtroFaena, setFiltroFaena] = useState("Todas");
+  const [origen, setOrigen] = useState("Todos");
+  const [detalle, setDetalle] = useState<Alerta | null>(null);
+  const [abrirId, setAbrirId] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
+
+  async function cargar() {
+    setLoading(true);
+    setError("");
+    try {
+      // `solo_activas:false` trae también las resueltas una sola vez; la pestaña
+      // "Resueltas" filtra en memoria en lugar de pedir otra página al backend.
+      const [pag, res] = await Promise.all([
+        Api.alertas.listar({ solo_activas: false, page_size: 100 }),
+        Api.alertas.resumen(),
+      ]);
+      setLista(pag.items || []);
+      setResumen(res);
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      try {
-        const [resList, resSum] = await Promise.all([
-          Api.alertas.listar({ page_size: 50 }),
-          Api.alertas.resumen()
-        ]);
-        setAlertasList(resList.items || []);
-        setResumen(resSum);
-      } catch (err) {
-        console.error("Error al cargar alertas:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
+    cargar();
+    // Filtros que llegan desde el Home. Se leen del `window` porque la página es
+    // cliente y `useSearchParams` obligaría a envolverla en un `Suspense`.
+    const sp = new URLSearchParams(window.location.search);
+    const f = sp.get("filtro");
+    setTab(f === "criticas" ? "Críticas" : f === "resueltas" ? "Resueltas" : "Todas");
+    setAbrirId(sp.get("alerta"));
+    // Solo al montar: después manda el estado local.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const opcionesEstado = Array.from(new Set(alertasList.map((a) => a.estado))).filter(Boolean);
-  const opcionesOrigen = Array.from(new Set(alertasList.map((a) => a.origen))).filter(Boolean);
+  function reemplazar(a: Alerta) {
+    setLista((prev) => prev.map((x) => (x.id === a.id ? a : x)));
+    setDetalle((d) => (d?.id === a.id ? a : d));
+    Api.alertas.resumen().then(setResumen).catch(() => {});
+  }
 
-  const getFilteredAlerts = () => {
-    let lista = alertasList;
-    if (filtroTab === "Críticas") lista = lista.filter(a => a.severidad === "critica");
-    else if (filtroTab === "Advertencias") lista = lista.filter(a => a.severidad === "advertencia" || a.severidad === "alta");
-    else if (filtroTab === "Informativas") lista = lista.filter(a => a.severidad === "informativa");
-    else if (filtroTab === "Resueltas") lista = lista.filter(a => a.estado === "resuelta");
-    if (q.trim()) {
-      const t = q.toLowerCase();
-      lista = lista.filter(a => `${a.titulo} ${a.descripcion || ""}`.toLowerCase().includes(t));
+  async function marcarLeida(a: Alerta) {
+    if (a.leida) return;
+    try {
+      reemplazar(await Api.alertas.editar(a.id, { leida: true }));
+    } catch (e) {
+      setError(Api.mensajeError(e));
     }
-    if (filtroEstado !== "Todos") lista = lista.filter(a => a.estado === filtroEstado);
-    if (filtroTipo !== "Todos") lista = lista.filter(a => a.origen === filtroTipo);
-    if (filtroAmbito !== "Todos") lista = lista.filter(a => ambitoDe(a) === filtroAmbito);
-    if (filtroFaena !== "Todas") lista = lista.filter(a => faenaDe(a) === filtroFaena);
-    return lista;
-  };
+  }
 
-  const alertasFiltradas = getFilteredAlerts();
+  async function cambiar(a: Alerta, cambios: AlertaPatch) {
+    setGuardando(true);
+    setError("");
+    try {
+      const r = await Api.alertas.editar(a.id, cambios);
+      reemplazar(r);
+      setAviso(
+        r.resuelta ? `Alerta resuelta: ${r.titulo}` : `Alerta actualizada: ${r.titulo}`,
+      );
+      if (r.resuelta) setDetalle(null);
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function marcarTodas() {
+    setError("");
+    try {
+      const { marcadas } = await Api.alertas.marcarLeidas();
+      setAviso(`${marcadas} alerta(s) marcadas como leídas`);
+      await cargar();
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    }
+  }
+
+  // La alerta pedida por URL (`?alerta=…`) se abre una vez que llegó el listado.
+  useEffect(() => {
+    if (!abrirId || loading) return;
+    const a = lista.find((x) => x.id === abrirId);
+    setAbrirId(null);
+    if (!a) return;
+    setDetalle(a);
+    marcarLeida(a);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirId, loading, lista]);
+
+  const activas = lista.filter(esActiva);
+  let filtradas = tab === "Resueltas" ? lista.filter((a) => a.resuelta) : activas;
+  if (tab === "Críticas") filtradas = filtradas.filter((a) => a.severidad === "critica");
+  else if (tab === "Advertencias")
+    filtradas = filtradas.filter((a) => a.severidad === "advertencia" || a.severidad === "alta");
+  else if (tab === "Informativas")
+    filtradas = filtradas.filter((a) => ["informativa", "media", "baja"].includes(a.severidad));
+  if (q.trim()) {
+    const t = q.toLowerCase();
+    filtradas = filtradas.filter((a) => `${a.titulo} ${a.descripcion || ""}`.toLowerCase().includes(t));
+  }
+  if (origen !== "Todos") filtradas = filtradas.filter((a) => a.origen === origen);
+
+  const kpis = [
+    { label: "Pendientes", valor: resumen?.activas ?? 0, color: "text-slate-800", sub: "sin resolver", tab: "Todas" },
+    { label: "Críticas", valor: resumen?.criticas ?? 0, color: "text-red-500", sub: "requieren atención", tab: "Críticas" },
+    { label: "Advertencias", valor: resumen?.advertencias ?? 0, color: "text-amber-500", sub: "por vencer o altas", tab: "Advertencias" },
+    { label: "Resueltas (30 días)", valor: resumen?.resueltas_30d ?? 0, color: "text-emerald-600", sub: "últimos 30 días", tab: "Resueltas" },
+  ];
 
   return (
     <div className="p-8 space-y-6 bg-slate-50 min-h-screen">
-      {/* Header único (título en AppHeader) */}
-      <div className="flex justify-end items-center mb-2">
-        <button className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
-          <SettingsIcon /> Configurar notificaciones
-        </button>
-      </div>
-      <div className="mb-2">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <button
-          onClick={(e) => { e.preventDefault(); (window as any).setAppRoute?.("/dashboard"); }}
+          onClick={() => (window as any).setAppRoute?.("/dashboard")}
           className="text-sm font-semibold text-slate-500 hover:text-slate-700 transition-colors"
         >
           ← Volver a Inicio
         </button>
+        <button
+          onClick={marcarTodas}
+          disabled={loading || (resumen?.no_leidas ?? 0) === 0}
+          className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          ✓ Marcar todas como leídas
+          {resumen?.no_leidas ? (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700">{resumen.no_leidas}</span>
+          ) : null}
+        </button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Críticas */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">
-            <span className="w-2 h-2 rounded-full bg-red-500"></span>
-            Críticas
-          </div>
-          <div className="text-3xl font-bold text-red-500">{resumen?.criticas || 0}</div>
-          <div className="text-xs text-red-400 font-medium mt-1">requieren atención</div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4 text-sm" role="alert">
+          {error}
         </div>
-
-        {/* Advertencias */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">
-            <div className="bg-amber-100 text-amber-500 p-1 rounded">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-            </div>
-            Advertencias
-          </div>
-          <div className="text-3xl font-bold text-amber-500">{resumen?.advertencias || 0}</div>
-          <div className="text-xs text-amber-400 font-medium mt-1">requieren atención</div>
+      )}
+      {aviso && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-sm" role="status">
+          {aviso}
         </div>
+      )}
 
-        {/* Informativas */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">
-            <div className="bg-blue-100 text-blue-500 p-1 rounded">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            </div>
-            Informativas
-          </div>
-          <div className="text-3xl font-bold text-slate-800">{resumen?.informativas || 0}</div>
-          <div className="text-xs text-slate-500 font-medium mt-1">nuevas</div>
-        </div>
-
-        {/* Resueltas */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">
-            <div className="bg-emerald-100 text-emerald-500 p-1 rounded">
-              <CheckCircleIcon />
-            </div>
-            Resueltas (30 días)
-          </div>
-          <div className="text-3xl font-bold text-slate-800">{resumen?.resueltas_30d || 0}</div>
-          <div className="text-xs text-emerald-600 font-medium mt-1">en los últimos 30 días</div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
-        {["Todas", "Críticas", "Advertencias", "Informativas", "Resueltas"].map((tab) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        {kpis.map((k) => (
           <button
-            key={tab}
-            onClick={() => setFiltroTab(tab)}
-            className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors whitespace-nowrap ${
-              filtroTab === tab
-                ? "bg-blue-600 text-white"
-                : "text-slate-600 hover:bg-slate-100"
+            key={k.label}
+            onClick={() => setTab(k.tab)}
+            aria-pressed={tab === k.tab}
+            className={`bg-white p-5 rounded-xl border shadow-sm text-left transition-colors ${
+              tab === k.tab ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"
             }`}
           >
-            {tab}
-            {tab === "Críticas" && resumen?.criticas ? (
-              <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] ${filtroTab === tab ? "bg-red-500 text-white" : "bg-red-100 text-red-600"}`}>
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">{k.label}</div>
+            <div className={`text-3xl font-bold ${k.color}`}>{k.valor}</div>
+            <div className="text-xs text-slate-400 font-medium mt-1">{k.sub}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            aria-pressed={tab === t}
+            className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors whitespace-nowrap ${
+              tab === t ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {t}
+            {t === "Críticas" && resumen?.criticas ? (
+              <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] ${tab === t ? "bg-red-500 text-white" : "bg-red-100 text-red-600"}`}>
                 {resumen.criticas}
               </span>
             ) : null}
@@ -180,41 +210,29 @@ export default function AlertasPage() {
         ))}
       </div>
 
-      {/* Filters Bar */}
       <div className="flex flex-col md:flex-row gap-3">
         <div className="flex-1 relative">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input 
-            type="text" 
-            placeholder="Buscar alerta por palabra clave..." 
+          <input
+            type="text"
+            placeholder="Buscar alerta por palabra clave..."
+            aria-label="Buscar alerta"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto">
-          <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option value="Todos">Estado: Todos</option>
-            {opcionesEstado.map((es) => <option key={es} value={es}>{ESTADO_ALERTA_LBL[es] || es}</option>)}
-          </select>
-          <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option value="Todos">Tipo: Todos</option>
-            {opcionesOrigen.map((o) => <option key={o} value={o}>{ORIGEN_LBL[o] || o}</option>)}
-          </select>
-          <select value={filtroAmbito} onChange={(e) => setFiltroAmbito(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option value="Todos">Ámbito: Todos</option>
-            <option value="Personal">Personal</option>
-            <option value="Empresa">Empresa</option>
-          </select>
-          <select value={filtroFaena} onChange={(e) => setFiltroFaena(e.target.value)} className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none">
-            <option value="Todas">Faena: Todas</option>
-            <option value="Asociado a Contrato">Asociado a Contrato</option>
-            <option value="General">General</option>
-          </select>
-        </div>
+        <select
+          value={origen}
+          onChange={(e) => setOrigen(e.target.value)}
+          aria-label="Filtrar por origen"
+          className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none"
+        >
+          <option value="Todos">Tipo: Todos</option>
+          {Object.entries(ORIGEN_LBL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
       </div>
 
-      {/* Data Table */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden overflow-x-auto">
         <table className="w-full text-left text-sm text-slate-600">
           <thead className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -222,9 +240,7 @@ export default function AlertasPage() {
               <th className="px-4 py-4 whitespace-nowrap">Prioridad</th>
               <th className="px-4 py-4">Alerta</th>
               <th className="px-4 py-4 whitespace-nowrap">Tipo</th>
-              <th className="px-4 py-4 whitespace-nowrap">Ámbito</th>
-              <th className="px-4 py-4">Relacionado con</th>
-              <th className="px-4 py-4">Faena / Contrato</th>
+              <th className="px-4 py-4">Contrato</th>
               <th className="px-4 py-4 whitespace-nowrap">Fecha</th>
               <th className="px-4 py-4 whitespace-nowrap">Estado</th>
               <th className="px-4 py-4 text-center">Acciones</th>
@@ -233,107 +249,147 @@ export default function AlertasPage() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
-                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500 mb-2"></div>
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500 mb-2"></div>
                   <p>Cargando alertas...</p>
                 </td>
               </tr>
-            ) : alertasFiltradas.length === 0 ? (
+            ) : filtradas.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
                   No hay alertas que coincidan con los filtros.
                 </td>
               </tr>
             ) : (
-              alertasFiltradas.map((a) => {
-                // Derive values to mimic screenshot
-                const isCritical = a.severidad === "critica" || a.severidad === "alta";
-                const isWarning = a.severidad === "advertencia";
-                
-                // Try to split description for "Relacionado con" if it contains a name
-                const relName = a.sujeto_id ? "Sujeto / Empleado" : "Empresa / Contrato";
-                const letter = relName.charAt(0).toUpperCase();
-
-                return (
-                  <tr key={a.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      {isCritical ? (
-                         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-bold bg-red-50 text-red-600 border border-red-100">
-                           <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
-                           Crítica
-                         </span>
-                      ) : isWarning ? (
-                         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-bold bg-amber-50 text-amber-600 border border-amber-100">
-                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                           Advertencia
-                         </span>
-                      ) : (
-                         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-bold bg-blue-50 text-blue-600 border border-blue-100">
-                           <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                           Informativa
-                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4 min-w-[250px]">
-                      <div className="font-bold text-slate-800">{a.titulo}</div>
-                      <div className="text-xs text-slate-500 mt-1 line-clamp-1">{a.descripcion}</div>
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      {isCritical ? (
-                         <span className="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold bg-red-50 text-red-600 border border-red-100">
-                           Crítica
-                         </span>
-                      ) : (
-                         <span className="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                           {a.severidad}
-                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4 text-xs whitespace-nowrap">
-                      {a.sujeto_id ? "Personal" : "Empresa"}
-                    </td>
-                    <td className="px-4 py-4 min-w-[200px]">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${isCritical ? 'bg-blue-600' : 'bg-slate-400'}`}>
-                          {letter}
-                        </div>
-                        <span className="font-semibold text-slate-700 text-xs">{relName}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-xs text-slate-500 min-w-[200px]">
-                      {a.contrato_id ? "Asociado a Contrato" : "General"}
-                    </td>
-                    <td className="px-4 py-4 text-xs whitespace-nowrap text-slate-500">
-                      {formatDateStr(a.created_at)}
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap">
-                      {!a.leida ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold bg-red-50 text-red-600 border border-red-100">
-                          No leída
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100">
-                          Leída
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded border border-transparent hover:border-slate-200 transition-colors">
-                          <EyeIcon />
+              filtradas.map((a) => (
+                <tr key={a.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <Chip estado={a.severidad} texto={SEVERIDAD_LABEL[a.severidad]} />
+                  </td>
+                  <td className="px-4 py-4 min-w-[250px]">
+                    <button onClick={() => { setDetalle(a); marcarLeida(a); }} className="text-left">
+                      <div className="font-bold text-slate-800 hover:text-blue-700">{a.titulo}</div>
+                      <div className="text-xs text-slate-500 mt-1 line-clamp-1">{a.descripcion || "Sin descripción"}</div>
+                    </button>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-xs">{ORIGEN_LBL[a.origen] || a.origen}</td>
+                  <td className="px-4 py-4 text-xs min-w-[150px]">
+                    {a.contrato_id ? (
+                      <Link href={`/contratos/${a.contrato_id}?tab=alertas-ia`} className="font-semibold text-blue-600 hover:text-blue-800">
+                        Ver contrato
+                      </Link>
+                    ) : (
+                      <span className="text-slate-500">General</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-4 text-xs whitespace-nowrap text-slate-500">{fecha(a.created_at)}</td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <Chip estado={a.estado} />
+                    {!a.leida && <span className="ml-1.5 inline-block w-2 h-2 rounded-full bg-blue-500" title="No leída" aria-label="No leída" />}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => { setDetalle(a); marcarLeida(a); }}
+                        className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded"
+                      >
+                        Ver
+                      </button>
+                      {a.resuelta ? (
+                        <button
+                          onClick={() => cambiar(a, { resuelta: false })}
+                          disabled={guardando}
+                          className="px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded disabled:opacity-50"
+                        >
+                          Reabrir
                         </button>
-                        <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded border border-transparent hover:border-slate-200 transition-colors">
-                          <MoreVerticalIcon />
+                      ) : (
+                        <button
+                          onClick={() => cambiar(a, { resuelta: true })}
+                          disabled={guardando}
+                          className="px-2.5 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded disabled:opacity-50"
+                        >
+                          Resolver
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
+
+      <Modal
+        abierto={!!detalle}
+        titulo={detalle?.titulo ?? "Alerta"}
+        onCerrar={() => setDetalle(null)}
+        ancho="max-w-2xl"
+      >
+        {detalle && (
+          <div className="space-y-4 text-sm">
+            <div className="flex flex-wrap gap-2">
+              <Chip estado={detalle.severidad} texto={SEVERIDAD_LABEL[detalle.severidad]} />
+              <Chip estado={detalle.estado} />
+              <Chip estado="informativa" texto={ORIGEN_LBL[detalle.origen] || detalle.origen} />
+            </div>
+            <p className="text-slate-600 whitespace-pre-line">{detalle.descripcion || "Sin descripción."}</p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+              <div><dt className="inline font-semibold">Creada: </dt><dd className="inline">{fecha(detalle.created_at)}</dd></div>
+              <div><dt className="inline font-semibold">Leída: </dt><dd className="inline">{detalle.leida_at ? fecha(detalle.leida_at) : "No"}</dd></div>
+              <div><dt className="inline font-semibold">Resuelta: </dt><dd className="inline">{detalle.resuelta_at ? fecha(detalle.resuelta_at) : "No"}</dd></div>
+              <div>
+                <dt className="inline font-semibold">Contrato: </dt>
+                <dd className="inline">
+                  {detalle.contrato_id ? (
+                    <Link href={`/contratos/${detalle.contrato_id}?tab=alertas-ia`} className="font-semibold text-blue-600 hover:text-blue-800">
+                      Ver contrato
+                    </Link>
+                  ) : "General"}
+                </dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+              {!detalle.leida && (
+                <button
+                  onClick={() => marcarLeida(detalle)}
+                  disabled={guardando}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg disabled:opacity-50"
+                >
+                  Marcar como leída
+                </button>
+              )}
+              {!detalle.resuelta && detalle.estado !== "en_progreso" && (
+                <button
+                  onClick={() => cambiar(detalle, { estado: "en_progreso" })}
+                  disabled={guardando}
+                  className="px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg disabled:opacity-50"
+                >
+                  En progreso
+                </button>
+              )}
+              {detalle.resuelta ? (
+                <button
+                  onClick={() => cambiar(detalle, { resuelta: false })}
+                  disabled={guardando}
+                  className="px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg disabled:opacity-50"
+                >
+                  Reabrir alerta
+                </button>
+              ) : (
+                <button
+                  onClick={() => cambiar(detalle, { resuelta: true })}
+                  disabled={guardando}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
+                >
+                  {guardando ? "Guardando..." : "Marcar como resuelta"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

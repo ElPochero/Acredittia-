@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const [acreditaciones, setAcreditaciones] = useState<AcreditacionesEstado | null>(null);
   const [contratos, setContratos] = useState<CumplimientoContrato[]>([]);
   const [alertas, setAlertas] = useState<Alerta[]>([]);
+  const [alertasTotal, setAlertasTotal] = useState(0);
   const [vencimientos, setVencimientos] = useState<ProximoVencimiento[]>([]);
   const [actividades, setActividades] = useState<ActividadFila[]>([]);
   const [tendencia, setTendencia] = useState<Tendencia | null>(null);
@@ -56,7 +57,10 @@ export default function DashboardPage() {
         if (kpisRes.status === "fulfilled") setKpis(kpisRes.value);
         if (acreditacionesRes.status === "fulfilled") setAcreditaciones(acreditacionesRes.value);
         if (contratosRes.status === "fulfilled") setContratos(contratosRes.value.items || []);
-        if (alertasRes.status === "fulfilled") setAlertas(alertasRes.value.items || []);
+        if (alertasRes.status === "fulfilled") {
+          setAlertas(alertasRes.value.items || []);
+          setAlertasTotal(alertasRes.value.total || 0);
+        }
         if (vencimientosRes.status === "fulfilled") setVencimientos(vencimientosRes.value.items || []);
         if (actividadRes.status === "fulfilled") setActividades(actividadRes.value.items || []);
         if (tendenciaRes.status === "fulfilled") setTendencia(tendenciaRes.value);
@@ -94,7 +98,7 @@ export default function DashboardPage() {
 
       <DashboardKpis kpis={kpis} tendencia={tendencia} loading={loading} />
       <VigiaBanner />
-      <AccionesPendientesCard alertas={alertas} loading={loading} />
+      <AccionesPendientesCard alertas={alertas} total={alertasTotal} loading={loading} />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         <div className="xl:col-span-7">
