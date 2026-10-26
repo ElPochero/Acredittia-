@@ -383,6 +383,12 @@ class Contrato(Base):
     # Unidad de negocio a la que pertenece el contrato (v14). Es lo que agrupa
     # el listado y lo que da acceso a los encargados jerárquicos de la unidad.
     unidad_negocio: Mapped[str | None] = mapped_column(Text)
+    # Configuración de alertas IA del contrato (v15): días de anticipación del
+    # aviso de vencimiento, cada cuántos días se reenvía y cada cuántos se
+    # recuerda la documentación faltante. Las lee el cron diario.
+    alerta_anticipacion_dias: Mapped[int] = mapped_column(Integer, default=30)
+    alerta_frecuencia_dias: Mapped[int] = mapped_column(Integer, default=1)
+    alerta_faltantes_dias: Mapped[int] = mapped_column(Integer, default=3)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

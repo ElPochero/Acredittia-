@@ -213,7 +213,10 @@ def resolver_cargo(db: Session, company_id: uuid.UUID, *,
 
 
 # ---------------------------------------------------------------- estados
-def calc_estado_doc(doc: Documento, hoy: date | None = None) -> str:
+def calc_estado_doc(doc: Documento, hoy: date | None = None,
+                    dias: int = UMBRAL_PORVENC_DIAS) -> str:
+    """Estado calculado. `dias` es la anticipación de «por vencer» del contrato
+    (configurable por contrato, v15); el resto de llamadores usa el umbral global."""
     hoy = hoy or date.today()
     if doc.estado == "falta":
         return "falta"
@@ -221,7 +224,7 @@ def calc_estado_doc(doc: Documento, hoy: date | None = None) -> str:
         return "ok"
     if doc.vence < hoy:
         return "venc"
-    if doc.vence <= hoy + timedelta(days=UMBRAL_PORVENC_DIAS):
+    if doc.vence <= hoy + timedelta(days=dias):
         return "porvenc"
     return "ok"
 

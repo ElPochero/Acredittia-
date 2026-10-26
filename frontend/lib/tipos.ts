@@ -432,6 +432,12 @@ export type Contrato = {
   origen_ia_review_id: string | null;
   /** Unidad de negocio a la que pertenece (agrupa el listado). */
   unidad_negocio: string | null;
+  /** Días de anticipación del aviso de vencimiento (Alertas IA). */
+  alerta_anticipacion_dias: number;
+  /** Cada cuántos días se reenvía el recordatorio de vencimiento. */
+  alerta_frecuencia_dias: number;
+  /** Cada cuántos días se recuerda la documentación faltante. */
+  alerta_faltantes_dias: number;
   faena: {
     id: string;
     nombre: string;
@@ -473,6 +479,9 @@ export type ContratoPatch = {
   renovacion_automatica?: boolean;
   estado?: EstadoContrato;
   unidad_negocio?: string | null;
+  alerta_anticipacion_dias?: number;
+  alerta_frecuencia_dias?: number;
+  alerta_faltantes_dias?: number;
 };
 
 export type CeldaMatriz = {

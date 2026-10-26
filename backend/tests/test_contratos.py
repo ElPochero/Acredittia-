@@ -96,6 +96,108 @@ def test_una_unidad_de_negocio_inventada_se_rechaza(app_cliente, empresa_a,
     assert r.json()["error"]["code"] == "UNIDAD_NEGOCIO_INVALIDA"
 
 
+# ============================================================================
+# Alertas IA por contrato (v15)
+# ============================================================================
+def test_la_configuracion_de_alertas_ia_se_guarda_y_valida(
+        app_cliente, empresa_a, contrato_a):
+    """Persiste en el contrato y el cron la lee: el default es 30/1/3."""
+    assert contrato_a["alerta_anticipacion_dias"] == 30
+    assert contrato_a["alerta_frecuencia_dias"] == 1
+    assert contrato_a["alerta_faltantes_dias"] == 3
+
+    r = app_cliente.patch(
+        f"{API}/contratos/{contrato_a['id']}", headers=empresa_a["headers"],
+        json={"alerta_anticipacion_dias": 30, "alerta_frecuencia_dias": 3,
+              "alerta_faltantes_dias": 5})
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert c["alerta_anticipacion_dias"] == 30
+    assert c["alerta_frecuencia_dias"] == 3
+    assert c["alerta_faltantes_dias"] == 5
+
+    # Releído de la base: la configuración no vive solo en la respuesta.
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}",
+                        headers=empresa_a["headers"])
+    assert r.json()["alerta_frecuencia_dias"] == 3
+
+    for campo in ("alerta_anticipacion_dias", "alerta_frecuencia_dias",
+                  "alerta_faltantes_dias"):
+        r = app_cliente.patch(f"{API}/contratos/{contrato_a['id']}",
+                              headers=empresa_a["headers"], json={campo: 0})
+        assert r.status_code == 400
+        assert r.json()["error"]["code"] == "ALERTAS_CONFIG_INVALIDA"
+
+
+def test_el_cron_usa_la_anticipacion_del_contrato(
+        app_cliente, empresa_a, contrato_a, sesion_db, monkeypatch):
+    """Un documento a 20 días es «por vencer» con anticipación 30 y «ok» con 10."""
+    import sqlalchemy as sa
+
+    from app.models import Documento
+    from app.services import jobs
+    from app.services.vencimientos import recalcular_documentos
+    from tests.conftest import primer_documento
+
+    monkeypatch.setattr(jobs, "enqueue", lambda nombre, **kw: None)
+
+    doc = primer_documento(app_cliente, empresa_a, contrato_id=contrato_a["id"])
+    r = app_cliente.patch(
+        f"{API}/documentos/{doc['id']}", headers=empresa_a["headers"],
+        json={"estado": "ok",
+              "vence": (date.today() + timedelta(days=20)).isoformat()})
+    assert r.status_code == 200, r.text
+
+    def estado_calc() -> str:
+        sesion_db.expire_all()
+        return sesion_db.scalar(sa.select(Documento.estado_calc).where(
+            Documento.id == uuid.UUID(doc["id"])))
+
+    recalcular_documentos(sesion_db)
+    assert estado_calc() == "porvenc"
+
+    r = app_cliente.patch(f"{API}/contratos/{contrato_a['id']}",
+                          headers=empresa_a["headers"],
+                          json={"alerta_anticipacion_dias": 10})
+    assert r.status_code == 200, r.text
+
+    recalcular_documentos(sesion_db)
+    assert estado_calc() == "ok"
+
+
+def test_el_cron_no_duplica_ni_reenvia_antes_de_la_frecuencia(
+        app_cliente, empresa_a, contrato_a, sesion_db, monkeypatch):
+    """La alerta de faltantes se reutiliza y no se reenvía dentro de la ventana."""
+    import sqlalchemy as sa
+
+    from app.models import Alerta
+    from app.services import jobs
+    from app.services.vencimientos import recalcular_documentos
+
+    envios = []
+    monkeypatch.setattr(jobs, "enqueue", lambda nombre, **kw: envios.append(nombre))
+
+    titulo = f"Documentos faltantes: {contrato_a['nombre']}"
+
+    def alertas() -> list[Alerta]:
+        sesion_db.expire_all()
+        return list(sesion_db.scalars(sa.select(Alerta).where(
+            Alerta.titulo == titulo)).all())
+
+    recalcular_documentos(sesion_db)
+    primera = alertas()
+    assert len(primera) == 1
+    ultimo_aviso = primera[0].updated_at
+    envios_antes = len(envios)
+
+    # Frecuencia de faltantes por defecto = 3 días: el segundo barrido no repite.
+    recalcular_documentos(sesion_db)
+    segunda = alertas()
+    assert len(segunda) == 1
+    assert segunda[0].updated_at == ultimo_aviso
+    assert len(envios) == envios_antes
+
+
 def test_el_encargado_de_la_unidad_accede_a_sus_contratos(        app_cliente, empresa_a, faena_pelambres):
     """El encargado jerárquico ve su contrato y los de su unidad, no los demás."""
     from tests.conftest import crear_contract_admin

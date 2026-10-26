@@ -45,6 +45,10 @@ export default function ContratoDetalle() {
   const [subiendo, setSubiendo] = useState<{ docId: string; pct: number; texto: string } | null>(null);
   const [analizandoId, setAnalizandoId] = useState<string | null>(null);
   const [showCorreosAlertas, setShowCorreosAlertas] = useState(false);
+  const [cfgAlertas, setCfgAlertas] = useState<{
+    anticipacion: number; frecuencia: number; faltantes: number;
+  } | null>(null);
+  const [guardandoCfg, setGuardandoCfg] = useState(false);
   const [recordando, setRecordando] = useState<string | null>(null);
   const reintentoRef = useRef<HTMLInputElement>(null);
 
@@ -214,6 +218,35 @@ export default function ContratoDetalle() {
     } catch (e) { setError(Api.mensajeError(e)); }
   };
 
+  /**
+   * Guarda la configuración de alertas IA del contrato (v15). El cron la lee:
+   * días de anticipación del aviso, frecuencia del recordatorio y frecuencia
+   * del recordatorio de documentación faltante.
+   */
+  const guardarCfgAlertas = async () => {
+    if (!c) return;
+    const cfg = cfgAlertas ?? {
+      anticipacion: c.alerta_anticipacion_dias,
+      frecuencia: c.alerta_frecuencia_dias,
+      faltantes: c.alerta_faltantes_dias,
+    };
+    setGuardandoCfg(true);
+    try {
+      const actualizado = await Api.contratos.editar(id as string, {
+        alerta_anticipacion_dias: cfg.anticipacion,
+        alerta_frecuencia_dias: cfg.frecuencia,
+        alerta_faltantes_dias: cfg.faltantes,
+      });
+      setC(actualizado);
+      setCfgAlertas(null);
+      toast.success("Configuración de alertas guardada");
+    } catch (e) {
+      toast.error("No se pudo guardar", { description: Api.mensajeError(e) });
+    } finally {
+      setGuardandoCfg(false);
+    }
+  };
+
   const handleDeletePlataforma = async (pid: string) => {
     if (!confirm('¿Estás seguro de que deseas desvincular esta plataforma de este contrato?')) return;
     try {
@@ -228,6 +261,11 @@ export default function ContratoDetalle() {
 
   const pct = c.stats?.cumplimiento_pct || 0;
   const vigente = pct >= 70;
+  const cfgA = cfgAlertas ?? {
+    anticipacion: c.alerta_anticipacion_dias,
+    frecuencia: c.alerta_frecuencia_dias,
+    faltantes: c.alerta_faltantes_dias,
+  };
 
   return (
     <ContratoLayout
@@ -273,6 +311,63 @@ export default function ContratoDetalle() {
 
       {panel("Alertas IA", (
         <section className="space-y-2">
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="m-0 text-[0.95rem] font-bold text-[#1E293B]">Configuración de alertas IA</h3>
+                <p className="m-0 mt-0.5 text-[0.78rem] text-slate-500">
+                  Con cuánta anticipación se avisa un vencimiento y cada cuánto se repite el recordatorio.
+                </p>
+              </div>
+              <button
+                onClick={guardarCfgAlertas}
+                disabled={guardandoCfg}
+                className="h-8 px-3 rounded-lg bg-[#1E40AF] text-[0.78rem] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+              >
+                {guardandoCfg ? "Guardando…" : "Guardar configuración"}
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
+                Días de anticipación
+                <input
+                  type="number" min={1} max={365}
+                  aria-label="Días de anticipación"
+                  value={cfgA.anticipacion}
+                  onChange={(e) => setCfgAlertas({ ...cfgA, anticipacion: Number(e.target.value) })}
+                  className="h-8 rounded-lg border border-slate-300 px-2 text-sm font-normal text-slate-700"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
+                Frecuencia del recordatorio
+                <select
+                  className="view-select"
+                  aria-label="Frecuencia del recordatorio"
+                  value={cfgA.frecuencia}
+                  onChange={(e) => setCfgAlertas({ ...cfgA, frecuencia: Number(e.target.value) })}
+                >
+                  <option value={1}>Diaria</option>
+                  <option value={3}>Cada 3 días</option>
+                  <option value={5}>Cada 5 días</option>
+                  <option value={7}>Semanal</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
+                Frecuencia de faltantes
+                <select
+                  className="view-select"
+                  aria-label="Frecuencia de faltantes"
+                  value={cfgA.faltantes}
+                  onChange={(e) => setCfgAlertas({ ...cfgA, faltantes: Number(e.target.value) })}
+                >
+                  <option value={1}>Diaria</option>
+                  <option value={3}>Cada 3 días</option>
+                  <option value={5}>Cada 5 días</option>
+                  <option value={7}>Semanal</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <div className="flex items-center justify-between">
             <p className="m-0 text-[0.78rem] text-slate-500">Alertas activas del contrato con acciones directas.</p>
             <button

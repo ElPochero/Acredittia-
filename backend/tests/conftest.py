@@ -82,6 +82,7 @@ SCRIPTS = [
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
     "14_unidad_negocio.sql",
+    "15_alertas_ia.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")

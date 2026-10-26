@@ -60,6 +60,15 @@ UNIDADES_NEGOCIO: tuple[str, ...] = (
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
                    "created_at", "updated_at"}
 
+# Rangos de la configuración de alertas IA (v15): anticipación en días y cada
+# cuántos días se repite el recordatorio. Se validan aquí porque el cron confía
+# en lo que hay en la base.
+ALERTAS_RANGOS: dict[str, tuple[int, int]] = {
+    "alerta_anticipacion_dias": (1, 365),
+    "alerta_frecuencia_dias": (1, 30),
+    "alerta_faltantes_dias": (1, 30),
+}
+
 
 # ============================================================================
 # Entradas
@@ -87,6 +96,10 @@ class ContratoPatch(BaseModel):
     renovacion_automatica: bool | None = None
     estado: str | None = None
     unidad_negocio: str | None = None
+    # Configuración de alertas IA (v15). Ver `ALERTAS_RANGOS`.
+    alerta_anticipacion_dias: int | None = None
+    alerta_frecuencia_dias: int | None = None
+    alerta_faltantes_dias: int | None = None
 
 
 class AnalizarIn(BaseModel):
@@ -161,6 +174,9 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
         "renovacion_automatica": c.renovacion_automatica,
         "unidad_negocio": c.unidad_negocio,
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias,
         "origen_ia_review_id": (str(c.origen_ia_review_id)
                                 if c.origen_ia_review_id else None),
         "faena": {"id": str(f.id), "nombre": f.nombre, "mandante": f.mandante,
@@ -331,6 +347,11 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
     if "unidad_negocio" in data:
         data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
+    for campo, (minimo, maximo) in ALERTAS_RANGOS.items():
+        if campo in data and (data[campo] is None
+                              or not minimo <= data[campo] <= maximo):
+            raise err(400, "ALERTAS_CONFIG_INVALIDA",
+                      f"{campo} debe estar entre {minimo} y {maximo} días")
     for k, v in data.items():
         setattr(c, k, v)
     c.updated_at = datetime.now(timezone.utc)

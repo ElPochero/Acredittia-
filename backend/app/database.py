@@ -77,8 +77,9 @@ SCHEMA_SCRIPTS = [
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
     "14_unidad_negocio.sql",
+    "15_alertas_ia.sql",
 ]
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -237,11 +238,13 @@ def _enum_tiene(conn, tipo: str, valor: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = unidad de negocio."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = unidad de negocio · 15 = alertas IA por contrato."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "documento_chunk"):
+            if _columna_existe(c, "contratos", "alerta_anticipacion_dias"):
+                return 15
             if _columna_existe(c, "contratos", "unidad_negocio"):
                 return 14
             if _enum_tiene(c, "user_role", "visor"):
@@ -317,6 +320,9 @@ def apply_schema(schema_dir: str | None = None) -> int:
             cur.execute("""
                 ALTER TABLE contratos ADD COLUMN IF NOT EXISTS unidad_negocio TEXT;
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS unidad_negocio TEXT;
+                ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_anticipacion_dias INTEGER NOT NULL DEFAULT 30;
+                ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_frecuencia_dias   INTEGER NOT NULL DEFAULT 1;
+                ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_faltantes_dias    INTEGER NOT NULL DEFAULT 3;
                 CREATE INDEX IF NOT EXISTS ix_contratos_unidad_negocio ON contratos (unidad_negocio);
                 CREATE INDEX IF NOT EXISTS ix_users_unidad_negocio ON users (unidad_negocio);
             """)
@@ -347,6 +353,7 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 11: SCHEMA_SCRIPTS[10:],
                 12: SCHEMA_SCRIPTS[11:],
                 13: SCHEMA_SCRIPTS[12:],
+                14: SCHEMA_SCRIPTS[13:],
             }
             pendientes = scripts_por_version.get(actual, [])
 
