@@ -302,6 +302,24 @@ export const contratos = {
   editar: (id: string, cambios: ContratoPatch) =>
     patch<Contrato>(`/contratos/${id}`, cambios),
 
+  /** Configuración de alertas IA del contrato (v15). */
+  alertasIaConfig: (id: string) =>
+    api<{
+      alerta_anticipacion_dias: number;
+      alerta_frecuencia_dias: number;
+      alerta_faltantes_dias: number;
+    }>(`/contratos/${id}/alertas-ia/config`),
+
+  guardarAlertasIa: (id: string, body: {
+    alerta_anticipacion_dias: number;
+    alerta_frecuencia_dias: number;
+    alerta_faltantes_dias: number;
+  }) => api<{
+    alerta_anticipacion_dias: number;
+    alerta_frecuencia_dias: number;
+    alerta_faltantes_dias: number;
+  }>(`/contratos/${id}/alertas-ia/config`, { method: "PUT", body }),
+
   eliminar: (id: string) =>
     api<{ ok: boolean; sujetos_eliminados: number; archivos_eliminados: number }>(
       `/contratos/${id}`, { method: "DELETE", query: { confirm: true } }),
@@ -635,6 +653,10 @@ export const alertas = {
   marcarLeidas: (ids?: string[]) =>
     api<{ marcadas: number }>("/alertas/marcar-leidas",
       { body: { ids: ids ?? null } }),
+
+  /** Alias masivo: permite marcar leídas y resolver en la misma llamada. */
+  marcar: (body: { ids?: string[] | null; leida?: boolean; resuelta?: boolean }) =>
+    api<{ marcadas: number; resueltas: number }>("/alertas/marcar", { body }),
 };
 
 // ============================================================================

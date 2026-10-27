@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import * as Api from "@/lib/cliente";
-import type { Alerta, AlertaPatch, ResumenAlertas } from "@/lib/tipos";
+import type { Alerta, AlertaPatch, OrigenAlerta, ParamsAlertas, ResumenAlertas } from "@/lib/tipos";
 import { Chip, Modal, SEVERIDAD_LABEL } from "@/components/ui";
 
 const ORIGEN_LBL: Record<string, string> = {
@@ -18,9 +18,20 @@ function fecha(iso: string) {
   });
 }
 
-/** Contador de alertas que siguen abiertas, separado del total histórico. */
-function esActiva(a: Alerta) {
-  return !a.resuelta;
+/** Aplica un cambio del usuario antes de que responda el backend. */
+function aplicar(a: Alerta, cambios: AlertaPatch): Alerta {
+  const ahora = new Date().toISOString();
+  const resuelta = cambios.resuelta ?? a.resuelta;
+  return {
+    ...a,
+    leida: cambios.leida ?? a.leida,
+    resuelta,
+    estado:
+      cambios.estado ??
+      (cambios.resuelta === true ? "resuelta" : cambios.resuelta === false ? "nueva" : a.estado),
+    leida_at: cambios.leida === undefined ? a.leida_at : cambios.leida ? ahora : null,
+    resuelta_at: cambios.resuelta === undefined ? a.resuelta_at : resuelta ? ahora : null,
+  };
 }
 
 export default function AlertasPage() {
@@ -30,23 +41,47 @@ export default function AlertasPage() {
   const [tab, setTab] = useState<string>("Todas");
   const [q, setQ] = useState("");
   const [origen, setOrigen] = useState("Todos");
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
   const [detalle, setDetalle] = useState<Alerta | null>(null);
   const [abrirId, setAbrirId] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
 
+  /** Filtros de la pestaña activa, resueltos por el backend. */
+  function filtros(): ParamsAlertas {
+    const base: ParamsAlertas = {
+      page: pagina,
+      page_size: 20,
+      search: q.trim() || undefined,
+      origen: origen === "Todos" ? undefined : (origen as OrigenAlerta),
+    };
+    if (tab === "Resueltas") return { ...base, estado: "resuelta", solo_activas: false };
+    if (tab === "Críticas") return { ...base, severidad: "critica" };
+    if (tab === "Advertencias") return { ...base, severidad: "advertencia,alta" };
+    if (tab === "Informativas") return { ...base, severidad: "informativa,media,baja" };
+    return base;
+  }
+
+  /** Cambiar de pestaña vuelve a la primera página. */
+  function cambiarTab(t: string) {
+    setTab(t);
+    setPagina(1);
+  }
+
   async function cargar() {
     setLoading(true);
     setError("");
     try {
-      // `solo_activas:false` trae también las resueltas una sola vez; la pestaña
-      // "Resueltas" filtra en memoria en lugar de pedir otra página al backend.
       const [pag, res] = await Promise.all([
-        Api.alertas.listar({ solo_activas: false, page_size: 100 }),
+        Api.alertas.listar(filtros()),
         Api.alertas.resumen(),
       ]);
       setLista(pag.items || []);
+      setTotal(pag.total || 0);
+      setTotalPaginas(pag.total_pages || 1);
       setResumen(res);
     } catch (e) {
       setError(Api.mensajeError(e));
@@ -56,28 +91,36 @@ export default function AlertasPage() {
   }
 
   useEffect(() => {
-    cargar();
-    // Filtros que llegan desde el Home. Se leen del `window` porque la página es
-    // cliente y `useSearchParams` obligaría a envolverla en un `Suspense`.
+    // Filtros que llegan desde el Home. Se leen del `window` porque la página
+    // es cliente y `useSearchParams` obligaría a envolverla en un `Suspense`.
     const sp = new URLSearchParams(window.location.search);
     const f = sp.get("filtro");
-    setTab(f === "criticas" ? "Críticas" : f === "resueltas" ? "Resueltas" : "Todas");
+    const estado = sp.get("estado");
+    const inicial = f === "criticas" || estado === "criticas" ? "Críticas"
+      : f === "resueltas" || estado === "resueltas" ? "Resueltas"
+      : "Todas";
+    setTab(inicial);
     setAbrirId(sp.get("alerta"));
-    // Solo al montar: después manda el estado local.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(cargar, q ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, origen, pagina, q]);
 
   function reemplazar(a: Alerta) {
     setLista((prev) => prev.map((x) => (x.id === a.id ? a : x)));
     setDetalle((d) => (d?.id === a.id ? a : d));
-    Api.alertas.resumen().then(setResumen).catch(() => {});
   }
 
   async function marcarLeida(a: Alerta) {
     if (a.leida) return;
+    reemplazar(aplicar(a, { leida: true }));
     try {
       reemplazar(await Api.alertas.editar(a.id, { leida: true }));
     } catch (e) {
+      reemplazar(a);
       setError(Api.mensajeError(e));
     }
   }
@@ -85,6 +128,7 @@ export default function AlertasPage() {
   async function cambiar(a: Alerta, cambios: AlertaPatch) {
     setGuardando(true);
     setError("");
+    reemplazar(aplicar(a, cambios));
     try {
       const r = await Api.alertas.editar(a.id, cambios);
       reemplazar(r);
@@ -92,7 +136,9 @@ export default function AlertasPage() {
         r.resuelta ? `Alerta resuelta: ${r.titulo}` : `Alerta actualizada: ${r.titulo}`,
       );
       if (r.resuelta) setDetalle(null);
+      await cargar();
     } catch (e) {
+      reemplazar(a);
       setError(Api.mensajeError(e));
     } finally {
       setGuardando(false);
@@ -121,18 +167,7 @@ export default function AlertasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abrirId, loading, lista]);
 
-  const activas = lista.filter(esActiva);
-  let filtradas = tab === "Resueltas" ? lista.filter((a) => a.resuelta) : activas;
-  if (tab === "Críticas") filtradas = filtradas.filter((a) => a.severidad === "critica");
-  else if (tab === "Advertencias")
-    filtradas = filtradas.filter((a) => a.severidad === "advertencia" || a.severidad === "alta");
-  else if (tab === "Informativas")
-    filtradas = filtradas.filter((a) => ["informativa", "media", "baja"].includes(a.severidad));
-  if (q.trim()) {
-    const t = q.toLowerCase();
-    filtradas = filtradas.filter((a) => `${a.titulo} ${a.descripcion || ""}`.toLowerCase().includes(t));
-  }
-  if (origen !== "Todos") filtradas = filtradas.filter((a) => a.origen === origen);
+  const filtradas = lista;
 
   const kpis = [
     { label: "Pendientes", valor: resumen?.activas ?? 0, color: "text-slate-800", sub: "sin resolver", tab: "Todas" },
@@ -177,7 +212,7 @@ export default function AlertasPage() {
         {kpis.map((k) => (
           <button
             key={k.label}
-            onClick={() => setTab(k.tab)}
+            onClick={() => cambiarTab(k.tab)}
             aria-pressed={tab === k.tab}
             className={`bg-white p-5 rounded-xl border shadow-sm text-left transition-colors ${
               tab === k.tab ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"
@@ -194,7 +229,7 @@ export default function AlertasPage() {
         {TABS.map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => cambiarTab(t)}
             aria-pressed={tab === t}
             className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors whitespace-nowrap ${
               tab === t ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"
@@ -218,13 +253,13 @@ export default function AlertasPage() {
             placeholder="Buscar alerta por palabra clave..."
             aria-label="Buscar alerta"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => { setQ(e.target.value); setPagina(1); }}
             className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <select
           value={origen}
-          onChange={(e) => setOrigen(e.target.value)}
+          onChange={(e) => { setOrigen(e.target.value); setPagina(1); }}
           aria-label="Filtrar por origen"
           className="bg-white border border-slate-200 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none"
         >
@@ -320,6 +355,30 @@ export default function AlertasPage() {
           </tbody>
         </table>
       </div>
+
+      {totalPaginas > 1 && (
+        <nav aria-label="Paginación de alertas" className="flex items-center justify-between gap-3 text-xs text-slate-600">
+          <span>
+            {total} alerta(s) · página {pagina} de {totalPaginas}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPagina((p) => Math.max(1, p - 1))}
+              disabled={pagina <= 1 || loading}
+              className="px-3 py-1.5 font-semibold bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              ← Anterior
+            </button>
+            <button
+              onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+              disabled={pagina >= totalPaginas || loading}
+              className="px-3 py-1.5 font-semibold bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              Siguiente →
+            </button>
+          </div>
+        </nav>
+      )}
 
       <Modal
         abierto={!!detalle}

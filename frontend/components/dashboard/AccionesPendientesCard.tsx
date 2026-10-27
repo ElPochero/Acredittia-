@@ -52,7 +52,7 @@ export default function AccionesPendientesCard({ alertas, total, loading }: Prop
 
       {total > 0 && (
         <div className="p-3 bg-slate-50/50 border-t border-slate-100 text-center">
-          <Link href="/alertas?filtro=pendientes" className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <Link href="/alertas?estado=pendiente" className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
             Ver los {total} pendientes →
           </Link>
         </div>

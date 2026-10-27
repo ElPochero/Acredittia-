@@ -21,7 +21,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -60,14 +60,12 @@ UNIDADES_NEGOCIO: tuple[str, ...] = (
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
                    "created_at", "updated_at"}
 
-# Rangos de la configuración de alertas IA (v15): anticipación en días y cada
-# cuántos días se repite el recordatorio. Se validan aquí porque el cron confía
-# en lo que hay en la base.
-ALERTAS_RANGOS: dict[str, tuple[int, int]] = {
-    "alerta_anticipacion_dias": (1, 365),
-    "alerta_frecuencia_dias": (1, 30),
-    "alerta_faltantes_dias": (1, 30),
-}
+# Configuración de alertas IA (v15): anticipación en días y cada cuántos días
+# se repite el recordatorio. Se valida aquí porque el cron confía en lo que hay
+# en la base. Las frecuencias son un conjunto cerrado para que la UI y el cron
+# no puedan divergir.
+ALERTAS_ANTICIPACION = (1, 180)
+ALERTAS_FRECUENCIAS: tuple[int, ...] = (1, 3, 5, 7)
 
 
 # ============================================================================
@@ -96,10 +94,26 @@ class ContratoPatch(BaseModel):
     renovacion_automatica: bool | None = None
     estado: str | None = None
     unidad_negocio: str | None = None
-    # Configuración de alertas IA (v15). Ver `ALERTAS_RANGOS`.
+    # Configuración de alertas IA (v15). Ver `ALERTAS_ANTICIPACION`.
     alerta_anticipacion_dias: int | None = None
     alerta_frecuencia_dias: int | None = None
     alerta_faltantes_dias: int | None = None
+
+
+class AlertasIaConfigIn(BaseModel):
+    """Configuración editable de recordatorios. Validación cerrada por diseño."""
+    alerta_anticipacion_dias: int = Field(ge=ALERTAS_ANTICIPACION[0],
+                                          le=ALERTAS_ANTICIPACION[1])
+    alerta_frecuencia_dias: int
+    alerta_faltantes_dias: int
+
+    @field_validator("alerta_frecuencia_dias", "alerta_faltantes_dias")
+    @classmethod
+    def _frecuencia_permitida(cls, valor: int) -> int:
+        if valor not in ALERTAS_FRECUENCIAS:
+            permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+            raise ValueError(f"Frecuencia debe ser una de: {permitidos} días")
+        return valor
 
 
 class AnalizarIn(BaseModel):
@@ -347,11 +361,18 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
     if "unidad_negocio" in data:
         data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
-    for campo, (minimo, maximo) in ALERTAS_RANGOS.items():
-        if campo in data and (data[campo] is None
-                              or not minimo <= data[campo] <= maximo):
+    if "alerta_anticipacion_dias" in data:
+        minimo, maximo = ALERTAS_ANTICIPACION
+        if (data["alerta_anticipacion_dias"] is None
+                or not minimo <= data["alerta_anticipacion_dias"] <= maximo):
             raise err(400, "ALERTAS_CONFIG_INVALIDA",
-                      f"{campo} debe estar entre {minimo} y {maximo} días")
+                      f"alerta_anticipacion_dias debe estar entre {minimo} y {maximo} días")
+    for campo in ("alerta_frecuencia_dias", "alerta_faltantes_dias"):
+        if campo in data and (data[campo] is None
+                              or data[campo] not in ALERTAS_FRECUENCIAS):
+            permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+            raise err(400, "ALERTAS_CONFIG_INVALIDA",
+                      f"{campo} debe ser uno de: {permitidos} días")
     for k, v in data.items():
         setattr(c, k, v)
     c.updated_at = datetime.now(timezone.utc)
@@ -360,6 +381,47 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
                   entidad_tipo="contrato", entidad_id=c.id)
     db.commit()
     return _out(db, c)
+
+
+@router.get("/{contrato_id}/alertas-ia/config")
+def alertas_ia_config(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Configuración vigente; si la fila es antigua, devuelve los defaults."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    return {
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias or 30,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias or 1,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias or 3,
+    }
+
+
+@router.put("/{contrato_id}/alertas-ia/config")
+def editar_alertas_ia_config(contrato_id: uuid.UUID, body: AlertasIaConfigIn,
+                             db: Session = Depends(get_db),
+                             cid: uuid.UUID = Depends(get_company_id),
+                             user: User = Depends(get_current_user)):
+    """Guarda la configuración del contrato. El visor solo consulta."""
+    if user.role == "visor":
+        raise err(403, "ROL_INSUFICIENTE",
+                  "El visor no puede modificar la configuración de alertas")
+    c = _get_contrato(db, cid, contrato_id, user)
+    c.alerta_anticipacion_dias = body.alerta_anticipacion_dias
+    c.alerta_frecuencia_dias = body.alerta_frecuencia_dias
+    c.alerta_faltantes_dias = body.alerta_faltantes_dias
+    c.updated_at = datetime.now(timezone.utc)
+    actividad.log(db, cid, "actualizacion", "contratos",
+                  f"Alertas IA de '{c.nombre}': anticipación "
+                  f"{body.alerta_anticipacion_dias} días, frecuencia "
+                  f"{body.alerta_frecuencia_dias} días y faltantes "
+                  f"{body.alerta_faltantes_dias} días",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias,
+    }
 
 
 @router.delete("/{contrato_id}")

@@ -129,6 +129,38 @@ def test_la_configuracion_de_alertas_ia_se_guarda_y_valida(
         assert r.json()["error"]["code"] == "ALERTAS_CONFIG_INVALIDA"
 
 
+def test_los_endpoints_de_configuracion_de_alertas_ia_validan_y_persisten(
+        app_cliente, empresa_a, contrato_a):
+    """GET devuelve la config vigente y PUT la reemplaza con rangos cerrados."""
+    r = app_cliente.get(f"{API}/contratos/{contrato_a['id']}/alertas-ia/config",
+                        headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json() == {"alerta_anticipacion_dias": 30,
+                        "alerta_frecuencia_dias": 1,
+                        "alerta_faltantes_dias": 3}
+
+    r = app_cliente.put(f"{API}/contratos/{contrato_a['id']}/alertas-ia/config",
+                        headers=empresa_a["headers"],
+                        json={"alerta_anticipacion_dias": 30,
+                              "alerta_frecuencia_dias": 1,
+                              "alerta_faltantes_dias": 3})
+    assert r.status_code == 200, r.text
+    assert r.json()["alerta_anticipacion_dias"] == 30
+
+    for cuerpo in (
+        {"alerta_anticipacion_dias": 0, "alerta_frecuencia_dias": 1,
+         "alerta_faltantes_dias": 3},
+        {"alerta_anticipacion_dias": 181, "alerta_frecuencia_dias": 1,
+         "alerta_faltantes_dias": 3},
+        {"alerta_anticipacion_dias": 30, "alerta_frecuencia_dias": 2,
+         "alerta_faltantes_dias": 3},
+    ):
+        r = app_cliente.put(
+            f"{API}/contratos/{contrato_a['id']}/alertas-ia/config",
+            headers=empresa_a["headers"], json=cuerpo)
+        assert r.status_code == 422, r.text
+
+
 def test_el_cron_usa_la_anticipacion_del_contrato(
         app_cliente, empresa_a, contrato_a, sesion_db, monkeypatch):
     """Un documento a 20 días es «por vencer» con anticipación 30 y «ok» con 10."""

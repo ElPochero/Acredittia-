@@ -84,6 +84,19 @@ export default function ContratoDetalle() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // La configuración se relee del endpoint dedicado al abrir la pestaña: la
+  // ficha del contrato pudo quedar cacheada de una visita anterior.
+  useEffect(() => {
+    if (tab !== "Alertas IA") return;
+    Api.contratos.alertasIaConfig(id)
+      .then((cfg) => setCfgAlertas({
+        anticipacion: cfg.alerta_anticipacion_dias,
+        frecuencia: cfg.alerta_frecuencia_dias,
+        faltantes: cfg.alerta_faltantes_dias,
+      }))
+      .catch((e) => setError(Api.mensajeError(e)));
+  }, [id, tab]);
+
   // Cada pestaña consume su propio endpoint del contrato (§4): ya no hace falta
   // pedir /alertas o /dashboard/actividad y filtrar en el navegador.
   useEffect(() => {
@@ -230,14 +243,20 @@ export default function ContratoDetalle() {
       frecuencia: c.alerta_frecuencia_dias,
       faltantes: c.alerta_faltantes_dias,
     };
+    if (cfg.anticipacion < 1 || cfg.anticipacion > 180) {
+      toast.error("Anticipación inválida", {
+        description: "Debe estar entre 1 y 180 días.",
+      });
+      return;
+    }
     setGuardandoCfg(true);
     try {
-      const actualizado = await Api.contratos.editar(id as string, {
+      const guardado = await Api.contratos.guardarAlertasIa(id as string, {
         alerta_anticipacion_dias: cfg.anticipacion,
         alerta_frecuencia_dias: cfg.frecuencia,
         alerta_faltantes_dias: cfg.faltantes,
       });
-      setC(actualizado);
+      setC((prev) => (prev ? { ...prev, ...guardado } : prev));
       setCfgAlertas(null);
       toast.success("Configuración de alertas guardada");
     } catch (e) {
@@ -266,6 +285,12 @@ export default function ContratoDetalle() {
     frecuencia: c.alerta_frecuencia_dias,
     faltantes: c.alerta_faltantes_dias,
   };
+  const cfgInvalida = cfgA.anticipacion < 1 || cfgA.anticipacion > 180;
+  const cfgSinGuardar = !!cfgAlertas && (
+    cfgA.anticipacion !== c.alerta_anticipacion_dias ||
+    cfgA.frecuencia !== c.alerta_frecuencia_dias ||
+    cfgA.faltantes !== c.alerta_faltantes_dias
+  );
 
   return (
     <ContratoLayout
@@ -319,24 +344,37 @@ export default function ContratoDetalle() {
                   Con cuánta anticipación se avisa un vencimiento y cada cuánto se repite el recordatorio.
                 </p>
               </div>
-              <button
-                onClick={guardarCfgAlertas}
-                disabled={guardandoCfg}
-                className="h-8 px-3 rounded-lg bg-[#1E40AF] text-[0.78rem] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
-              >
-                {guardandoCfg ? "Guardando…" : "Guardar configuración"}
-              </button>
+              <div className="flex items-center gap-2">
+                {cfgSinGuardar && (
+                  <span role="status" className="text-[0.72rem] font-semibold text-amber-700">
+                    Cambios sin guardar
+                  </span>
+                )}
+                <button
+                  onClick={guardarCfgAlertas}
+                  disabled={guardandoCfg || !cfgSinGuardar || cfgInvalida}
+                  className="h-8 px-3 rounded-lg bg-[#1E40AF] text-[0.78rem] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                >
+                  {guardandoCfg ? "Guardando…" : "Guardar configuración"}
+                </button>
+              </div>
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
                 Días de anticipación
                 <input
-                  type="number" min={1} max={365}
+                  type="number" min={1} max={180}
                   aria-label="Días de anticipación"
+                  aria-invalid={cfgInvalida}
                   value={cfgA.anticipacion}
                   onChange={(e) => setCfgAlertas({ ...cfgA, anticipacion: Number(e.target.value) })}
                   className="h-8 rounded-lg border border-slate-300 px-2 text-sm font-normal text-slate-700"
                 />
+                {cfgInvalida && (
+                  <span role="alert" className="text-[0.7rem] font-medium text-red-600">
+                    Debe estar entre 1 y 180 días.
+                  </span>
+                )}
               </label>
               <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
                 Frecuencia del recordatorio

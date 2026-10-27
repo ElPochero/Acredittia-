@@ -779,7 +779,7 @@ export type AlertaPatch = {
 };
 
 export type ParamsAlertas = ParamsPagina & {
-  severidad?: Severidad;
+  severidad?: string;
   origen?: OrigenAlerta;
   estado?: EstadoAlerta;
   contrato_id?: string;

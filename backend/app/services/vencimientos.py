@@ -76,7 +76,7 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento,
         titulo = f"{doc.titulo} por vencer"
         desc = f"{doc.titulo}{quien} vence en {dias} días ({doc.vence:%d/%m/%Y})."
 
-    frecuencia = contrato.alerta_frecuencia_dias if contrato else 1
+    frecuencia = (contrato.alerta_frecuencia_dias if contrato else None) or 1
     existente = _alerta_existente(db, doc.id, sev)
     if existente:
         if _dias_desde_ultimo_aviso(existente) < frecuencia:
@@ -124,7 +124,7 @@ def _emitir_alerta_faltantes(db: Session, c: Contrato, n: int) -> None:
         Alerta.titulo == titulo,
         Alerta.resuelta_at.is_(None),
     ))
-    if existente and _dias_desde_ultimo_aviso(existente) < c.alerta_faltantes_dias:
+    if existente and _dias_desde_ultimo_aviso(existente) < (c.alerta_faltantes_dias or 3):
         return
     desc = f"{n} documento(s) obligatorios de '{c.nombre}' siguen sin cargarse."
     if existente:
@@ -158,8 +158,8 @@ def recalcular_documentos(db: Session, company_id: uuid.UUID | None = None) -> i
             sujeto_contrato.get(doc.sujeto_id) if doc.sujeto_id else None)
         contrato = contratos.get(cid_doc)
         nuevo = calc_estado_doc(
-            doc, dias=contrato.alerta_anticipacion_dias if contrato
-            else UMBRAL_PORVENC_DIAS)
+            doc, dias=(contrato.alerta_anticipacion_dias if contrato else None)
+            or UMBRAL_PORVENC_DIAS)
         if nuevo != doc.estado_calc:
             doc.estado_calc = nuevo
             cambios += 1
@@ -207,7 +207,7 @@ def alertar_vencimiento_contratos(db: Session) -> int:
             desc = f"El contrato '{c.nombre}' venció el {c.fecha_termino:%d/%m/%Y}."
         else:
             dias = (c.fecha_termino - hoy).days
-            if dias <= c.alerta_anticipacion_dias:
+            if dias <= (c.alerta_anticipacion_dias or 30):
                 sev, estado = "advertencia", "nueva"
                 titulo = f"Contrato por vencer: {c.nombre}"
                 desc = f"El contrato '{c.nombre}' vence en {dias} días ({c.fecha_termino:%d/%m/%Y})."

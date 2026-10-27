@@ -11,6 +11,8 @@ export default function PersonasPage() {
   const [loading, setLoading] = useState(true);
   const [personalList, setPersonalList] = useState<Sujeto[]>([]);
   const [search, setSearch] = useState("");
+  /** Filtro que llega desde el gráfico del Home (`?estado=…`). */
+  const [filtroEstado, setFiltroEstado] = useState("");
   
   // Modals state
   const [showModal, setShowModal] = useState(false);
@@ -31,6 +33,11 @@ export default function PersonasPage() {
 
   useEffect(() => {
     fetchPersonal();
+  }, []);
+
+  useEffect(() => {
+    const estado = new URLSearchParams(window.location.search).get("estado");
+    if (estado) setFiltroEstado(estado);
   }, []);
 
   async function fetchPersonal() {
@@ -133,6 +140,11 @@ export default function PersonasPage() {
   };
 
   const filtered = personalList.filter((p) => {
+    if (filtroEstado) {
+      if (filtroEstado === "pendiente") {
+        if (!["proc", "falta"].includes(p.estado)) return false;
+      } else if (p.estado !== filtroEstado) return false;
+    }
     if (!search) return true;
     const term = search.toLowerCase();
     return (
@@ -152,6 +164,13 @@ export default function PersonasPage() {
   const acreditados = personalList.filter((p) => p.estado === "ok").length;
   const pendientes = personalList.filter((p) => p.estado === "proc" || p.estado === "falta").length;
   const vencidos = personalList.filter((p) => p.estado === "venc").length;
+  const etiquetaFiltro = filtroEstado === "pendiente" ? "Pendientes"
+    : filtroEstado === "ok" ? "Acreditados"
+    : filtroEstado === "venc" ? "Vencidos"
+    : filtroEstado === "falta" ? "Pendientes"
+    : filtroEstado === "proc" ? "En proceso"
+    : filtroEstado === "baja" ? "Inactivos"
+    : "";
 
   return (
     <div className="p-6 space-y-6">
@@ -235,6 +254,17 @@ export default function PersonasPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        {filtroEstado && (
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <span>Filtrando: <b>{etiquetaFiltro}</b> ({filtered.length})</span>
+            <button
+              onClick={() => setFiltroEstado("")}
+              className="font-semibold text-blue-600 hover:text-blue-800"
+            >
+              Quitar filtro
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Table */}

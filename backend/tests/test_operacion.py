@@ -78,6 +78,7 @@ def test_listado_de_alertas(app_cliente, empresa_a, tres_alertas):
 
 @pytest.mark.parametrize("query, esperado", [
     ("severidad=critica", 1),
+    ("severidad=advertencia,informativa", 2),
     ("origen=ia", 1),
     ("estado=informativa", 1),
     ("leida=false", 3),
@@ -93,6 +94,7 @@ def test_filtros_de_alertas(app_cliente, empresa_a, tres_alertas, query,
 
 @pytest.mark.parametrize("query, codigo", [
     ("severidad=inventada", "SEVERIDAD_INVALIDA"),
+    ("severidad=critica,inventada", "SEVERIDAD_INVALIDA"),
     ("origen=inventado", "ORIGEN_INVALIDO"),
     ("estado=inventado", "ESTADO_INVALIDO"),
 ])
@@ -182,6 +184,18 @@ def test_marcar_leidas_solo_las_indicadas(app_cliente, empresa_a, tres_alertas):
     assert r.status_code == 200, r.text
     assert r.json()["marcadas"] == 1
     r = app_cliente.get(f"{API}/alertas?leida=true", headers=empresa_a["headers"])
+    assert [i["id"] for i in r.json()["items"]] == [tres_alertas[0]]
+
+
+def test_marcar_en_bloque_resuelve_las_indicadas(app_cliente, empresa_a,
+                                                 tres_alertas):
+    r = app_cliente.post(f"{API}/alertas/marcar", headers=empresa_a["headers"],
+                         json={"ids": [tres_alertas[0]], "resuelta": True})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"marcadas": 1, "resueltas": 1}
+
+    r = app_cliente.get(f"{API}/alertas?estado=resuelta&solo_activas=false",
+                        headers=empresa_a["headers"])
     assert [i["id"] for i in r.json()["items"]] == [tres_alertas[0]]
 
 

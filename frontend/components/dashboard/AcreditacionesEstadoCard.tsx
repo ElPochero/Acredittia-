@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import type { KeyboardEvent } from "react";
 import * as Api from "@/lib/cliente";
 import type { AcreditacionesEstado, EstadoSujeto, Sujeto } from "@/lib/tipos";
 import { Chip, Modal } from "@/components/ui";
@@ -16,6 +18,7 @@ const META: Record<Filtro, { titulo: string; color: string; estados: EstadoSujet
 };
 
 export default function AcreditacionesEstadoCard({ data, loading }: Props) {
+  const router = useRouter();
   const total = data?.total || 1;
   const acred = data?.acreditados || 0;
   const pend = data?.pendientes || 0;
@@ -28,6 +31,18 @@ export default function AcreditacionesEstadoCard({ data, loading }: Props) {
   const [sujetos, setSujetos] = useState<Sujeto[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
+
+  /** El clic en el gráfico lleva al listado ya filtrado por ese estado. */
+  function verListado(f: Filtro) {
+    router.push(`/personal?estado=${f}`);
+  }
+
+  function teclaListado(f: Filtro, e: KeyboardEvent<SVGPathElement>) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      verListado(f);
+    }
+  }
 
   async function verDetalle(f: Filtro) {
     setFiltro(f);
@@ -75,23 +90,29 @@ export default function AcreditacionesEstadoCard({ data, loading }: Props) {
       <div>
         <h3 className="font-bold text-sm text-slate-800 mb-4">Acreditaciones por estado</h3>
         <div className="flex items-center justify-center my-4">
-          <div className="relative w-36 h-36 flex items-center justify-center" role="img"
+          <div className="relative w-36 h-36 flex items-center justify-center" role="group"
             aria-label={`Acreditados ${pA}%, pendientes ${pP}%, vencidos ${pV}%`}>
             <svg className="w-36 h-36 -rotate-90" viewBox="0 0 36 36" aria-hidden="true">
               <path className="text-slate-100" strokeWidth="4" stroke="currentColor" fill="none"
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-              <path className="text-red-500 transition-all duration-700" strokeDasharray={`${pV}, 100`} strokeDashoffset="0"
-                strokeWidth="4.5" stroke="currentColor" fill="none"
+              <path className="text-red-500 transition-all duration-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" strokeDasharray={`${pV}, 100`} strokeDashoffset="0"
+                strokeWidth="4.5" stroke="currentColor" fill="none" role="button" tabIndex={0}
+                aria-label={`Ver vencidos: ${venc} (${pV}%)`}
+                onClick={() => verListado("venc")} onKeyDown={(e) => teclaListado("venc", e)}
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831">
                 <title>{`Vencidos: ${venc} (${pV}%)`}</title>
               </path>
-              <path className="text-amber-400 transition-all duration-700" strokeDasharray={`${pP}, 100`} strokeDashoffset={`-${pV}`}
-                strokeWidth="4.5" stroke="currentColor" fill="none"
+              <path className="text-amber-400 transition-all duration-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" strokeDasharray={`${pP}, 100`} strokeDashoffset={`-${pV}`}
+                strokeWidth="4.5" stroke="currentColor" fill="none" role="button" tabIndex={0}
+                aria-label={`Ver pendientes: ${pend} (${pP}%)`}
+                onClick={() => verListado("pendiente")} onKeyDown={(e) => teclaListado("pendiente", e)}
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831">
                 <title>{`Pendientes: ${pend} (${pP}%)`}</title>
               </path>
-              <path className="text-emerald-500 transition-all duration-700" strokeDasharray={`${pA}, 100`} strokeDashoffset={`-${pV + pP}`}
-                strokeWidth="4.5" stroke="currentColor" fill="none"
+              <path className="text-emerald-500 transition-all duration-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" strokeDasharray={`${pA}, 100`} strokeDashoffset={`-${pV + pP}`}
+                strokeWidth="4.5" stroke="currentColor" fill="none" role="button" tabIndex={0}
+                aria-label={`Ver acreditados: ${acred} (${pA}%)`}
+                onClick={() => verListado("ok")} onKeyDown={(e) => teclaListado("ok", e)}
                 d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831">
                 <title>{`Acreditados: ${acred} (${pA}%)`}</title>
               </path>
