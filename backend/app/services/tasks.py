@@ -52,6 +52,7 @@ from ..models import (
 )
 from . import actividad
 from .checklist import calc_estado_doc, calc_estado_sujeto, vencimiento_por_plantilla
+from .email import datos_observado_documento, despachar_alerta_email
 from .ia import get_reviewer
 from .jobs import tarea
 from .storage import get_storage
@@ -263,6 +264,8 @@ def revisar_documento(
 
         rid = review.id
         base = dict(review.campos_extraidos or {})
+        nombre_archivo = archivo.filename
+        rechazado = False
         _marcar_procesando(db, review)
 
         try:
@@ -301,6 +304,12 @@ def revisar_documento(
                     ]
                 )
                 titulo = f"Documento rechazado por IA: {doc.titulo}"
+                mensajes = [h["mensaje"] for h in errores] or [
+                    "Documento no corresponde al solicitado o contiene errores graves."
+                ]
+                sujeto_email = (doc.sujeto.email
+                                if doc.sujeto_id and doc.sujeto else None)
+                rechazado = True
                 db.add(
                     Alerta(
                         company_id=cid,
@@ -308,9 +317,7 @@ def revisar_documento(
                         estado="bloqueante" if severidad == "critica" else "nueva",
                         origen="ia",
                         titulo=titulo,
-                        descripcion="; ".join(h["mensaje"] for h in errores)
-                        if errores
-                        else "Documento no corresponde al solicitado o contiene errores graves.",
+                        descripcion="; ".join(mensajes),
                         documento_id=doc.id,
                         sujeto_id=doc.sujeto_id,
                         contrato_id=doc.contrato_id,
@@ -391,6 +398,21 @@ def revisar_documento(
                 logger.error("Error al despachar job nvidia_nim revisión: %s", _e)
 
             db.commit()
+
+            # El correo va después del commit: un fallo al encolarlo no puede
+            # deshacer la decisión de la IA sobre el documento.
+            if rechazado:
+                try:
+                    asunto, html_body, texto = datos_observado_documento(
+                        db, doc, nombre_archivo, mensajes)
+                    despachar_alerta_email(
+                        db, cid, "doc_rechazado", asunto, "; ".join(mensajes),
+                        contrato_id=doc.contrato_id, sujeto_email=sujeto_email,
+                        severidad=severidad, html=html_body, texto=texto,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("revisión %s: fallo al encolar el correo", rid)
+
             logger.info("revisión %s aplicada: %s", rid, accion)
         except Exception as e:  # noqa: BLE001
             logger.exception("revisión %s falló al aplicar la decisión", rid)

@@ -616,7 +616,7 @@ def test_preferencias_devuelven_los_defectos(app_cliente, empresa_a):
                         headers=empresa_a["headers"])
     assert r.status_code == 200, r.text
     items = r.json()["items"]
-    assert len(items) == 7, "el catálogo de eventos notificables"
+    assert len(items) == 10, "el catálogo de eventos notificables"
     assert all(i["origen"] == "defecto" for i in items)
     assert all(i["canal_email"] is True and i["canal_whatsapp"] is False
                for i in items)

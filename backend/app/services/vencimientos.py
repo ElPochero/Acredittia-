@@ -17,7 +17,7 @@ from ..config import UMBRAL_ACREDITADO_PCT, UMBRAL_PORVENC_DIAS
 from ..models import (Alerta, Contrato, CumplimientoSnapshot, Documento,
                       PlataformaCredencial, Sujeto)
 from .checklist import calc_estado_doc, calc_estado_sujeto
-from .email import despachar_alerta_email
+from .email import datos_porvencer_documento, despachar_alerta_email
 
 log = logging.getLogger("acredittia.vencimientos")
 
@@ -106,12 +106,15 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento,
     contrato_nombre = ""
     if doc.contrato_id and doc.sujeto and doc.sujeto.contrato:
         contrato_nombre = doc.sujeto.contrato.nombre
+    asunto, html_body, texto = datos_porvencer_documento(db, doc, contrato)
     despachar_alerta_email(
-        db, doc.company_id, evento, titulo, desc,
+        db, doc.company_id, evento, asunto, desc,
         contrato_id=doc.contrato_id,
         sujeto_email=sujeto_email,
         severidad="critica" if doc.estado_calc == "venc" else "advertencia",
         contrato_nombre=contrato_nombre,
+        html=html_body,
+        texto=texto,
     )
 
 
