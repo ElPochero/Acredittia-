@@ -713,8 +713,8 @@ export const actividad = {
 // ============================================================================
 export const calendario = {
   /** `desde` y `hasta` son obligatorios; el rango máximo es de 366 días. */
-  eventos: (desde: string, hasta: string, categoria?: CategoriaEvento) =>
-    api<Eventos>("/calendario/eventos", { query: { desde, hasta, categoria } }),
+  eventos: (desde: string, hasta: string, categoria?: CategoriaEvento, contrato_id?: string) =>
+    api<Eventos>("/calendario/eventos", { query: { desde, hasta, categoria, contrato_id } }),
 
   crear: (body: {
     titulo: string; fecha: string; categoria?: Exclude<CategoriaEvento, "vencimiento">;

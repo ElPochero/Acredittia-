@@ -191,9 +191,11 @@ def _valida_categoria_manual(categoria: str) -> None:
 
 
 # ------------------------------------------------------------------- listado
+@router.get("")
 @router.get("/eventos")
 def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
                    categoria: str | None = Query(None),
+                   contrato_id: uuid.UUID | None = Query(None),
                    db: Session = Depends(get_db),
                    cid: uuid.UUID = Depends(get_company_id),
                    user: User = Depends(get_current_user)):
@@ -214,11 +216,16 @@ def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
         raise err(400, "CATEGORIA_INVALIDA",
                   f"Categoría debe ser una de: {', '.join(CATEGORIAS)}")
 
+    scope = contrato_scope(user)
+    if scope and contrato_id and contrato_id != scope:
+        raise err(403, "CONTRATO_AJENO", "No tiene acceso a ese contrato")
+    efectivo_scope = contrato_id or scope
+
     items: list[dict] = []
     truncado = False
     if categoria in (None, "vencimiento"):
         items, truncado = _vencimientos(db, cid, desde, hasta,
-                                        contrato_scope(user))
+                                        efectivo_scope)
     proyectados = {i["documento_id"] for i in items if i["documento_id"]}
     if categoria != "vencimiento":
         manuales = _manuales(db, cid, desde, hasta, proyectados)
@@ -236,11 +243,18 @@ def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
     }
 
 
+def _require_editor(user: User = Depends(get_current_user)) -> User:
+    if user.role not in ("company", "contract_admin", "admin"):
+        raise err(403, "ROL_INSUFICIENTE", "El visor es de solo lectura")
+    return user
+
+
 # ----------------------------------------------------------------- mutaciones
+@router.post("", status_code=201)
 @router.post("/eventos", status_code=201)
 def crear_evento(body: EventoIn, db: Session = Depends(get_db),
                  cid: uuid.UUID = Depends(get_company_id),
-                 user: User = Depends(require_company)):
+                 user: User = Depends(_require_editor)):
     """Anota un evento propio de la empresa en el calendario.
 
     `categoria='vencimiento'` se rechaza con 400: esa categoría la produce la
@@ -265,11 +279,12 @@ def crear_evento(body: EventoIn, db: Session = Depends(get_db),
     return _out(e)
 
 
+@router.patch("/{evento_id}")
 @router.patch("/eventos/{evento_id}")
 def editar_evento(evento_id: uuid.UUID, body: EventoPatch,
                   db: Session = Depends(get_db),
                   cid: uuid.UUID = Depends(get_company_id),
-                  user: User = Depends(require_company)):
+                  user: User = Depends(_require_editor)):
     """Edita un evento manual. La categoría sigue sin poder ser 'vencimiento'."""
     e = _get_evento(db, cid, evento_id)
     data = body.model_dump(exclude_unset=True)
@@ -300,10 +315,11 @@ def editar_evento(evento_id: uuid.UUID, body: EventoPatch,
     return _out(e)
 
 
+@router.delete("/{evento_id}")
 @router.delete("/eventos/{evento_id}")
 def eliminar_evento(evento_id: uuid.UUID, db: Session = Depends(get_db),
                     cid: uuid.UUID = Depends(get_company_id),
-                    user: User = Depends(require_company)):
+                    user: User = Depends(_require_editor)):
     """Elimina un evento manual. Los vencimientos no se pueden borrar: no son
     filas, desaparecen del calendario cuando el documento cambia de fecha."""
     e = _get_evento(db, cid, evento_id)

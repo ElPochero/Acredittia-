@@ -1023,8 +1023,21 @@ export type EventoCalendario = {
   documento_id: string | null;
   estado_calc: EstadoCalc | null;
   dias: number;
-  sujeto: { id: string; nombre: string; tipo: TipoSujeto } | null;
-  contrato: { id: string; nombre: string; faena: string } | null;
+  sujeto: {
+    id: string;
+    nombre: string;
+    tipo: TipoSujeto;
+    rut?: string | null;
+    patente?: string | null;
+    cargo?: string | null;
+    estado?: string | null;
+  } | null;
+  contrato: {
+    id: string;
+    nombre: string;
+    codigo?: string | null;
+    faena: string | null;
+  } | null;
   editable: boolean;
   created_at: string | null;
 };
