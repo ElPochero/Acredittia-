@@ -41,7 +41,9 @@ properties:
       - name: AZURE_KEYVAULT_URL
         value: "https://acredittia-kv.vault.azure.net/"
       - name: IA_BACKEND
-        value: simulada
+        value: gemini
+      - name: GEMINI_API_KEY
+        value: "${GEMINI_API_KEY}"
       image: acredittiaregistry.azurecr.io/acredittia-backend:v1
       name: acredittia-worker
       resources:

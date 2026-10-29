@@ -425,6 +425,8 @@ export type Contrato = {
   id: string;
   nombre: string;
   codigo: string | null;
+  mandante?: string | null;
+  mandante_propio?: string | null;
   estado: EstadoContrato;
   fecha_inicio: string | null;
   fecha_termino: string | null;
@@ -432,6 +434,12 @@ export type Contrato = {
   origen_ia_review_id: string | null;
   /** Unidad de negocio a la que pertenece (agrupa el listado). */
   unidad_negocio: string | null;
+  /** Días de anticipación del aviso de vencimiento (Alertas IA). */
+  alerta_anticipacion_dias: number;
+  /** Cada cuántos días se reenvía el recordatorio de vencimiento. */
+  alerta_frecuencia_dias: number;
+  /** Cada cuántos días se recuerda la documentación faltante. */
+  alerta_faltantes_dias: number;
   faena: {
     id: string;
     nombre: string;
@@ -452,6 +460,8 @@ export type ContratoIn = {
   fecha_inicio?: string | null;
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
+  /** Mandante libre (H-19, Punto 15). Fallback a faenas.mandante. */
+  mandante?: string | null;
   /** Unidad de negocio a la que pertenece el contrato. */
   unidad_negocio?: string | null;
   /** Job de `POST /contratos/analizar` que originó el alta. */
@@ -463,6 +473,7 @@ export type ContratoIn = {
     equipos?: string[];
     licencia?: string[];
   } | null;
+  plantilla_contrato_id?: string | null;
 };
 
 export type ContratoPatch = {
@@ -472,7 +483,11 @@ export type ContratoPatch = {
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
   estado?: EstadoContrato;
+  mandante?: string | null;
   unidad_negocio?: string | null;
+  alerta_anticipacion_dias?: number;
+  alerta_frecuencia_dias?: number;
+  alerta_faltantes_dias?: number;
 };
 
 export type CeldaMatriz = {
@@ -770,7 +785,7 @@ export type AlertaPatch = {
 };
 
 export type ParamsAlertas = ParamsPagina & {
-  severidad?: Severidad;
+  severidad?: string;
   origen?: OrigenAlerta;
   estado?: EstadoAlerta;
   contrato_id?: string;
@@ -1008,8 +1023,21 @@ export type EventoCalendario = {
   documento_id: string | null;
   estado_calc: EstadoCalc | null;
   dias: number;
-  sujeto: { id: string; nombre: string; tipo: TipoSujeto } | null;
-  contrato: { id: string; nombre: string; faena: string } | null;
+  sujeto: {
+    id: string;
+    nombre: string;
+    tipo: TipoSujeto;
+    rut?: string | null;
+    patente?: string | null;
+    cargo?: string | null;
+    estado?: string | null;
+  } | null;
+  contrato: {
+    id: string;
+    nombre: string;
+    codigo?: string | null;
+    faena: string | null;
+  } | null;
   editable: boolean;
   created_at: string | null;
 };
@@ -1023,9 +1051,62 @@ export type Eventos = {
   truncado: boolean;
 };
 
+
+export type FaenaAgrupada = {
+  faena_id: string;
+  nombre: string;
+  mandante_defecto: string;
+  grupo: string | null;
+  region: string | null;
+  color: string | null;
+  contratos_total: number;
+  cumplimiento_pct: number;
+  personal: { total: number; acreditados: number };
+  equipos: { total: number; acreditados: number };
+  contratos: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    mandante: string;
+    estado: string;
+    unidad_negocio: string | null;
+    cumplimiento_pct: number;
+    personal: { total: number; acreditados: number };
+    equipos: { total: number; acreditados: number };
+  }[];
+};
+
+export type MandanteAgrupado = {
+  mandante: string;
+  contratos_total: number;
+  cumplimiento_pct: number;
+  personal: { total: number; acreditados: number };
+  equipos: { total: number; acreditados: number };
+  faenas: { id: string; nombre: string; region: string | null; color: string | null }[];
+  contratos: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    estado: string;
+    mandante: string;
+    unidad_negocio: string | null;
+    faena: { id: string; nombre: string; color: string | null } | null;
+    cumplimiento_pct: number;
+    personal: { total: number; acreditados: number };
+    equipos: { total: number; acreditados: number };
+  }[];
+};
+
 // ============================================================================
 // Reportes y exportaciones
 // ============================================================================
+export type ReportesResumen = {
+  reportes_generados_30d: number;
+  programados_activos: number;
+  cumplimiento_promedio: number;
+  alertas_activas: number;
+};
+
 export type Reporte = {
   id: string;
   nombre: string;
@@ -1105,12 +1186,17 @@ export type Integracion = {
   nombre: string;
   estado: EstadoIntegracion;
   config: Record<string, unknown>;
+  frecuencia?: string | null;
+  credenciales_ref?: string | null;
+  credenciales_configuradas?: boolean;
+  conector_disponible?: boolean;
   ultima_sync_at: string | null;
   syncs_exitosas: number;
   syncs_fallidas: number;
   registros_sincronizados: number;
   ultimo_error: string | null;
   created_at: string | null;
+  updated_at?: string | null;
 };
 
 export type SyncLog = {
@@ -1245,3 +1331,10 @@ export type CumplimientoDashboardData = {
   alertas: string[];
 };
 
+
+export interface EmailPreview {
+  plantilla: string;
+  asunto: string;
+  html: string;
+  text: string;
+}

@@ -43,8 +43,11 @@ EVENTOS_NOTIFICABLES: dict[str, str] = {
     "vencimiento_7": "Documento por vencer en 7 días",
     "doc_rechazado": "Documento rechazado en la revisión",
     "alerta_critica": "Alerta crítica de cumplimiento",
+    "documentos_faltantes": "Documentos obligatorios sin cargar",
     "sync_fallida": "Falló la sincronización con una plataforma",
     "credencial_por_expirar": "Credencial de plataforma por expirar",
+    "resumen_mensual": "Resumen mensual de vencimientos",
+    "estado_semanal": "Estado semanal del contrato",
 }
 
 # Valores por defecto de un evento sin fila propia: aviso por email y nada por

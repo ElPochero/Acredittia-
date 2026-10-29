@@ -50,6 +50,8 @@ class AlertaPatch(BaseModel):
 
 class MarcarIn(BaseModel):
     ids: list[uuid.UUID] | None = None
+    leida: bool = True
+    resuelta: bool | None = None
 
 
 def _out(a: Alerta) -> dict:
@@ -100,19 +102,27 @@ def listar(severidad: str | None = Query(None),
            cid: uuid.UUID = Depends(get_company_id),
            user: User = Depends(get_current_user)):
     """Alertas de la empresa, la más reciente primero."""
-    for valor, permitidos, code in ((severidad, SEVERIDADES, "SEVERIDAD_INVALIDA"),
-                                    (origen, ORIGENES, "ORIGEN_INVALIDO"),
+    # `severidad` acepta varias separadas por coma: la pestaña "Advertencias"
+    # agrupa advertencia y alta, y así el filtro y la paginación quedan en el
+    # backend en vez de recortar solo la página visible.
+    severidades = ([s.strip() for s in severidad.split(",") if s.strip()]
+                   if severidad else [])
+    for valor, permitidos, code in ((origen, ORIGENES, "ORIGEN_INVALIDO"),
                                     (estado, ESTADOS, "ESTADO_INVALIDO")):
         if valor and valor not in permitidos:
             raise err(400, code, f"Valor debe ser uno de: {', '.join(permitidos)}")
+    invalidas = [s for s in severidades if s not in SEVERIDADES]
+    if invalidas:
+        raise err(400, "SEVERIDAD_INVALIDA",
+                  f"Valor debe ser uno de: {', '.join(SEVERIDADES)}")
     if contrato_id:
         require_contrato(contrato_id, user)
 
     q = _base(cid, contrato_id or contrato_scope(user))
     if solo_activas:
         q = q.where(Alerta.resuelta_at.is_(None))
-    if severidad:
-        q = q.where(Alerta.severidad == severidad)
+    if severidades:
+        q = q.where(Alerta.severidad.in_(severidades))
     if origen:
         q = q.where(Alerta.origen == origen)
     if estado:
@@ -249,22 +259,34 @@ def editar(alerta_id: uuid.UUID, body: AlertaPatch,
     return _out(a)
 
 
+@router.post("/marcar")
 @router.post("/marcar-leidas")
 def marcar_leidas(body: MarcarIn, db: Session = Depends(get_db),
                   cid: uuid.UUID = Depends(get_company_id),
                   user: User = Depends(get_current_user)):
-    """Marca como leídas las alertas indicadas, o todas las no leídas."""
-    q = _base(cid, contrato_scope(user)).where(Alerta.leida_at.is_(None))
+    """Marca en bloque: leídas por defecto y, si se pide, resueltas o reabiertas."""
+    q = _base(cid, contrato_scope(user))
+    if body.leida:
+        q = q.where(Alerta.leida_at.is_(None))
     if body.ids:
         q = q.where(Alerta.id.in_(body.ids))
     now = datetime.now(timezone.utc)
-    n = 0
+    n = m = 0
     for a in db.scalars(q):
-        a.leida_at = now
+        if body.leida:
+            a.leida_at = now
+            n += 1
+        if body.resuelta is not None:
+            a.resuelta_at = now if body.resuelta else None
+            a.estado = "resuelta" if body.resuelta else "nueva"
+            m += 1
         a.updated_at = now
-        n += 1
     if n:
         actividad.log(db, cid, "visualizacion", "alertas",
                       f"{n} alertas marcadas como leídas", user_id=user.id)
+    if m:
+        actividad.log(db, cid, "actualizacion", "alertas",
+                      f"{m} alertas {'resueltas' if body.resuelta else 'reabiertas'} en bloque",
+                      user_id=user.id)
     db.commit()
-    return {"marcadas": n}
+    return {"marcadas": n, "resueltas": m}

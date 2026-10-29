@@ -24,11 +24,16 @@ import LandingContacto from "./LandingContacto";
 import LandingFooter from "./LandingFooter";
 
 /**
- * LandingPage — Orquestador de la landing con diseño alternativo (Día 6).
+ * LandingPage — Orquestador de la landing con diseño alternativo (Día 7).
  * Integra las 18 secciones de contenido completas según el diseño de referencia:
  * Nav, Hero, Problema, Plataforma, ParaQuién, Stats, Funciones, Alertas, Industrias,
  * Flujo, Carpetas, Ecosistema, Planilla, Faenas, Agentes, Impacto, Beneficiados,
  * Trust, CTA Final, Contacto y Footer.
+ * 
+ * Optimizaciones de rendimiento (H-01, Tarea 7.2):
+ * - Ningún componente de la landing entra al bundle de la aplicación (exclusivo para ruta '/').
+ * - Carruseles y rotadores con ejecución diferida en useEffect para liberar el hilo inicial.
+ * - Sin dependencias pesadas en el bundle de cliente.
  */
 export default function LandingPage() {
   return (

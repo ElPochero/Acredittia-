@@ -116,10 +116,26 @@ def cron_purga_temporales():
     return {"blobs_purgados": n, "chats_purgados": chats_purgados}
 
 
+@celery.task(name="acredittia.cron_resumen_mensual")
+def cron_resumen_mensual():
+    """Día 1 de cada mes, 07:00: resumen de vencimientos por contrato."""
+    from app.database import worker_session
+    from app.services.email import enviar_resumen_mensual
+
+    with worker_session(is_admin=True) as db:
+        n = enviar_resumen_mensual(db)
+    log.info("Resumen mensual encolado para %s destinatarios", n)
+    return {"destinatarios": n}
+
+
 celery.conf.beat_schedule = {
     "cron-diario": {
         "task": "acredittia.cron_diario",
         "schedule": crontab(hour=0, minute=30),
+    },
+    "resumen-mensual": {
+        "task": "acredittia.cron_resumen_mensual",
+        "schedule": crontab(day_of_month=1, hour=7, minute=0),
     },
     "reportes-programados": {
         "task": "acredittia.cron_reportes_programados",

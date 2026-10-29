@@ -13,36 +13,56 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from ..config import UMBRAL_ACREDITADO_PCT
+from ..config import UMBRAL_ACREDITADO_PCT, UMBRAL_PORVENC_DIAS
 from ..models import (Alerta, Contrato, CumplimientoSnapshot, Documento,
                       PlataformaCredencial, Sujeto)
 from .checklist import calc_estado_doc, calc_estado_sujeto
-from .email import despachar_alerta_email
+from .email import datos_porvencer_documento, despachar_alerta_email
 
 log = logging.getLogger("acredittia.vencimientos")
 
 
-def _alerta_contrato_existente(db: Session, contrato_id: uuid.UUID, severidad: str) -> bool:
-    return db.scalar(select(Alerta.id).where(
+def _dias_desde_ultimo_aviso(a: Alerta) -> int:
+    """Días transcurridos desde el último envío de una alerta sin resolver.
+
+    Las filas leídas de un `timestamptz` siempre vienen con zona; el `replace`
+    cubre las creadas en esta misma sesión (el default del modelo es naive).
+    """
+    ultimo = a.updated_at
+    if ultimo.tzinfo is None:
+        ultimo = ultimo.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - ultimo).days
+
+
+def _alerta_contrato_existente(db: Session, contrato_id: uuid.UUID,
+                               severidad: str) -> Alerta | None:
+    return db.scalar(select(Alerta).where(
         Alerta.contrato_id == contrato_id,
         Alerta.documento_id.is_(None),
         Alerta.sujeto_id.is_(None),
         Alerta.severidad == severidad,
         Alerta.origen == "vencimiento",
         Alerta.resuelta_at.is_(None),
-    )) is not None
+    ))
 
 
-def _alerta_existente(db: Session, documento_id: uuid.UUID, severidad: str) -> bool:
-    return db.scalar(select(Alerta.id).where(
+def _alerta_existente(db: Session, documento_id: uuid.UUID,
+                      severidad: str) -> Alerta | None:
+    return db.scalar(select(Alerta).where(
         Alerta.documento_id == documento_id,
         Alerta.severidad == severidad,
         Alerta.origen == "vencimiento",
         Alerta.resuelta_at.is_(None),
-    )) is not None
+    ))
 
 
-def _emitir_alerta_vencimiento(db: Session, doc: Documento) -> None:
+def _emitir_alerta_vencimiento(db: Session, doc: Documento,
+                               contrato: Contrato | None = None) -> None:
+    """Alerta de vencimiento del documento, respetando la frecuencia del contrato.
+
+    No se duplica: si ya hay una alerta sin resolver se refresca y solo se
+    reenvía el correo cuando pasó la frecuencia configurada (v15).
+    """
     quien = ""
     if doc.sujeto_id and doc.sujeto:
         quien = f" — {doc.sujeto.nombre}"
@@ -55,54 +75,105 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento) -> None:
         dias = (doc.vence - date.today()).days
         titulo = f"{doc.titulo} por vencer"
         desc = f"{doc.titulo}{quien} vence en {dias} días ({doc.vence:%d/%m/%Y})."
-    if not _alerta_existente(db, doc.id, sev):
+
+    frecuencia = (contrato.alerta_frecuencia_dias if contrato else None) or 1
+    existente = _alerta_existente(db, doc.id, sev)
+    if existente:
+        if _dias_desde_ultimo_aviso(existente) < frecuencia:
+            return
+        existente.titulo, existente.descripcion = titulo, desc
+        existente.updated_at = datetime.now(timezone.utc)
+    else:
         db.add(Alerta(
             company_id=doc.company_id, severidad=sev, estado=estado,
             origen="vencimiento", titulo=titulo, descripcion=desc,
             documento_id=doc.id, sujeto_id=doc.sujeto_id, contrato_id=doc.contrato_id,
         ))
-        
-        # Mapear al evento configurable que más se acerque
-        if doc.estado_calc == "venc":
-            evento = "alerta_critica"
+
+    # Mapear al evento configurable que más se acerque
+    if doc.estado_calc == "venc":
+        evento = "alerta_critica"
+    else:
+        dias = (doc.vence - date.today()).days
+        if dias <= 7:
+            evento = "vencimiento_7"
+        elif dias <= 15:
+            evento = "vencimiento_15"
         else:
-            dias = (doc.vence - date.today()).days
-            if dias <= 7:
-                evento = "vencimiento_7"
-            elif dias <= 15:
-                evento = "vencimiento_15"
-            else:
-                evento = "vencimiento_30"
-                
-        sujeto_email = doc.sujeto.email if doc.sujeto_id and doc.sujeto else None
-        contrato_nombre = ""
-        if doc.contrato_id and doc.sujeto and doc.sujeto.contrato:
-            contrato_nombre = doc.sujeto.contrato.nombre
-        despachar_alerta_email(
-            db, doc.company_id, evento, titulo, desc,
-            contrato_id=doc.contrato_id,
-            sujeto_email=sujeto_email,
-            severidad="critica" if doc.estado_calc == "venc" else "advertencia",
-            contrato_nombre=contrato_nombre,
-        )
+            evento = "vencimiento_30"
+
+    sujeto_email = doc.sujeto.email if doc.sujeto_id and doc.sujeto else None
+    contrato_nombre = ""
+    if doc.contrato_id and doc.sujeto and doc.sujeto.contrato:
+        contrato_nombre = doc.sujeto.contrato.nombre
+    asunto, html_body, texto = datos_porvencer_documento(db, doc, contrato)
+    despachar_alerta_email(
+        db, doc.company_id, evento, asunto, desc,
+        contrato_id=doc.contrato_id,
+        sujeto_email=sujeto_email,
+        severidad="critica" if doc.estado_calc == "venc" else "advertencia",
+        contrato_nombre=contrato_nombre,
+        html=html_body,
+        texto=texto,
+    )
+
+
+def _emitir_alerta_faltantes(db: Session, c: Contrato, n: int) -> None:
+    """Un recordatorio agregado por contrato, no uno por documento faltante."""
+    titulo = f"Documentos faltantes: {c.nombre}"
+    existente = db.scalar(select(Alerta).where(
+        Alerta.contrato_id == c.id,
+        Alerta.origen == "sistema",
+        Alerta.titulo == titulo,
+        Alerta.resuelta_at.is_(None),
+    ))
+    if existente and _dias_desde_ultimo_aviso(existente) < (c.alerta_faltantes_dias or 3):
+        return
+    desc = f"{n} documento(s) obligatorios de '{c.nombre}' siguen sin cargarse."
+    if existente:
+        existente.descripcion = desc
+        existente.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(Alerta(
+            company_id=c.company_id, severidad="advertencia", estado="nueva",
+            origen="sistema", titulo=titulo, descripcion=desc, contrato_id=c.id,
+        ))
+    despachar_alerta_email(
+        db, c.company_id, "documentos_faltantes", titulo, desc,
+        contrato_id=c.id, severidad="advertencia", contrato_nombre=c.nombre,
+    )
 
 
 def recalcular_documentos(db: Session, company_id: uuid.UUID | None = None) -> int:
     """Recalcula `estado_calc` y emite alertas. Devuelve documentos cambiados."""
+    contratos = {c.id: c for c in db.scalars(select(Contrato))}
+    # Los documentos de un sujeto no llevan `contrato_id` propio: se resuelve
+    # por su sujeto para aplicar la configuración de alertas del contrato.
+    sujeto_contrato = dict(db.execute(select(Sujeto.id, Sujeto.contrato_id)).all())
     q = select(Documento)
     if company_id:
         q = q.where(Documento.company_id == company_id)
     cambios = 0
     sujetos_afectados: set[uuid.UUID] = set()
+    faltantes: dict[uuid.UUID, int] = {}
     for doc in db.scalars(q):
-        nuevo = calc_estado_doc(doc)
+        cid_doc = doc.contrato_id or (
+            sujeto_contrato.get(doc.sujeto_id) if doc.sujeto_id else None)
+        contrato = contratos.get(cid_doc)
+        nuevo = calc_estado_doc(
+            doc, dias=(contrato.alerta_anticipacion_dias if contrato else None)
+            or UMBRAL_PORVENC_DIAS)
         if nuevo != doc.estado_calc:
             doc.estado_calc = nuevo
             cambios += 1
             if doc.sujeto_id:
                 sujetos_afectados.add(doc.sujeto_id)
-        if doc.estado_calc in ("venc", "porvenc"):
-            _emitir_alerta_vencimiento(db, doc)
+        if nuevo in ("venc", "porvenc"):
+            _emitir_alerta_vencimiento(db, doc, contrato)
+        elif nuevo == "falta" and contrato and doc.obligatorio and not doc.es_emsipor:
+            faltantes[contrato.id] = faltantes.get(contrato.id, 0) + 1
+    for contrato_id, n in faltantes.items():
+        _emitir_alerta_faltantes(db, contratos[contrato_id], n)
     for sid in sujetos_afectados:
         recalcular_sujeto(db, sid)
     db.commit()
@@ -119,11 +190,15 @@ def recalcular_sujeto(db: Session, sujeto_id: uuid.UUID) -> None:
     sujeto.estado = calc_estado_sujeto(list(docs), sujeto.estado)
 
 
-def alertar_vencimiento_contratos(db: Session, dias_aviso: int = 30) -> int:
-    """Emite alertas para contratos por vencer o vencidos."""
+def alertar_vencimiento_contratos(db: Session) -> int:
+    """Emite alertas para contratos por vencer o vencidos.
+
+    La anticipación y la frecuencia salen de la configuración del contrato
+    (v15), no de un umbral global.
+    """
     hoy = date.today()
     cambios = 0
-    
+
     q = select(Contrato).where(
         Contrato.estado != "terminado",
         Contrato.fecha_termino.is_not(None)
@@ -135,28 +210,34 @@ def alertar_vencimiento_contratos(db: Session, dias_aviso: int = 30) -> int:
             desc = f"El contrato '{c.nombre}' venció el {c.fecha_termino:%d/%m/%Y}."
         else:
             dias = (c.fecha_termino - hoy).days
-            if dias <= dias_aviso:
+            if dias <= (c.alerta_anticipacion_dias or 30):
                 sev, estado = "advertencia", "nueva"
                 titulo = f"Contrato por vencer: {c.nombre}"
                 desc = f"El contrato '{c.nombre}' vence en {dias} días ({c.fecha_termino:%d/%m/%Y})."
             else:
                 continue
-                
-        if not _alerta_contrato_existente(db, c.id, sev):
+
+        existente = _alerta_contrato_existente(db, c.id, sev)
+        if existente and _dias_desde_ultimo_aviso(existente) < c.alerta_frecuencia_dias:
+            continue
+        if existente:
+            existente.titulo, existente.descripcion = titulo, desc
+            existente.updated_at = datetime.now(timezone.utc)
+        else:
             db.add(Alerta(
                 company_id=c.company_id, severidad=sev, estado=estado,
                 origen="vencimiento", titulo=titulo, descripcion=desc,
                 contrato_id=c.id
             ))
             cambios += 1
-            evento = "alerta_critica" if sev == "critica" else "vencimiento_30"
-            despachar_alerta_email(
-                db, c.company_id, evento, titulo, desc,
-                contrato_id=c.id,
-                severidad=sev,
-                contrato_nombre=c.nombre,
-            )
-            
+        evento = "alerta_critica" if sev == "critica" else "vencimiento_30"
+        despachar_alerta_email(
+            db, c.company_id, evento, titulo, desc,
+            contrato_id=c.id,
+            severidad=sev,
+            contrato_nombre=c.nombre,
+        )
+
     db.commit()
     return cambios
 

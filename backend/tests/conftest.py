@@ -82,9 +82,12 @@ SCRIPTS = [
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
     "14_unidad_negocio.sql",
+    "15_alertas_ia.sql",
+    "16_gemini_embeddings.sql",
+    "17_contratos_mandante.sql",
 ]
 
-_TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")
+_TMP = os.path.join(tempfile.gettempdir(), f"acredittia_pruebas_{os.getpid()}")
 PGDATA = os.path.join(_TMP, "pgdata")
 SQL_DIR = os.path.join(_TMP, "sql")
 KEYS_DIR = os.path.join(_TMP, "keys")

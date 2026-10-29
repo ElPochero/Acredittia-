@@ -40,6 +40,8 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
   const [sinVigencia, setSinVigencia] = useState(false);
   const [faenaId, setFaenaId] = useState("");
   const [faenasList, setFaenasList] = useState<Faena[]>([]);
+  const [mandante, setMandante] = useState("");
+  const [mandantesSugeridos, setMandantesSugeridos] = useState<string[]>([]);
   const [creando, setCreando] = useState(false);
   // Unidad de negocio: agrupa el contrato y da acceso a los encargados de la unidad.
   const [unidad, setUnidad] = useState("");
@@ -84,13 +86,20 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
     setError("");
     Api.faenas.listar({ page_size: 100 })
       .then((res) => {
-        setFaenasList(res.items || []);
-        setFaenaId(res.items?.length ? res.items[0].id : "");
+        const items = res.items || [];
+        setFaenasList(items);
+        if (items.length > 0) {
+          setFaenaId(items[0].id);
+          setMandante(items[0].mandante || "");
+        }
       })
       .catch(console.error);
     Api.contratos.unidadesNegocio()
       .then((res) => setUnidades((res.items || []).map((u) => u.nombre)))
       .catch(() => setUnidades([]));
+    Api.contratos.mandantes()
+      .then((res) => setMandantesSugeridos(res.items || []))
+      .catch(() => setMandantesSugeridos([]));
   }, [abierto]);
 
   useEffect(() => {
@@ -207,6 +216,7 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
         nombre: nombre.trim(),
         codigo: codigo.trim() || null,
         faena_id: finalFaenaId,
+        mandante: mandante.trim() || (isCustom && customFaenaMandante.trim() ? customFaenaMandante.trim() : null),
         fecha_inicio: fechaInicio || null,
         fecha_termino: sinVigencia ? null : fechaTermino || null,
         unidad_negocio: unidad || null,
@@ -294,11 +304,44 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
           </div>
 
           <div>
-            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Faena (mandante) *</label>
-            <select value={faenaId} onChange={(e) => setFaenaId(e.target.value)} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white">
+            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Faena de operación *</label>
+            <select
+              value={faenaId}
+              onChange={(e) => {
+                const fid = e.target.value;
+                setFaenaId(fid);
+                if (fid && fid !== "__otra") {
+                  const sel = faenasList.find((f) => f.id === fid);
+                  if (sel?.mandante) setMandante(sel.mandante);
+                }
+              }}
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
+            >
               {faenasList.map((f) => <option key={f.id} value={f.id}>{f.nombre} ({f.mandante})</option>)}
               <option value="__otra">➕ Otra faena (no integrada)</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-[0.75rem] font-bold text-slate-700 mb-1" htmlFor="mandante-input">
+              Mandante del contrato
+            </label>
+            <input
+              id="mandante-input"
+              list="mandantes-sugeridos"
+              value={mandante}
+              onChange={(e) => setMandante(e.target.value)}
+              placeholder="Ej: AMSA, Lundin Mining, Codelco..."
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
+            />
+            <datalist id="mandantes-sugeridos">
+              {mandantesSugeridos.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <p className="text-[0.72rem] text-slate-500 mt-1">
+              Relleno inicial desde la faena elegida. Puedes editarlo libremente si este contrato responde a otro mandante.
+            </p>
           </div>
 
           <div>

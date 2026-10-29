@@ -161,7 +161,7 @@ export function ContratoLayout({
               <span className="text-[0.9rem] mr-1">↓</span> Descargar reporte
             </button>
             {!soloLectura && (
-              <button className={`h-[34px] px-3.5 border-none rounded-[8px] ${btnClass} text-white font-semibold text-[0.85rem] transition-colors shadow-sm cursor-pointer`} onClick={() => alert('Editar contrato — demo')}>
+              <button className={`h-[34px] px-3.5 border-none rounded-[8px] ${btnClass} text-white font-semibold text-[0.85rem] transition-colors shadow-sm cursor-pointer`} onClick={() => (window as any).toast?.("La edición de condiciones contractuales se gestiona desde Configuración / Contratos.")}>
                 ✎ Editar contrato
               </button>
             )}

@@ -15,7 +15,7 @@ from app.models import (
 )
 from app.services import rag_index
 
-DIM = 2048
+DIM = 768
 
 
 def _vec(seed: int) -> list[float]:

@@ -183,7 +183,7 @@ export default function LandingContacto() {
                 required
                 value={form.nombre}
                 onChange={handleChange}
-                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul transition-colors placeholder:text-landing-gris2"
+                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul focus:ring-2 focus:ring-landing-azul/30 transition-all placeholder:text-landing-gris2"
               />
             </div>
 
@@ -198,7 +198,7 @@ export default function LandingContacto() {
                 placeholder="Tu apellido"
                 value={form.apellido}
                 onChange={handleChange}
-                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul transition-colors placeholder:text-landing-gris2"
+                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul focus:ring-2 focus:ring-landing-azul/30 transition-all placeholder:text-landing-gris2"
               />
             </div>
           </div>
@@ -216,7 +216,7 @@ export default function LandingContacto() {
                 required
                 value={form.email}
                 onChange={handleChange}
-                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul transition-colors placeholder:text-landing-gris2"
+                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul focus:ring-2 focus:ring-landing-azul/30 transition-all placeholder:text-landing-gris2"
               />
             </div>
 
@@ -231,7 +231,7 @@ export default function LandingContacto() {
                 placeholder="Nombre de tu empresa"
                 value={form.empresa}
                 onChange={handleChange}
-                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul transition-colors placeholder:text-landing-gris2"
+                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul focus:ring-2 focus:ring-landing-azul/30 transition-all placeholder:text-landing-gris2"
               />
             </div>
           </div>
@@ -249,7 +249,7 @@ export default function LandingContacto() {
                 required
                 value={form.mensaje}
                 onChange={handleChange}
-                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul transition-colors placeholder:text-landing-gris2 resize-y"
+                className="w-full border border-landing-linea rounded-xl px-3.5 py-3 text-sm text-landing-ink bg-white focus:outline-none focus:border-landing-azul focus:ring-2 focus:ring-landing-azul/30 transition-all placeholder:text-landing-gris2 resize-y"
               />
             </div>
           </div>
@@ -259,7 +259,7 @@ export default function LandingContacto() {
             Al enviar este formulario, aceptas el tratamiento de tus datos para ser contactado de acuerdo a nuestra{" "}
             <Link
               href="/privacidad"
-              className="text-landing-azul underline hover:text-landing-azul-d transition-colors font-medium"
+              className="text-landing-azul underline hover:text-landing-azul-d transition-colors font-medium focus-visible:outline-2 focus-visible:outline-landing-azul"
             >
               política de privacidad
             </Link>
@@ -270,7 +270,7 @@ export default function LandingContacto() {
             id="cfBtn"
             type="submit"
             disabled={isSubmitting}
-            className="w-full flex items-center justify-center font-bold text-sm sm:text-base px-6 py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            className="w-full flex items-center justify-center font-bold text-sm sm:text-base px-6 py-3.5 rounded-full bg-landing-azul text-white hover:bg-landing-azul-d disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-azul"
           >
             {isSubmitting ? "Enviando…" : "Enviar mensaje →"}
           </button>

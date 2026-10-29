@@ -7,7 +7,7 @@ import uuid
 from app.database import worker_session
 from app.models import DocumentoChunk
 
-DIM = 2048
+DIM = 768
 
 
 def _v0():

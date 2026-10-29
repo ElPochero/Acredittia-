@@ -25,11 +25,11 @@ import type {
   Contrato, ContratoCreado, ContratoIn, ContratoPatch, Credencial,
   CumplimientoContrato, Documento, DocumentoFila, DownloadUrl, Ejemplo, Empresa,
   EmpresaDetalle, EquipoIn, EquipoPatch, EstadoAcceso, Eventos, Faena,
-  FaenaAdmin, FaenaDetalle, Integracion, JobEncolado, Kpis, LicenciaInterna,
+  FaenaAdmin, FaenaAgrupada, FaenaDetalle, MandanteAgrupado, Integracion, JobEncolado, Kpis, LicenciaInterna,
   Matriz, OlvidoPassword, Pagina, ParamsAlertas, ParamsDocumentos, ParamsEquipos,
   ParamsPagina, ParamsPersonal, PerfilActualizado, Persona, PlantillaAdmin,
   PlantillaRequisito, PlataformaContrato, PlataformaFaena, ProximoVencimiento,
-  Proveedor, Cargo, CargoIn, CargoPatch, Reporte, ReporteProgramado,
+  Proveedor, Cargo, CargoIn, CargoPatch, Reporte, ReporteProgramado, ReportesResumen,
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
@@ -179,6 +179,9 @@ export const faenas = {
     mandante?: string;
   }) => api<Pagina<Faena>>("/faenas", { query: q(params) }),
 
+  agrupado: (params?: { unidad_negocio?: string }) =>
+    api<FaenaAgrupada[]>("/faenas/agrupado", { query: q(params) }),
+
   detalle: (id: string) => api<FaenaDetalle>(`/faenas/${id}`),
 
   plataformas: (id: string, params?: ParamsPagina) =>
@@ -295,12 +298,41 @@ export const contratos = {
   unidadesNegocio: () =>
     api<Conjunto<{ nombre: string }>>("/contratos/unidades-negocio"),
 
+  plantillasDisponibles: () =>
+    api<{ items: any[]; total: number }>("/contratos/plantillas-disponibles"),
+
+  plantillaResumen: (id: string) =>
+    api<any>(`/contratos/${id}/plantilla-resumen`),
+
+  mandantes: () => api<Conjunto<string>>("/contratos/mandantes"),
+
+  agrupadoPorMandante: (params?: { unidad_negocio?: string }) =>
+    api<MandanteAgrupado[]>("/contratos/agrupado", { query: q({ por: "mandante", ...params }) }),
+
   detalle: (id: string) => api<Contrato>(`/contratos/${id}`),
 
   crear: (body: ContratoIn) => api<ContratoCreado>("/contratos", { body }),
 
   editar: (id: string, cambios: ContratoPatch) =>
     patch<Contrato>(`/contratos/${id}`, cambios),
+
+  /** Configuración de alertas IA del contrato (v15). */
+  alertasIaConfig: (id: string) =>
+    api<{
+      alerta_anticipacion_dias: number;
+      alerta_frecuencia_dias: number;
+      alerta_faltantes_dias: number;
+    }>(`/contratos/${id}/alertas-ia/config`),
+
+  guardarAlertasIa: (id: string, body: {
+    alerta_anticipacion_dias: number;
+    alerta_frecuencia_dias: number;
+    alerta_faltantes_dias: number;
+  }) => api<{
+    alerta_anticipacion_dias: number;
+    alerta_frecuencia_dias: number;
+    alerta_faltantes_dias: number;
+  }>(`/contratos/${id}/alertas-ia/config`, { method: "PUT", body }),
 
   eliminar: (id: string) =>
     api<{ ok: boolean; sujetos_eliminados: number; archivos_eliminados: number }>(
@@ -635,6 +667,10 @@ export const alertas = {
   marcarLeidas: (ids?: string[]) =>
     api<{ marcadas: number }>("/alertas/marcar-leidas",
       { body: { ids: ids ?? null } }),
+
+  /** Alias masivo: permite marcar leídas y resolver en la misma llamada. */
+  marcar: (body: { ids?: string[] | null; leida?: boolean; resuelta?: boolean }) =>
+    api<{ marcadas: number; resueltas: number }>("/alertas/marcar", { body }),
 };
 
 // ============================================================================
@@ -677,8 +713,8 @@ export const actividad = {
 // ============================================================================
 export const calendario = {
   /** `desde` y `hasta` son obligatorios; el rango máximo es de 366 días. */
-  eventos: (desde: string, hasta: string, categoria?: CategoriaEvento) =>
-    api<Eventos>("/calendario/eventos", { query: { desde, hasta, categoria } }),
+  eventos: (desde: string, hasta: string, categoria?: CategoriaEvento, contrato_id?: string) =>
+    api<Eventos>("/calendario/eventos", { query: { desde, hasta, categoria, contrato_id } }),
 
   crear: (body: {
     titulo: string; fecha: string; categoria?: Exclude<CategoriaEvento, "vencimiento">;
@@ -700,6 +736,7 @@ export const calendario = {
 // Reportes y exportaciones
 // ============================================================================
 export const reportes = {
+  resumen: () => api<ReportesResumen>("/reportes/resumen"),
   listar: (params?: ParamsPagina & {
     tipo?: TipoReporte; formato?: string; status?: string; desde?: string;
     hasta?: string;
@@ -912,3 +949,12 @@ export const certificacion = {
 };
 
 
+
+
+export const emails = {
+  preview: (contrato_id: string, plantilla: string) =>
+    api<{ plantilla: string; asunto: string; html: string; text: string }>(
+      `/emails/preview/${plantilla}`, { query: { contrato_id } }),
+  test: (body: { plantilla: string; para?: string }) =>
+    api<{ enviados: number; asunto: string }>("/emails/test", { body }),
+};

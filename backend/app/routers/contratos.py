@@ -21,17 +21,17 @@ import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..database import get_db
 from ..deps import (Page, aplicar_orden, contrato_permitido, contrato_scope, err,
                     get_company_id, get_current_user, paginacion, sobre)
 from ..models import (
-    Actividad, Alerta, Contrato, Documento, DocumentoArchivo, Faena, IaReview,
+    Actividad, Alerta, Contrato, ContratoPlantillaOverride, ContratoRequisito, Documento, DocumentoArchivo, Faena, IaReview,
     Sujeto, User,
 )
 from ..services import actividad
@@ -60,6 +60,13 @@ UNIDADES_NEGOCIO: tuple[str, ...] = (
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
                    "created_at", "updated_at"}
 
+# Configuración de alertas IA (v15): anticipación en días y cada cuántos días
+# se repite el recordatorio. Se valida aquí porque el cron confía en lo que hay
+# en la base. Las frecuencias son un conjunto cerrado para que la UI y el cron
+# no puedan divergir.
+ALERTAS_ANTICIPACION = (1, 180)
+ALERTAS_FRECUENCIAS: tuple[int, ...] = (1, 3, 5, 7)
+
 
 # ============================================================================
 # Entradas
@@ -73,10 +80,13 @@ class ContratoIn(BaseModel):
     renovacion_automatica: bool = False
     # Unidad de negocio a la que pertenece el contrato (agrupa y da acceso).
     unidad_negocio: str | None = None
+    # Mandante libre por contrato (H-19, Punto 15). Fallback a faenas.mandante.
+    mandante: str | None = None
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
     requisitos_custom: dict[str, list[str]] | None = None
+    plantilla_contrato_id: uuid.UUID | None = None
 
 
 class ContratoPatch(BaseModel):
@@ -87,6 +97,27 @@ class ContratoPatch(BaseModel):
     renovacion_automatica: bool | None = None
     estado: str | None = None
     unidad_negocio: str | None = None
+    mandante: str | None = None
+    # Configuración de alertas IA (v15). Ver `ALERTAS_ANTICIPACION`.
+    alerta_anticipacion_dias: int | None = None
+    alerta_frecuencia_dias: int | None = None
+    alerta_faltantes_dias: int | None = None
+
+
+class AlertasIaConfigIn(BaseModel):
+    """Configuración editable de recordatorios. Validación cerrada por diseño."""
+    alerta_anticipacion_dias: int = Field(ge=ALERTAS_ANTICIPACION[0],
+                                          le=ALERTAS_ANTICIPACION[1])
+    alerta_frecuencia_dias: int
+    alerta_faltantes_dias: int
+
+    @field_validator("alerta_frecuencia_dias", "alerta_faltantes_dias")
+    @classmethod
+    def _frecuencia_permitida(cls, valor: int) -> int:
+        if valor not in ALERTAS_FRECUENCIAS:
+            permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+            raise ValueError(f"Frecuencia debe ser una de: {permitidos} días")
+        return valor
 
 
 class AnalizarIn(BaseModel):
@@ -154,13 +185,19 @@ def _stats(db: Session, c: Contrato) -> dict:
 
 def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
     f = c.faena
+    m_efectivo = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante if f else None)
     d = {
         "id": str(c.id), "nombre": c.nombre, "codigo": c.codigo,
+        "mandante": m_efectivo,
+        "mandante_propio": c.mandante,
         "estado": c.estado,
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
         "renovacion_automatica": c.renovacion_automatica,
         "unidad_negocio": c.unidad_negocio,
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias,
         "origen_ia_review_id": (str(c.origen_ia_review_id)
                                 if c.origen_ia_review_id else None),
         "faena": {"id": str(f.id), "nombre": f.nombre, "mandante": f.mandante,
@@ -174,11 +211,195 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
 # ============================================================================
 # §8.1 — CRUD
 # ============================================================================
+@router.get("/mandantes")
+def listar_mandantes(
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Lista los mandantes existentes en contratos y faenas para autocompletado (§8.1, H-19)."""
+    mandantes_faenas = db.scalars(
+        select(Faena.mandante).where(
+            Faena.mandante.isnot(None),
+            Faena.mandante != ""
+        ).distinct()
+    ).all()
+
+    mandantes_contratos = db.scalars(
+        select(Contrato.mandante).where(
+            Contrato.company_id == cid,
+            Contrato.mandante.isnot(None),
+            Contrato.mandante != ""
+        ).distinct()
+    ).all()
+
+    todos = set()
+    for m in list(mandantes_faenas) + list(mandantes_contratos):
+        if m and m.strip():
+            todos.add(m.strip())
+
+    return {"items": sorted(list(todos), key=lambda x: x.lower())}
+
+
+@router.get("/agrupado")
+def contratos_agrupado(
+    por: str = Query("mandante"),
+    unidad_negocio: str | None = Query(None),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Contratos y dotación agrupados por mandante efectivo (§8.1, H-19, Punto 15)."""
+    scope = contrato_scope(user)
+
+    q_c = select(Contrato).options(joinedload(Contrato.faena)).where(Contrato.company_id == cid)
+    if scope:
+        q_c = q_c.where(Contrato.id == scope)
+    if unidad_negocio:
+        q_c = q_c.where(Contrato.unidad_negocio == unidad_negocio)
+    contratos = list(db.scalars(q_c.order_by(Contrato.nombre)).unique().all())
+    contrato_ids = [c.id for c in contratos]
+
+    stats_personal: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+    stats_equipos: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+
+    if contrato_ids:
+        rows_sujetos = db.execute(
+            select(
+                Sujeto.contrato_id,
+                Sujeto.tipo,
+                func.count().label("total"),
+                func.count().filter(Sujeto.estado == "ok").label("acreditados")
+            ).where(
+                Sujeto.company_id == cid,
+                Sujeto.estado != "baja",
+                Sujeto.contrato_id.in_(contrato_ids)
+            ).group_by(Sujeto.contrato_id, Sujeto.tipo)
+        ).all()
+
+        for cid_c, tipo, tot, ok in rows_sujetos:
+            if tipo == "trabajador":
+                stats_personal[cid_c] = {"total": tot, "acreditados": ok}
+            elif tipo == "equipo":
+                stats_equipos[cid_c] = {"total": tot, "acreditados": ok}
+
+    grupos: dict[str, list] = {}
+    faenas_por_mandante: dict[str, dict[uuid.UUID, dict]] = {}
+
+    for c in contratos:
+        f = c.faena
+        mandante_norm = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante.strip() if f and f.mandante else None) or "Sin Mandante"
+        clave = mandante_norm
+
+        if clave not in grupos:
+            grupos[clave] = []
+            faenas_por_mandante[clave] = {}
+
+        p = stats_personal.get(c.id, {"total": 0, "acreditados": 0})
+        e = stats_equipos.get(c.id, {"total": 0, "acreditados": 0})
+        partes = []
+        if p["total"]: partes.append(p["acreditados"] / p["total"])
+        if e["total"]: partes.append(e["acreditados"] / e["total"])
+        cump_pct = round(100 * sum(partes) / len(partes)) if partes else 100
+
+        if f and f.id not in faenas_por_mandante[clave]:
+            faenas_por_mandante[clave][f.id] = {
+                "id": str(f.id),
+                "nombre": f.nombre,
+                "region": f.region,
+                "color": f.color,
+            }
+
+        grupos[clave].append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "estado": c.estado,
+            "mandante": mandante_norm,
+            "unidad_negocio": c.unidad_negocio,
+            "faena": {"id": str(f.id), "nombre": f.nombre, "color": f.color} if f else None,
+            "cumplimiento_pct": cump_pct,
+            "personal": p,
+            "equipos": e,
+        })
+
+    salida = []
+    for m_nombre, conts in grupos.items():
+        p_tot = sum(item["personal"]["total"] for item in conts)
+        p_ok = sum(item["personal"]["acreditados"] for item in conts)
+        e_tot = sum(item["equipos"]["total"] for item in conts)
+        e_ok = sum(item["equipos"]["acreditados"] for item in conts)
+        cump_prom = round(sum(item["cumplimiento_pct"] for item in conts) / len(conts)) if conts else 100
+
+        salida.append({
+            "mandante": m_nombre,
+            "contratos_total": len(conts),
+            "cumplimiento_pct": cump_prom,
+            "personal": {"total": p_tot, "acreditados": p_ok},
+            "equipos": {"total": e_tot, "acreditados": e_ok},
+            "faenas": list(faenas_por_mandante[m_nombre].values()),
+            "contratos": conts,
+        })
+
+    salida.sort(key=lambda x: (-x["contratos_total"], x["mandante"].lower()))
+    return salida
+
+
 @router.get("/unidades-negocio")
 def unidades_negocio(user: User = Depends(get_current_user)):
     """Catálogo de unidades de negocio. Va antes que `/{contrato_id}` porque
     FastAPI resuelve las rutas en orden de declaración."""
     return {"items": [{"nombre": u} for u in UNIDADES_NEGOCIO]}
+
+
+@router.get("/plantillas-disponibles")
+def plantillas_disponibles(db: Session = Depends(get_db),
+                           cid: uuid.UUID = Depends(get_company_id),
+                           user: User = Depends(get_current_user)):
+    """Listado de contratos utilizables como planillas reutilizables (§8.3, H-41, Punto 17)."""
+    q = select(Contrato).options(joinedload(Contrato.faena)).where(
+        Contrato.company_id == cid
+    ).order_by(Contrato.nombre)
+    scope = contrato_scope(user)
+    if scope:
+        q = q.where(Contrato.id == scope)
+    contratos = list(db.scalars(q).unique().all())
+
+    salida = []
+    for c in contratos:
+        f = c.faena
+        ovs = db.scalars(select(ContratoPlantillaOverride).where(
+            ContratoPlantillaOverride.contrato_id == c.id)).all()
+        overrides_info = {ov.ambito: len(ov.requisito_template_ids or []) for ov in ovs}
+
+        reqs_custom = db.scalars(select(ContratoRequisito).where(
+            ContratoRequisito.contrato_id == c.id,
+            ContratoRequisito.activo.is_(True))).all()
+        custom_por_ambito: dict[str, int] = {}
+        for r in reqs_custom:
+            custom_por_ambito[r.ambito] = custom_por_ambito.get(r.ambito, 0) + 1
+
+        docs_empresa = db.scalar(select(func.count(Documento.id)).where(
+            Documento.contrato_id == c.id, Documento.sujeto_id.is_(None))) or 0
+
+        total_reqs = sum(overrides_info.values()) + len(reqs_custom) + (docs_empresa if not overrides_info.get("empresa") else 0)
+
+        salida.append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "estado": c.estado,
+            "faena_id": str(c.faena_id),
+            "faena_nombre": f.nombre if f else "Faena general",
+            "mandante": c.mandante or (f.mandante if f else "Sin mandante"),
+            "unidad_negocio": c.unidad_negocio,
+            "overrides": overrides_info,
+            "requisitos_custom_total": len(reqs_custom),
+            "custom_por_ambito": custom_por_ambito,
+            "total_requisitos": total_reqs,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    return {"items": salida, "total": len(salida)}
 
 
 @router.get("")
@@ -260,11 +481,13 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
             raise err(404, "NO_ENCONTRADO", "El job de IA no existe")
         origen = review.id
 
+    m_val = body.mandante.strip() if body.mandante and body.mandante.strip() else None
     c = Contrato(company_id=cid, faena_id=body.faena_id, nombre=body.nombre.strip(),
                  codigo=body.codigo, fecha_inicio=body.fecha_inicio,
                  fecha_termino=body.fecha_termino,
                  renovacion_automatica=body.renovacion_automatica,
                  unidad_negocio=unidad,
+                 mandante=m_val,
                  origen_ia_review_id=origen)
     db.add(c)
     try:
@@ -273,8 +496,43 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
         db.rollback()
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
 
+    if body.plantilla_contrato_id:
+        fuente = db.get(Contrato, body.plantilla_contrato_id)
+        if not fuente or fuente.company_id != cid:
+            raise err(404, "PLANTILLA_NO_ENCONTRADA", "El contrato plantilla no existe")
+        ovs_fuente = db.scalars(select(ContratoPlantillaOverride).where(
+            ContratoPlantillaOverride.contrato_id == fuente.id)).all()
+        for ov in ovs_fuente:
+            nuevo_ov = ContratoPlantillaOverride(
+                company_id=cid,
+                contrato_id=c.id,
+                ambito=ov.ambito,
+                requisito_template_ids=list(ov.requisito_template_ids or [])
+            )
+            db.add(nuevo_ov)
+        reqs_fuente = db.scalars(select(ContratoRequisito).where(
+            ContratoRequisito.contrato_id == fuente.id,
+            ContratoRequisito.activo.is_(True))).all()
+        for rf in reqs_fuente:
+            cr = ContratoRequisito(
+                company_id=cid,
+                contrato_id=c.id,
+                ambito=rf.ambito,
+                titulo=rf.titulo,
+                obligatorio=rf.obligatorio,
+                cargo_id=rf.cargo_id,
+                origen="custom",
+                requisito_template_id=rf.requisito_template_id,
+                ejemplo_clave=rf.ejemplo_clave,
+                vigencia_meses=rf.vigencia_meses,
+                vinculo_tipo=rf.vinculo_tipo,
+                activo=True
+            )
+            db.add(cr)
+        db.flush()
+
     if body.requisitos_custom:
-        from ..models import ContratoRequisito
+
         for ambito, reqs in body.requisitos_custom.items():
             if ambito not in ("empresa", "personal", "equipos", "licencia"):
                 continue
@@ -312,6 +570,56 @@ def detalle(contrato_id: uuid.UUID, db: Session = Depends(get_db),
     return _out(db, _get_contrato(db, cid, contrato_id, user))
 
 
+@router.get("/{contrato_id}/plantilla-resumen")
+def plantilla_resumen(contrato_id: uuid.UUID,
+                      db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Resumen completo de requisitos de una planilla para previsualización."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    ovs = db.scalars(select(ContratoPlantillaOverride).where(
+        ContratoPlantillaOverride.contrato_id == c.id)).all()
+    overrides_dict = {ov.ambito: list(ov.requisito_template_ids or []) for ov in ovs}
+
+    reqs_custom = db.scalars(select(ContratoRequisito).where(
+        ContratoRequisito.contrato_id == c.id,
+        ContratoRequisito.activo.is_(True))).all()
+
+    from ..services.checklist import plantilla_efectiva
+    ambitos_out = {}
+    for amb in ("empresa", "personal", "equipo", "emsipor"):
+        templates = plantilla_efectiva(db, amb, contrato_id=c.id, faena_id=c.faena_id)
+        custom_amb = [r for r in reqs_custom if r.ambito == amb]
+        items = []
+        for t in templates:
+            items.append({
+                "titulo": t.titulo,
+                "origen": "override" if amb in overrides_dict else "base",
+                "obligatorio": t.obligatorio,
+                "tipo": t.tipo,
+                "vigencia_meses": t.vigencia_meses,
+            })
+        for cr in custom_amb:
+            items.append({
+                "titulo": cr.titulo,
+                "origen": "custom",
+                "obligatorio": cr.obligatorio,
+                "tipo": "documento",
+                "vigencia_meses": cr.vigencia_meses,
+            })
+        ambitos_out[amb] = items
+
+    return {
+        "contrato_id": str(c.id),
+        "nombre": c.nombre,
+        "codigo": c.codigo,
+        "faena": c.faena.nombre if c.faena else None,
+        "mandante": c.mandante,
+        "requisitos_por_ambito": ambitos_out,
+        "total": sum(len(v) for v in ambitos_out.values()),
+    }
+
+
 @router.patch("/{contrato_id}")
 def editar(contrato_id: uuid.UUID, body: ContratoPatch,
            db: Session = Depends(get_db),
@@ -331,6 +639,20 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
     if "unidad_negocio" in data:
         data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
+    if "mandante" in data:
+        data["mandante"] = data["mandante"].strip() if data["mandante"] and data["mandante"].strip() else None
+    if "alerta_anticipacion_dias" in data:
+        minimo, maximo = ALERTAS_ANTICIPACION
+        if (data["alerta_anticipacion_dias"] is None
+                or not minimo <= data["alerta_anticipacion_dias"] <= maximo):
+            raise err(400, "ALERTAS_CONFIG_INVALIDA",
+                      f"alerta_anticipacion_dias debe estar entre {minimo} y {maximo} días")
+    for campo in ("alerta_frecuencia_dias", "alerta_faltantes_dias"):
+        if campo in data and (data[campo] is None
+                              or data[campo] not in ALERTAS_FRECUENCIAS):
+            permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+            raise err(400, "ALERTAS_CONFIG_INVALIDA",
+                      f"{campo} debe ser uno de: {permitidos} días")
     for k, v in data.items():
         setattr(c, k, v)
     c.updated_at = datetime.now(timezone.utc)
@@ -339,6 +661,47 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
                   entidad_tipo="contrato", entidad_id=c.id)
     db.commit()
     return _out(db, c)
+
+
+@router.get("/{contrato_id}/alertas-ia/config")
+def alertas_ia_config(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Configuración vigente; si la fila es antigua, devuelve los defaults."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    return {
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias or 30,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias or 1,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias or 3,
+    }
+
+
+@router.put("/{contrato_id}/alertas-ia/config")
+def editar_alertas_ia_config(contrato_id: uuid.UUID, body: AlertasIaConfigIn,
+                             db: Session = Depends(get_db),
+                             cid: uuid.UUID = Depends(get_company_id),
+                             user: User = Depends(get_current_user)):
+    """Guarda la configuración del contrato. El visor solo consulta."""
+    if user.role == "visor":
+        raise err(403, "ROL_INSUFICIENTE",
+                  "El visor no puede modificar la configuración de alertas")
+    c = _get_contrato(db, cid, contrato_id, user)
+    c.alerta_anticipacion_dias = body.alerta_anticipacion_dias
+    c.alerta_frecuencia_dias = body.alerta_frecuencia_dias
+    c.alerta_faltantes_dias = body.alerta_faltantes_dias
+    c.updated_at = datetime.now(timezone.utc)
+    actividad.log(db, cid, "actualizacion", "contratos",
+                  f"Alertas IA de '{c.nombre}': anticipación "
+                  f"{body.alerta_anticipacion_dias} días, frecuencia "
+                  f"{body.alerta_frecuencia_dias} días y faltantes "
+                  f"{body.alerta_faltantes_dias} días",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return {
+        "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+        "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+        "alerta_faltantes_dias": c.alerta_faltantes_dias,
+    }
 
 
 @router.delete("/{contrato_id}")

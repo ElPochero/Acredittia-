@@ -37,7 +37,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from . import nvidia_nim
+from . import ia_consultas
 from ..database import worker_session
 from ..models import (
     Alerta,
@@ -52,6 +52,7 @@ from ..models import (
 )
 from . import actividad
 from .checklist import calc_estado_doc, calc_estado_sujeto, vencimiento_por_plantilla
+from .email import datos_observado_documento, despachar_alerta_email
 from .ia import get_reviewer
 from .jobs import tarea
 from .storage import get_storage
@@ -263,6 +264,8 @@ def revisar_documento(
 
         rid = review.id
         base = dict(review.campos_extraidos or {})
+        nombre_archivo = archivo.filename
+        rechazado = False
         _marcar_procesando(db, review)
 
         try:
@@ -291,8 +294,7 @@ def revisar_documento(
             if errores or review.resultado == "con_errores":
                 doc.estado = "falta"
 
-                # Desvincular y eliminar el archivo para obligar al usuario a subir uno nuevo
-                db.delete(archivo)
+                # El archivo se conserva para trazabilidad y descarga; el documento queda en falta
 
                 severidad = _peor(
                     [
@@ -301,6 +303,12 @@ def revisar_documento(
                     ]
                 )
                 titulo = f"Documento rechazado por IA: {doc.titulo}"
+                mensajes = [h["mensaje"] for h in errores] or [
+                    "Documento no corresponde al solicitado o contiene errores graves."
+                ]
+                sujeto_email = (doc.sujeto.email
+                                if doc.sujeto_id and doc.sujeto else None)
+                rechazado = True
                 db.add(
                     Alerta(
                         company_id=cid,
@@ -308,9 +316,7 @@ def revisar_documento(
                         estado="bloqueante" if severidad == "critica" else "nueva",
                         origen="ia",
                         titulo=titulo,
-                        descripcion="; ".join(h["mensaje"] for h in errores)
-                        if errores
-                        else "Documento no corresponde al solicitado o contiene errores graves.",
+                        descripcion="; ".join(mensajes),
                         documento_id=doc.id,
                         sujeto_id=doc.sujeto_id,
                         contrato_id=doc.contrato_id,
@@ -386,11 +392,26 @@ def revisar_documento(
                     ],
                 }
 
-                nvidia_nim.revisar_documento_job(archivo.blob_path, contexto, payload)
+                ia_consultas.revisar_documento_job(archivo.blob_path, contexto, payload)
             except Exception as _e:
-                logger.error("Error al despachar job nvidia_nim revisión: %s", _e)
+                logger.error("Error al despachar job ia_consultas revisión: %s", _e)
 
             db.commit()
+
+            # El correo va después del commit: un fallo al encolarlo no puede
+            # deshacer la decisión de la IA sobre el documento.
+            if rechazado:
+                try:
+                    asunto, html_body, texto = datos_observado_documento(
+                        db, doc, nombre_archivo, mensajes)
+                    despachar_alerta_email(
+                        db, cid, "doc_rechazado", asunto, "; ".join(mensajes),
+                        contrato_id=doc.contrato_id, sujeto_email=sujeto_email,
+                        severidad=severidad, html=html_body, texto=texto,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("revisión %s: fallo al encolar el correo", rid)
+
             logger.info("revisión %s aplicada: %s", rid, accion)
         except Exception as e:  # noqa: BLE001
             logger.exception("revisión %s falló al aplicar la decisión", rid)
@@ -981,9 +1002,9 @@ def extraer_carpeta_arranque(
 
             # Integración Nvidia NIM / OpenCode (Job asíncrono escribe en ../Consultas)
             try:
-                nvidia_nim.extraer_requisitos_job(blob_path, "arranque", propuesta)
+                ia_consultas.extraer_requisitos_job(blob_path, "arranque", propuesta)
             except Exception as _e:
-                logger.error("Error al despachar job nvidia_nim: %s", _e)
+                logger.error("Error al despachar job ia_consultas: %s", _e)
 
             _reescribir_hallazgos(
                 db,
@@ -1190,16 +1211,36 @@ def generar_reporte(reporte_id: str, company_id: str) -> None:
             scope = filtros.get("contrato_id")
             scope_contrato = uuid.UUID(str(scope)) if scope else None
 
-            cabeceras, filas = filas_de_recurso(
-                db, cid, recurso, filtros, scope_contrato
-            )
+            if recurso == "reporte_contrato":
+                from ..routers.reportes import (
+                    datos_reporte_contrato,
+                    excel_reporte_contrato,
+                    pdf_reporte_contrato,
+                )
 
-            formato = params.get("formato_export") or rep.formato
-            if formato == "pdf":
-                data = pdf_simple(rep.nombre, _lineas_tabla(cabeceras, filas))
-                ext = "pdf"
+                cid_contrato = filtros.get("contrato_id") or scope_contrato
+                if not cid_contrato:
+                    raise ValueError("contrato_id es requerido para reporte_contrato")
+                c_data = datos_reporte_contrato(db, cid, uuid.UUID(str(cid_contrato)))
+                formato = params.get("formato_export") or rep.formato
+                if formato == "pdf":
+                    data = pdf_reporte_contrato(c_data)
+                    ext = "pdf"
+                else:
+                    data = excel_reporte_contrato(c_data)
+                    ext = "xlsx"
+                filas = c_data.get("dotacion", [])
             else:
-                data, ext = serializar(formato, cabeceras, filas, rep.nombre)
+                cabeceras, filas = filas_de_recurso(
+                    db, cid, recurso, filtros, scope_contrato
+                )
+
+                formato = params.get("formato_export") or rep.formato
+                if formato == "pdf":
+                    data = pdf_simple(rep.nombre, _lineas_tabla(cabeceras, filas))
+                    ext = "pdf"
+                else:
+                    data, ext = serializar(formato, cabeceras, filas, rep.nombre)
 
             blob_path = f"reportes/{cid}/{rep.id}.{ext}"
             get_storage().save(blob_path, data)

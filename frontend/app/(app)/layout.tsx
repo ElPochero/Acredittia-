@@ -23,6 +23,7 @@ import IntegracionesPage from "./integraciones/page";
 import ConfigPage from "./config/page";
 import AdminPage from "./admin/page";
 import CertificacionLaboralPage from "./certificacion-laboral/page";
+import CentroAyudaModal from "@/components/CentroAyudaModal";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -30,6 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [activeRoute, setActiveRoute] = useState(pathname || "/dashboard");
   const [listo, setListo] = useState(false);
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [ayudaAbierta, setAyudaAbierta] = useState(false);
 
   useEffect(() => {
     if (!currentUser()) {
@@ -98,6 +100,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     (window as any).openProj = () => (window as any).navTo("contratos");
     (window as any).openP = () => (window as any).navTo("personal");
     (window as any).openE = () => (window as any).navTo("equipos");
+    (window as any).abrirCentroAyuda = () => setAyudaAbierta(true);
 
     (window as any).toast = (msg: string) => {
       let t = document.getElementById("app-toast");
@@ -184,6 +187,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
       <BottomNav />
+      <CentroAyudaModal isOpen={ayudaAbierta} onClose={() => setAyudaAbierta(false)} />
     </div>
   );
 }

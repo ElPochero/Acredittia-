@@ -113,14 +113,19 @@ export default function LandingHeroMockup() {
     setActiveIndex((prev) => (prev + 1) % DATASETS.length);
   }, []);
 
+  // Carga y diferimiento de rotación al cliente tras el render inicial (H-01, Tarea 7.2)
   useEffect(() => {
     if (!shouldAutoplay) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
 
-    timerRef.current = setInterval(nextTab, 3200);
+    const timeout = setTimeout(() => {
+      timerRef.current = setInterval(nextTab, 3200);
+    }, 1000);
+
     return () => {
+      clearTimeout(timeout);
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [shouldAutoplay, nextTab]);
@@ -162,7 +167,7 @@ export default function LandingHeroMockup() {
           </button>
         </div>
 
-        {/* Pestañas de navegación de datos interactivas */}
+        {/* Pestañas de navegación de datos interactivas (WCAG 2.2 AA, Tarea 8.2) */}
         <div
           role="tablist"
           aria-label="Pestañas del panel ejecutivo"
@@ -173,13 +178,25 @@ export default function LandingHeroMockup() {
             return (
               <button
                 key={dataset.name}
+                id={`hero-tab-${idx}`}
                 role="tab"
                 aria-selected={isActive}
+                aria-controls="hero-tabpanel"
+                tabIndex={isActive ? 0 : -1}
                 type="button"
                 onClick={() => {
                   setActiveIndex(idx);
                 }}
-                className={`text-[0.72rem] font-bold px-3 py-1 rounded-full transition-all shrink-0 cursor-pointer ${
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight") {
+                    e.preventDefault();
+                    setActiveIndex((idx + 1) % DATASETS.length);
+                  } else if (e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setActiveIndex((idx - 1 + DATASETS.length) % DATASETS.length);
+                  }
+                }}
+                className={`text-[0.72rem] font-bold px-3 py-1 rounded-full transition-all shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-landing-azul focus-visible:ring-offset-1 ${
                   isActive
                     ? "bg-landing-azul text-white shadow-sm"
                     : "text-landing-gris hover:text-landing-ink hover:bg-landing-soft"
@@ -191,8 +208,13 @@ export default function LandingHeroMockup() {
           })}
         </div>
 
-        {/* Cuerpo del dashboard */}
-        <div className="p-4 sm:p-5">
+        {/* Cuerpo del dashboard con rol tabpanel accesible */}
+        <div
+          id="hero-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`hero-tab-${activeIndex}`}
+          className="p-4 sm:p-5"
+        >
           <div className="flex justify-between items-baseline gap-2 mb-2.5">
             <span className="text-[0.62rem] sm:text-[0.66rem] font-extrabold tracking-wider text-landing-gris2 uppercase">
               TRABAJADORES EN TODOS TUS CONTRATOS
@@ -266,6 +288,7 @@ export default function LandingHeroMockup() {
                       fill
                       sizes="28px"
                       className="object-cover"
+                      priority
                     />
                   ) : row.avatar.type === "emoji" ? (
                     <span>{row.avatar.text}</span>

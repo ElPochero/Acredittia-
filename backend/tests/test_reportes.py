@@ -325,3 +325,102 @@ def test_la_url_de_exportacion_esta_firmada(app_cliente, empresa_a, contrato_a,
     r = app_cliente.get(manipulada)
     assert r.status_code == 403
     assert r.json()["error"]["code"] == "FIRMA_INVALIDA"
+
+
+# ============================================================================
+# Pruebas Día 8 (Slice 1): KPIs de Resumen y Reporte por Contrato (PDF y Excel)
+# ============================================================================
+def test_reportes_resumen_kpis(app_cliente, empresa_a, contrato_a, dotacion):
+    r = app_cliente.get(f"{API}/reportes/resumen", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "reportes_generados_30d" in body
+    assert "programados_activos" in body
+    assert "cumplimiento_promedio" in body
+    assert "alertas_activas" in body
+    assert isinstance(body["reportes_generados_30d"], int)
+    assert isinstance(body["cumplimiento_promedio"], int)
+
+
+def test_reporte_contrato_pdf_descarga_real(app_cliente, empresa_a, contrato_a, dotacion):
+    r = app_cliente.post(
+        f"{API}/reportes",
+        headers=empresa_a["headers"],
+        json={
+            "tipo": "estado_acreditacion",
+            "formato": "pdf",
+            "nombre": f"Reporte Contrato {contrato_a['nombre']}",
+            "params": {"contrato_id": contrato_a["id"], "recurso": "reporte_contrato"},
+        },
+    )
+    assert r.status_code == 202, r.text
+    rid = r.json()["id"]
+
+    # Con inproc el job ya terminó
+    r = app_cliente.get(f"{API}/reportes/{rid}", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "done", r.text
+
+    # Descarga
+    r = app_cliente.get(f"{API}/reportes/{rid}/download-url", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    url = r.json()["download_url"]
+    assert url.endswith(".pdf") or "filename=" in url
+
+    contenido = _descargar(app_cliente, url)
+    assert contenido.startswith(b"%PDF-"), "El archivo generado debe tener cabecera PDF válida"
+    assert len(contenido) > 500, "El archivo PDF no debe estar vacío"
+
+
+def test_reporte_contrato_excel_descarga_real(app_cliente, empresa_a, contrato_a, dotacion):
+    r = app_cliente.post(
+        f"{API}/reportes",
+        headers=empresa_a["headers"],
+        json={
+            "tipo": "estado_acreditacion",
+            "formato": "excel",
+            "nombre": f"Reporte Contrato {contrato_a['nombre']}",
+            "params": {"contrato_id": contrato_a["id"], "recurso": "reporte_contrato"},
+        },
+    )
+    assert r.status_code == 202, r.text
+    rid = r.json()["id"]
+
+    r = app_cliente.get(f"{API}/reportes/{rid}", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "done", r.text
+
+    r = app_cliente.get(f"{API}/reportes/{rid}/download-url", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    url = r.json()["download_url"]
+
+    contenido = _descargar(app_cliente, url)
+    assert contenido.startswith(b"PK\x03\x04"), "El archivo generado debe ser un XLSX (ZIP) válido"
+    assert len(contenido) > 1000, "El archivo Excel no debe estar vacío"
+
+
+def test_reporte_contrato_fallo_controlado(app_cliente, empresa_a):
+    non_existent = str(uuid.uuid4())
+    r = app_cliente.post(
+        f"{API}/reportes",
+        headers=empresa_a["headers"],
+        json={
+            "tipo": "estado_acreditacion",
+            "formato": "pdf",
+            "nombre": "Reporte Invalido",
+            "params": {"contrato_id": non_existent, "recurso": "reporte_contrato"},
+        },
+    )
+    assert r.status_code == 202, r.text
+    rid = r.json()["id"]
+
+    # Verificamos estado fallido
+    r = app_cliente.get(f"{API}/reportes/{rid}", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "failed"
+    assert r.json()["error"] is not None
+
+    # Intentar descargar debe dar 409 REPORTE_NO_LISTO
+    r = app_cliente.get(f"{API}/reportes/{rid}/download-url", headers=empresa_a["headers"])
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "REPORTE_NO_LISTO"

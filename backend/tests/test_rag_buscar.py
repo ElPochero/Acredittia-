@@ -7,7 +7,7 @@ import uuid
 from app.database import worker_session
 from app.models import DocumentoChunk
 
-DIM = 2048
+DIM = 768
 
 
 def _v0():
@@ -133,8 +133,10 @@ def test_nim_caido_da_502(app_cliente, empresa_a, contrato_a, monkeypatch):
 
 
 def test_contract_admin_acotado_a_su_contrato(
-    app_cliente, empresa_a, empresa_b, contrato_a, contrato_b
+    app_cliente, empresa_a, empresa_b, contrato_a, contrato_b, monkeypatch
 ):
+    import app.services.embeddings as embeddings
+    monkeypatch.setattr(embeddings, "embed_texts", lambda texts: [_v0() for _ in texts])
     from tests.conftest import crear_contract_admin
 
     jefe = crear_contract_admin(app_cliente, empresa_a, contrato_a["id"])

@@ -119,9 +119,9 @@ def listar_periodos_contrato(
         
     q = aplicar_orden(q, PeriodoLaboral, orden, ORDEN_PERIODOS, "-fecha_inicio")
     
-    total = db.scalar(select(select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id).subquery().count()))
+    total = db.scalar(select(func.count(PeriodoLaboral.id)).where(PeriodoLaboral.contrato_id == contrato_id))
     if estado:
-         total = db.scalar(select(select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id, PeriodoLaboral.estado == estado).subquery().count()))
+         total = db.scalar(select(func.count(PeriodoLaboral.id)).where(PeriodoLaboral.contrato_id == contrato_id, PeriodoLaboral.estado == estado))
          
     items = db.execute(q.offset(pag.offset).limit(pag.page_size)).scalars().all()
     

@@ -360,7 +360,8 @@ def invitar_usuario(body: UsuarioIn, db: Session = Depends(get_db),
         enlace = f"{settings.app_url.rstrip('/')}/login"
     enviar_invitacion(to_email=u.email, nombre=u.nombre, clave=clave_temporal,
                       rol=_ROL_ETIQUETA.get(body.role, body.role),
-                      contrato_nombre=contrato_nombre, enlace=enlace)
+                      contrato_nombre=contrato_nombre, enlace=enlace,
+                      empresa=c.nombre)
 
     logger.info("usuario invitado id=%s role=%s", u.id, u.role)
     salida = {"id": str(u.id), "email": u.email, "role": u.role,
