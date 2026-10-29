@@ -762,7 +762,7 @@ def _contexto_contrato(
     reqs_txt = ", ".join(todos[:60]) or "ninguno"
     # RAG (v10): si el contrato ya esta indexado, los requisitos salen de
     # busqueda semantica top-K sobre la pregunta en vez del volcado completo.
-    # Sin chunks, sin mensaje de texto o si NIM falla, se usa el volcado.
+    # Sin chunks, sin mensaje de texto o si Gemini falla, se usa el volcado.
     frags_txt = None
     if mensaje and isinstance(mensaje, str) and mensaje.strip():
         try:
@@ -847,7 +847,7 @@ async def chat_ia(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """API para chatear con el asistente IA (NVIDIA NIM)."""
+    """API para chatear con el asistente IA (Google Gemini)."""
     from ..services.ia import chat_with_ia
     import json
 

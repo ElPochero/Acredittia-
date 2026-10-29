@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.database import worker_session
 from app.models import Company, Contrato, DocumentoChunk, Faena
 
-DIM = 2048
+DIM = 768
 
 
 def _v0() -> list[float]:

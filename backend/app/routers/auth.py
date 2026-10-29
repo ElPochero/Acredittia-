@@ -173,16 +173,16 @@ def register(body: RegisterIn):
             raise err(409, "EMAIL_EN_USO", "El email ya está registrado")
         if db.scalar(select(Company).where(Company.rut == rut_str)):
             raise err(409, "RUT_EN_USO", "El RUT ya está registrado")
-        company = Company(nombre=body.empresa, rut=rut_str, email=body.email, status="approved")
+        company = Company(nombre=body.empresa, rut=rut_str, email=body.email, status="pending")
         db.add(company)
         db.flush()
         user = User(email=body.email, nombre=body.empresa, password_hash=hash_password(body.password),
-                    role="company", company_id=company.id, status="approved")
+                    role="company", company_id=company.id, status="pending")
         db.add(user)
         db.commit()
         salida = {"user_id": str(user.id), "company_id": str(company.id)}
-    salida.update(status="approved",
-                  message="Cuenta creada exitosamente.")
+    salida.update(status="pending",
+                  message="Solicitud registrada. Pendiente de aprobación.")
     return salida
 
 
