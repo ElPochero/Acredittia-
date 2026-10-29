@@ -29,7 +29,7 @@ import type {
   Matriz, OlvidoPassword, Pagina, ParamsAlertas, ParamsDocumentos, ParamsEquipos,
   ParamsPagina, ParamsPersonal, PerfilActualizado, Persona, PlantillaAdmin,
   PlantillaRequisito, PlataformaContrato, PlataformaFaena, ProximoVencimiento,
-  Proveedor, Cargo, CargoIn, CargoPatch, Reporte, ReporteProgramado,
+  Proveedor, Cargo, CargoIn, CargoPatch, Reporte, ReporteProgramado, ReportesResumen,
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
@@ -722,6 +722,7 @@ export const calendario = {
 // Reportes y exportaciones
 // ============================================================================
 export const reportes = {
+  resumen: () => api<ReportesResumen>("/reportes/resumen"),
   listar: (params?: ParamsPagina & {
     tipo?: TipoReporte; formato?: string; status?: string; desde?: string;
     hasta?: string;

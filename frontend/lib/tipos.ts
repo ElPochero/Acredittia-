@@ -1035,6 +1035,13 @@ export type Eventos = {
 // ============================================================================
 // Reportes y exportaciones
 // ============================================================================
+export type ReportesResumen = {
+  reportes_generados_30d: number;
+  programados_activos: number;
+  cumplimiento_promedio: number;
+  alertas_activas: number;
+};
+
 export type Reporte = {
   id: string;
   nombre: string;

@@ -795,6 +795,381 @@ def _filas_matriz(db: Session, cid: uuid.UUID, filtros: dict,
     return cab, filas
 
 
+def datos_reporte_contrato(db: Session, cid: uuid.UUID, contrato_id: uuid.UUID) -> dict:
+    """Extrae la información completa de un contrato para el reporte PDF y Excel (§15.3, H-42).
+
+    Fuente única de verdad compartida por la serialización Excel y la de PDF.
+    """
+    from .contratos import _stats
+    c = db.get(Contrato, contrato_id)
+    if c is None or c.company_id != cid:
+        raise err(404, "CONTRATO_NO_ENCONTRADO", f"Contrato {contrato_id} no existe")
+
+    f = c.faena
+    mandante = getattr(c, "mandante", None) or (f.mandante if f else "") or "Sin Mandante"
+    faena_nombre = f.nombre if f else "Sin Faena"
+    unidad_negocio = getattr(c, "unidad_negocio", None) or (getattr(f, "unidad_negocio", None) if f else "") or "General"
+
+    st = _stats(db, c)
+
+    # Sujetos (trabajador y equipo)
+    sujetos = list(db.scalars(
+        select(Sujeto).where(
+            Sujeto.company_id == cid,
+            Sujeto.contrato_id == c.id,
+            Sujeto.estado != "baja"
+        ).order_by(Sujeto.tipo, Sujeto.nombre)
+    ).all())
+
+    sujetos_ids = [s.id for s in sujetos]
+    docs_sujetos: dict[uuid.UUID, list[Documento]] = {s.id: [] for s in sujetos}
+    if sujetos_ids:
+        todos_docs = list(db.scalars(
+            select(Documento).where(
+                Documento.company_id == cid,
+                Documento.sujeto_id.in_(sujetos_ids)
+            )
+        ).all())
+        for d in todos_docs:
+            if d.sujeto_id in docs_sujetos:
+                docs_sujetos[d.sujeto_id].append(d)
+
+    filas_dotacion = []
+    for s in sujetos:
+        s_docs = docs_sujetos.get(s.id, [])
+        s_st = stats_sujeto(s_docs)
+        filas_dotacion.append({
+            "tipo": "Trabajador" if s.tipo == "trabajador" else "Equipo",
+            "nombre": s.nombre if s.tipo == "trabajador" else (s.patente or s.nombre),
+            "identificador": s.rut or s.patente or "",
+            "cargo_o_tipo": (s.cargo or "") if s.tipo == "trabajador" else (s.tipo_equipo or ""),
+            "estado": s.estado,
+            "cumplimiento_pct": s_st["cumplimiento_pct"],
+            "docs_ok": s_st["ok"],
+            "docs_total": s_st["docs_total"],
+        })
+
+    # Documentos vencidos o por vencer del contrato (empresa y sujetos)
+    docs_alerta = list(db.scalars(
+        select(Documento).where(
+            Documento.company_id == cid,
+            Documento.contrato_id == c.id,
+            Documento.estado_calc.in_(["venc", "porvenc"])
+        ).order_by(Documento.vence.asc().nulls_last())
+    ).all())
+
+    sujeto_map = {s.id: f"{s.nombre} ({s.rut or s.patente or ''})" for s in sujetos}
+    filas_vencimientos = []
+    for d in docs_alerta:
+        ambito = sujeto_map.get(d.sujeto_id, "Empresa / Contrato") if d.sujeto_id else "Empresa / Contrato"
+        dias_restantes = (d.vence - date.today()).days if d.vence else None
+        filas_vencimientos.append({
+            "ambito": ambito,
+            "documento": d.titulo,
+            "estado": "Vencido" if d.estado_calc == "venc" else "Por vencer",
+            "vence": d.vence.isoformat() if d.vence else "—",
+            "dias_restantes": dias_restantes if dias_restantes is not None else "—"
+        })
+
+    return {
+        "contrato_id": str(c.id),
+        "contrato_nombre": c.nombre,
+        "contrato_codigo": c.codigo or "",
+        "faena": faena_nombre,
+        "mandante": mandante,
+        "unidad_negocio": unidad_negocio,
+        "fecha_generacion": date.today().isoformat(),
+        "stats": st,
+        "dotacion": filas_dotacion,
+        "vencimientos": filas_vencimientos
+    }
+
+
+def _filas_reporte_contrato(db: Session, cid: uuid.UUID, filtros: dict,
+                            scope: uuid.UUID | None) -> tuple[list[str], list[list]]:
+    """Genera cabeceras y filas aplanadas del reporte por contrato para filas_de_recurso."""
+    cid_contrato = _f_uuid(filtros, "contrato_id") or scope
+    if not cid_contrato:
+        raise err(400, "FILTRO_FALTANTE", "'contrato_id' es obligatorio para el reporte de contrato")
+    data = datos_reporte_contrato(db, cid, cid_contrato)
+
+    cab = [
+        "Sección", "Identificador / Sujeto", "Tipo / Ámbito", "Cargo / Detalle",
+        "Estado", "Cumplimiento % / Vencimiento", "Detalle Documentos"
+    ]
+    filas = []
+    # Encabezado
+    filas.append(["ENCABEZADO", data["contrato_nombre"], f"Código: {data['contrato_codigo']}",
+                  f"Faena: {data['faena']}", f"Mandante: {data['mandante']}",
+                  f"Fecha: {data['fecha_generacion']}", f"U.N.: {data['unidad_negocio']}"])
+    # Resumen
+    st = data["stats"]
+    filas.append(["RESUMEN", "Cumplimiento General", f"{st['cumplimiento_pct']}%",
+                  f"Personal: {st['personal']['acreditados']}/{st['personal']['total']}",
+                  f"Equipos: {st['equipos']['acreditados']}/{st['equipos']['total']}",
+                  f"Alertas: {st['alertas_activas']}", ""])
+    # Dotación
+    for d in data["dotacion"]:
+        filas.append([
+            "DOTACIÓN", d["nombre"], d["tipo"], d["cargo_o_tipo"],
+            d["estado"].upper(), f"{d['cumplimiento_pct']}%",
+            f"Aprobados: {d['docs_ok']}/{d['docs_total']}"
+        ])
+    # Vencimientos
+    for v in data["vencimientos"]:
+        filas.append([
+            "ALERTAS_VENCIMIENTO", v["ambito"], "Documento", v["documento"],
+            v["estado"], v["vence"], f"Días: {v['dias_restantes']}"
+        ])
+    return cab, filas
+
+
+def excel_reporte_contrato(data: dict) -> bytes:
+    """Genera un archivo XLSX formateado profesionalmente para el reporte por contrato."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Contrato {data.get('contrato_codigo') or 'Reporte'}"[:31]
+
+    navy_fill = PatternFill("solid", fgColor="1F4E79")
+    header_fill = PatternFill("solid", fgColor="2F5597")
+    white_bold = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    navy_bold = Font(name="Calibri", size=11, bold=True, color="1F4E79")
+    normal = Font(name="Calibri", size=10)
+
+    # 1. Título principal
+    ws.merge_cells("A1:G1")
+    t_cell = ws["A1"]
+    t_cell.value = f"ACREDITTIA — REPORTE DE CUMPLIMIENTO: {data['contrato_nombre']}"
+    t_cell.font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    t_cell.fill = navy_fill
+    t_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 30
+
+    # 2. Metadatos del contrato
+    ws["A3"] = "Contrato:"
+    ws["B3"] = f"{data['contrato_nombre']} ({data['contrato_codigo']})"
+    ws["A4"] = "Faena:"
+    ws["B4"] = data['faena']
+    ws["A5"] = "Mandante:"
+    ws["B5"] = data['mandante']
+    ws["D3"] = "Unidad de Negocio:"
+    ws["E3"] = data.get('unidad_negocio') or "—"
+    ws["D4"] = "Fecha Generación:"
+    ws["E4"] = data['fecha_generacion']
+    ws["D5"] = "Cumplimiento General:"
+    ws["E5"] = f"{data['stats']['cumplimiento_pct']}%"
+
+    for r in range(3, 6):
+        for c in ("A", "D"):
+            ws[f"{c}{r}"].font = navy_bold
+        for c in ("B", "E"):
+            ws[f"{c}{r}"].font = normal
+
+    # 3. Resumen de Dotación y Cumplimiento
+    ws["A7"] = "RESUMEN DE FRENTES"
+    ws["A7"].font = navy_bold
+    ws.append(["Frente", "Total", "Acreditados / OK", "% Cumplimiento", "Alertas Activas", "", ""])
+    row_res_hdr = ws.max_row
+    for col_idx in range(1, 6):
+        c = ws.cell(row=row_res_hdr, column=col_idx)
+        c.font = white_bold
+        c.fill = header_fill
+
+    st = data["stats"]
+    p_pct = round(100 * st["personal"]["acreditados"] / st["personal"]["total"]) if st["personal"]["total"] else 100
+    e_pct = round(100 * st["equipos"]["acreditados"] / st["equipos"]["total"]) if st["equipos"]["total"] else 100
+    d_pct = round(100 * st["docs_empresa"]["ok"] / st["docs_empresa"]["total"]) if st["docs_empresa"]["total"] else 100
+
+    ws.append(["Personal (Trabajadores)", st["personal"]["total"], st["personal"]["acreditados"], f"{p_pct}%", st["alertas_activas"]])
+    ws.append(["Equipos y Maquinaria", st["equipos"]["total"], st["equipos"]["acreditados"], f"{e_pct}%", "—"])
+    ws.append(["Documentos de Empresa", st["docs_empresa"]["total"], st["docs_empresa"]["ok"], f"{d_pct}%", "—"])
+
+    # 4. Tabla de Personal y Equipos
+    ws.append([])
+    ws.append(["PERSONAL Y EQUIPOS ASOCIADOS AL CONTRATO"])
+    ws.cell(row=ws.max_row, column=1).font = navy_bold
+
+    headers_dot = ["Tipo", "Nombre / Identificador", "RUT / Patente", "Cargo / Tipo", "Estado", "Cumplimiento %", "Docs Aprobados"]
+    ws.append(headers_dot)
+    row_dot_hdr = ws.max_row
+    for col_idx in range(1, 8):
+        c = ws.cell(row=row_dot_hdr, column=col_idx)
+        c.font = white_bold
+        c.fill = header_fill
+
+    for d in data.get("dotacion", []):
+        ws.append([
+            d["tipo"], d["nombre"], d["identificador"], d["cargo_o_tipo"],
+            d["estado"].upper(), f"{d['cumplimiento_pct']}%", f"{d['docs_ok']}/{d['docs_total']}"
+        ])
+
+    # 5. Tabla de Documentos Vencidos o Por Vencer
+    ws.append([])
+    ws.append(["DOCUMENTOS VENCIDOS O PRÓXIMOS A VENCER"])
+    ws.cell(row=ws.max_row, column=1).font = navy_bold
+
+    headers_venc = ["Ámbito / Sujeto", "Documento Requerido", "Estado", "Fecha Vencimiento", "Días Restantes"]
+    ws.append(headers_venc)
+    row_venc_hdr = ws.max_row
+    for col_idx in range(1, 6):
+        c = ws.cell(row=row_venc_hdr, column=col_idx)
+        c.font = white_bold
+        c.fill = header_fill
+
+    vencs = data.get("vencimientos", [])
+    if not vencs:
+        ws.append(["Sin documentos vencidos o por vencer", "—", "OK", "—", "—"])
+    else:
+        for v in vencs:
+            ws.append([
+                v["ambito"], v["documento"], v["estado"], v["vence"], v["dias_restantes"]
+            ])
+
+    for col in ws.columns:
+        col_letter = get_column_letter(col[0].column)
+        max_len = 0
+        for cell in col:
+            val = str(cell.value or "")
+            if cell.coordinate in ("A1", "A2"):
+                continue
+            max_len = max(max_len, len(val))
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 45)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def pdf_reporte_contrato(data: dict) -> bytes:
+    """Genera un archivo PDF estructurado con PyMuPDF para el reporte por contrato."""
+    try:
+        import pymupdf
+    except ImportError:
+        cab, filas = _filas_reporte_contrato(None, None, {}, None)
+        return csv_bytes(cab, filas)
+
+    doc = pymupdf.open()
+    width, height = 842, 595  # Landscape A4
+    page = doc.new_page(width=width, height=height)
+
+    def draw_header(p, page_num):
+        p.draw_rect(pymupdf.Rect(30, 20, width - 30, 50), color=None, fill=(0.12, 0.31, 0.47))
+        p.insert_text(pymupdf.Point(40, 39), "ACREDITTIA", fontsize=13, fontname="helv", color=(1, 1, 1))
+        p.insert_text(pymupdf.Point(135, 39), f"|  Reporte de Cumplimiento: {data['contrato_nombre']}", fontsize=11, fontname="helv", color=(0.9, 0.95, 1))
+        p.insert_text(pymupdf.Point(width - 120, height - 15), f"Página {page_num}", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.5))
+        p.insert_text(pymupdf.Point(40, height - 15), f"Emitido el {data['fecha_generacion']} — Confidencial ACREDITTIA", fontsize=8, fontname="helv", color=(0.5, 0.5, 0.5))
+
+    page_num = 1
+    draw_header(page, page_num)
+
+    # Box metadata & KPIs
+    page.draw_rect(pymupdf.Rect(30, 60, width - 30, 115), color=(0.8, 0.85, 0.9), fill=(0.96, 0.98, 1.0))
+    st = data["stats"]
+    meta_text = (
+        f"Contrato: {data['contrato_nombre']} (Cód: {data['contrato_codigo'] or 'S/C'})   |   "
+        f"Faena: {data['faena']}   |   Mandante: {data['mandante']}   |   U.N.: {data.get('unidad_negocio') or 'General'}\n"
+        f"Cumplimiento General: {st['cumplimiento_pct']}%   |   "
+        f"Personal Acreditado: {st['personal']['acreditados']}/{st['personal']['total']}   |   "
+        f"Equipos Acreditados: {st['equipos']['acreditados']}/{st['equipos']['total']}   |   "
+        f"Alertas Activas: {st['alertas_activas']}"
+    )
+    page.insert_textbox(pymupdf.Rect(40, 68, width - 40, 110), meta_text, fontsize=9, fontname="helv", color=(0.1, 0.15, 0.2))
+
+    y = 135
+    # Sección 1: Dotación
+    page.insert_text(pymupdf.Point(30, y), "PERSONAL Y EQUIPOS ASOCIADOS", fontsize=10, fontname="helv", color=(0.12, 0.31, 0.47))
+    y += 8
+
+    col_x = [30, 95, 265, 375, 525, 605, 695, width - 30]
+    headers = ["Tipo", "Nombre / Identificador", "RUT / Patente", "Cargo / Tipo", "Estado", "% Cump.", "Docs OK"]
+    page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 16), color=None, fill=(0.12, 0.31, 0.47))
+    for i, h in enumerate(headers):
+        page.insert_text(pymupdf.Point(col_x[i] + 4, y + 12), h, fontsize=8, fontname="helv", color=(1, 1, 1))
+    y += 18
+
+    dotacion = data.get("dotacion", [])
+    if not dotacion:
+        page.insert_text(pymupdf.Point(40, y + 12), "No hay trabajadores ni equipos registrados en este contrato.", fontsize=8, fontname="helv", color=(0.4, 0.4, 0.4))
+        y += 20
+    else:
+        for idx, row in enumerate(dotacion):
+            if y > height - 60:
+                page = doc.new_page(width=width, height=height)
+                page_num += 1
+                draw_header(page, page_num)
+                y = 65
+                page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 16), color=None, fill=(0.12, 0.31, 0.47))
+                for i, h in enumerate(headers):
+                    page.insert_text(pymupdf.Point(col_x[i] + 4, y + 12), h, fontsize=8, fontname="helv", color=(1, 1, 1))
+                y += 18
+
+            bg = (0.97, 0.98, 0.99) if idx % 2 == 1 else (1, 1, 1)
+            page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 14), color=None, fill=bg)
+            vals = [
+                row["tipo"],
+                str(row["nombre"])[:28],
+                str(row["identificador"]),
+                str(row["cargo_o_tipo"])[:24],
+                row["estado"].upper(),
+                f"{row['cumplimiento_pct']}%",
+                f"{row['docs_ok']}/{row['docs_total']}"
+            ]
+            for i, val in enumerate(vals):
+                page.insert_text(pymupdf.Point(col_x[i] + 4, y + 10), str(val), fontsize=7.5, fontname="helv", color=(0.1, 0.1, 0.1))
+            y += 14
+
+    y += 15
+    # Sección 2: Vencimientos
+    if y > height - 110:
+        page = doc.new_page(width=width, height=height)
+        page_num += 1
+        draw_header(page, page_num)
+        y = 65
+
+    page.insert_text(pymupdf.Point(30, y), "DOCUMENTOS VENCIDOS O PRÓXIMOS A VENCER", fontsize=10, fontname="helv", color=(0.8, 0.2, 0.1))
+    y += 8
+    col_v = [30, 240, 520, 620, 720, width - 30]
+    h_v = ["Sujeto / Ámbito", "Documento", "Estado", "Vencimiento", "Días"]
+    page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 16), color=None, fill=(0.8, 0.2, 0.1))
+    for i, h in enumerate(h_v):
+        page.insert_text(pymupdf.Point(col_v[i] + 4, y + 12), h, fontsize=8, fontname="helv", color=(1, 1, 1))
+    y += 18
+
+    vencs = data.get("vencimientos", [])
+    if not vencs:
+        page.insert_text(pymupdf.Point(40, y + 12), "No existen documentos vencidos ni por vencer en este contrato.", fontsize=8, fontname="helv", color=(0.2, 0.5, 0.2))
+        y += 20
+    else:
+        for idx, row in enumerate(vencs):
+            if y > height - 40:
+                page = doc.new_page(width=width, height=height)
+                page_num += 1
+                draw_header(page, page_num)
+                y = 65
+                page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 16), color=None, fill=(0.8, 0.2, 0.1))
+                for i, h in enumerate(h_v):
+                    page.insert_text(pymupdf.Point(col_v[i] + 4, y + 12), h, fontsize=8, fontname="helv", color=(1, 1, 1))
+                y += 18
+            bg = (1.0, 0.96, 0.96) if idx % 2 == 1 else (1, 1, 1)
+            page.draw_rect(pymupdf.Rect(30, y, width - 30, y + 14), color=None, fill=bg)
+            vals = [
+                str(row["ambito"])[:35],
+                str(row["documento"])[:45],
+                row["estado"],
+                row["vence"],
+                str(row["dias_restantes"])
+            ]
+            for i, val in enumerate(vals):
+                page.insert_text(pymupdf.Point(col_v[i] + 4, y + 10), str(val), fontsize=7.5, fontname="helv", color=(0.1, 0.1, 0.1))
+            y += 14
+
+    return doc.tobytes()
+
+
 CONSTRUCTORES = {
     "personal": _filas_personal,
     "equipos": _filas_equipos,
@@ -805,6 +1180,7 @@ CONSTRUCTORES = {
     "alertas": _filas_alertas,
     "contratos": _filas_contratos,
     "matriz": _filas_matriz,
+    "reporte_contrato": _filas_reporte_contrato,
 }
 
 
@@ -1171,6 +1547,62 @@ def eliminar_programado(programado_id: uuid.UUID, db: Session = Depends(get_db),
     db.commit()
     return {"ok": True, "id": str(programado_id), "nombre": nombre,
             "reportes_conservados": True}
+
+
+# ------------------------------------------------------------------- resumen
+@router.get("/resumen")
+def resumen(
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """KPIs del módulo de Reportes (§15.3, H-42)."""
+    _solo_empresa(user)
+    scope = contrato_scope(user)
+    hace_30d = datetime.now(timezone.utc) - timedelta(days=30)
+
+    # 1. Reportes generados en últimos 30 días
+    q_rep = select(func.count()).select_from(Reporte).where(
+        Reporte.company_id == cid,
+        Reporte.created_at >= hace_30d,
+    )
+    reportes_generados = db.scalar(q_rep) or 0
+
+    # 2. Programados activos
+    q_prog = select(func.count()).select_from(ReporteProgramado).where(
+        ReporteProgramado.company_id == cid,
+        ReporteProgramado.activo.is_(True),
+    )
+    programados_activos = db.scalar(q_prog) or 0
+
+    # 3. Cumplimiento promedio en scope
+    q_cont = select(Contrato).where(Contrato.company_id == cid)
+    if scope:
+        q_cont = q_cont.where(Contrato.id == scope)
+    contratos = list(db.scalars(q_cont).all())
+
+    from .contratos import _stats
+    if contratos:
+        cumplimientos = [_stats(db, c)["cumplimiento_pct"] for c in contratos]
+        cumplimiento_promedio = round(sum(cumplimientos) / len(cumplimientos))
+    else:
+        cumplimiento_promedio = 100
+
+    # 4. Alertas activas en scope
+    q_alertas = select(func.count()).select_from(Alerta).where(
+        Alerta.company_id == cid,
+        Alerta.resuelta_at.is_(None),
+    )
+    if scope:
+        q_alertas = q_alertas.where(Alerta.contrato_id == scope)
+    alertas_activas = db.scalar(q_alertas) or 0
+
+    return {
+        "reportes_generados_30d": reportes_generados,
+        "programados_activos": programados_activos,
+        "cumplimiento_promedio": cumplimiento_promedio,
+        "alertas_activas": alertas_activas,
+    }
 
 
 # ------------------------------------------------------------------- detalle

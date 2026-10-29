@@ -37,7 +37,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from . import nvidia_nim
+from . import ia_consultas
 from ..database import worker_session
 from ..models import (
     Alerta,
@@ -393,9 +393,9 @@ def revisar_documento(
                     ],
                 }
 
-                nvidia_nim.revisar_documento_job(archivo.blob_path, contexto, payload)
+                ia_consultas.revisar_documento_job(archivo.blob_path, contexto, payload)
             except Exception as _e:
-                logger.error("Error al despachar job nvidia_nim revisión: %s", _e)
+                logger.error("Error al despachar job ia_consultas revisión: %s", _e)
 
             db.commit()
 
@@ -1003,9 +1003,9 @@ def extraer_carpeta_arranque(
 
             # Integración Nvidia NIM / OpenCode (Job asíncrono escribe en ../Consultas)
             try:
-                nvidia_nim.extraer_requisitos_job(blob_path, "arranque", propuesta)
+                ia_consultas.extraer_requisitos_job(blob_path, "arranque", propuesta)
             except Exception as _e:
-                logger.error("Error al despachar job nvidia_nim: %s", _e)
+                logger.error("Error al despachar job ia_consultas: %s", _e)
 
             _reescribir_hallazgos(
                 db,
@@ -1212,16 +1212,36 @@ def generar_reporte(reporte_id: str, company_id: str) -> None:
             scope = filtros.get("contrato_id")
             scope_contrato = uuid.UUID(str(scope)) if scope else None
 
-            cabeceras, filas = filas_de_recurso(
-                db, cid, recurso, filtros, scope_contrato
-            )
+            if recurso == "reporte_contrato":
+                from ..routers.reportes import (
+                    datos_reporte_contrato,
+                    excel_reporte_contrato,
+                    pdf_reporte_contrato,
+                )
 
-            formato = params.get("formato_export") or rep.formato
-            if formato == "pdf":
-                data = pdf_simple(rep.nombre, _lineas_tabla(cabeceras, filas))
-                ext = "pdf"
+                cid_contrato = filtros.get("contrato_id") or scope_contrato
+                if not cid_contrato:
+                    raise ValueError("contrato_id es requerido para reporte_contrato")
+                c_data = datos_reporte_contrato(db, cid, uuid.UUID(str(cid_contrato)))
+                formato = params.get("formato_export") or rep.formato
+                if formato == "pdf":
+                    data = pdf_reporte_contrato(c_data)
+                    ext = "pdf"
+                else:
+                    data = excel_reporte_contrato(c_data)
+                    ext = "xlsx"
+                filas = c_data.get("dotacion", [])
             else:
-                data, ext = serializar(formato, cabeceras, filas, rep.nombre)
+                cabeceras, filas = filas_de_recurso(
+                    db, cid, recurso, filtros, scope_contrato
+                )
+
+                formato = params.get("formato_export") or rep.formato
+                if formato == "pdf":
+                    data = pdf_simple(rep.nombre, _lineas_tabla(cabeceras, filas))
+                    ext = "pdf"
+                else:
+                    data, ext = serializar(formato, cabeceras, filas, rep.nombre)
 
             blob_path = f"reportes/{cid}/{rep.id}.{ext}"
             get_storage().save(blob_path, data)
