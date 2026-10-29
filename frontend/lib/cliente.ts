@@ -298,6 +298,12 @@ export const contratos = {
   unidadesNegocio: () =>
     api<Conjunto<{ nombre: string }>>("/contratos/unidades-negocio"),
 
+  plantillasDisponibles: () =>
+    api<{ items: any[]; total: number }>("/contratos/plantillas-disponibles"),
+
+  plantillaResumen: (id: string) =>
+    api<any>(`/contratos/${id}/plantilla-resumen`),
+
   mandantes: () => api<Conjunto<string>>("/contratos/mandantes"),
 
   agrupadoPorMandante: (params?: { unidad_negocio?: string }) =>

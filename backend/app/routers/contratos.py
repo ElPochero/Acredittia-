@@ -31,7 +31,7 @@ from ..database import get_db
 from ..deps import (Page, aplicar_orden, contrato_permitido, contrato_scope, err,
                     get_company_id, get_current_user, paginacion, sobre)
 from ..models import (
-    Actividad, Alerta, Contrato, Documento, DocumentoArchivo, Faena, IaReview,
+    Actividad, Alerta, Contrato, ContratoPlantillaOverride, ContratoRequisito, Documento, DocumentoArchivo, Faena, IaReview,
     Sujeto, User,
 )
 from ..services import actividad
@@ -86,6 +86,7 @@ class ContratoIn(BaseModel):
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
     requisitos_custom: dict[str, list[str]] | None = None
+    plantilla_contrato_id: uuid.UUID | None = None
 
 
 class ContratoPatch(BaseModel):
@@ -351,6 +352,56 @@ def unidades_negocio(user: User = Depends(get_current_user)):
     return {"items": [{"nombre": u} for u in UNIDADES_NEGOCIO]}
 
 
+@router.get("/plantillas-disponibles")
+def plantillas_disponibles(db: Session = Depends(get_db),
+                           cid: uuid.UUID = Depends(get_company_id),
+                           user: User = Depends(get_current_user)):
+    """Listado de contratos utilizables como planillas reutilizables (§8.3, H-41, Punto 17)."""
+    q = select(Contrato).options(joinedload(Contrato.faena)).where(
+        Contrato.company_id == cid
+    ).order_by(Contrato.nombre)
+    scope = contrato_scope(user)
+    if scope:
+        q = q.where(Contrato.id == scope)
+    contratos = list(db.scalars(q).unique().all())
+
+    salida = []
+    for c in contratos:
+        f = c.faena
+        ovs = db.scalars(select(ContratoPlantillaOverride).where(
+            ContratoPlantillaOverride.contrato_id == c.id)).all()
+        overrides_info = {ov.ambito: len(ov.requisito_template_ids or []) for ov in ovs}
+
+        reqs_custom = db.scalars(select(ContratoRequisito).where(
+            ContratoRequisito.contrato_id == c.id,
+            ContratoRequisito.activo.is_(True))).all()
+        custom_por_ambito: dict[str, int] = {}
+        for r in reqs_custom:
+            custom_por_ambito[r.ambito] = custom_por_ambito.get(r.ambito, 0) + 1
+
+        docs_empresa = db.scalar(select(func.count(Documento.id)).where(
+            Documento.contrato_id == c.id, Documento.sujeto_id.is_(None))) or 0
+
+        total_reqs = sum(overrides_info.values()) + len(reqs_custom) + (docs_empresa if not overrides_info.get("empresa") else 0)
+
+        salida.append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "estado": c.estado,
+            "faena_id": str(c.faena_id),
+            "faena_nombre": f.nombre if f else "Faena general",
+            "mandante": c.mandante or (f.mandante if f else "Sin mandante"),
+            "unidad_negocio": c.unidad_negocio,
+            "overrides": overrides_info,
+            "requisitos_custom_total": len(reqs_custom),
+            "custom_por_ambito": custom_por_ambito,
+            "total_requisitos": total_reqs,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    return {"items": salida, "total": len(salida)}
+
+
 @router.get("")
 def listar(faena_id: uuid.UUID | None = Query(None),
            estado: str | None = Query(None),
@@ -445,8 +496,43 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
         db.rollback()
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
 
+    if body.plantilla_contrato_id:
+        fuente = db.get(Contrato, body.plantilla_contrato_id)
+        if not fuente or fuente.company_id != cid:
+            raise err(404, "PLANTILLA_NO_ENCONTRADA", "El contrato plantilla no existe")
+        ovs_fuente = db.scalars(select(ContratoPlantillaOverride).where(
+            ContratoPlantillaOverride.contrato_id == fuente.id)).all()
+        for ov in ovs_fuente:
+            nuevo_ov = ContratoPlantillaOverride(
+                company_id=cid,
+                contrato_id=c.id,
+                ambito=ov.ambito,
+                requisito_template_ids=list(ov.requisito_template_ids or [])
+            )
+            db.add(nuevo_ov)
+        reqs_fuente = db.scalars(select(ContratoRequisito).where(
+            ContratoRequisito.contrato_id == fuente.id,
+            ContratoRequisito.activo.is_(True))).all()
+        for rf in reqs_fuente:
+            cr = ContratoRequisito(
+                company_id=cid,
+                contrato_id=c.id,
+                ambito=rf.ambito,
+                titulo=rf.titulo,
+                obligatorio=rf.obligatorio,
+                cargo_id=rf.cargo_id,
+                origen="custom",
+                requisito_template_id=rf.requisito_template_id,
+                ejemplo_clave=rf.ejemplo_clave,
+                vigencia_meses=rf.vigencia_meses,
+                vinculo_tipo=rf.vinculo_tipo,
+                activo=True
+            )
+            db.add(cr)
+        db.flush()
+
     if body.requisitos_custom:
-        from ..models import ContratoRequisito
+
         for ambito, reqs in body.requisitos_custom.items():
             if ambito not in ("empresa", "personal", "equipos", "licencia"):
                 continue
@@ -482,6 +568,56 @@ def detalle(contrato_id: uuid.UUID, db: Session = Depends(get_db),
             cid: uuid.UUID = Depends(get_company_id),
             user: User = Depends(get_current_user)):
     return _out(db, _get_contrato(db, cid, contrato_id, user))
+
+
+@router.get("/{contrato_id}/plantilla-resumen")
+def plantilla_resumen(contrato_id: uuid.UUID,
+                      db: Session = Depends(get_db),
+                      cid: uuid.UUID = Depends(get_company_id),
+                      user: User = Depends(get_current_user)):
+    """Resumen completo de requisitos de una planilla para previsualización."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    ovs = db.scalars(select(ContratoPlantillaOverride).where(
+        ContratoPlantillaOverride.contrato_id == c.id)).all()
+    overrides_dict = {ov.ambito: list(ov.requisito_template_ids or []) for ov in ovs}
+
+    reqs_custom = db.scalars(select(ContratoRequisito).where(
+        ContratoRequisito.contrato_id == c.id,
+        ContratoRequisito.activo.is_(True))).all()
+
+    from ..services.checklist import plantilla_efectiva
+    ambitos_out = {}
+    for amb in ("empresa", "personal", "equipo", "emsipor"):
+        templates = plantilla_efectiva(db, amb, contrato_id=c.id, faena_id=c.faena_id)
+        custom_amb = [r for r in reqs_custom if r.ambito == amb]
+        items = []
+        for t in templates:
+            items.append({
+                "titulo": t.titulo,
+                "origen": "override" if amb in overrides_dict else "base",
+                "obligatorio": t.obligatorio,
+                "tipo": t.tipo,
+                "vigencia_meses": t.vigencia_meses,
+            })
+        for cr in custom_amb:
+            items.append({
+                "titulo": cr.titulo,
+                "origen": "custom",
+                "obligatorio": cr.obligatorio,
+                "tipo": "documento",
+                "vigencia_meses": cr.vigencia_meses,
+            })
+        ambitos_out[amb] = items
+
+    return {
+        "contrato_id": str(c.id),
+        "nombre": c.nombre,
+        "codigo": c.codigo,
+        "faena": c.faena.nombre if c.faena else None,
+        "mandante": c.mandante,
+        "requisitos_por_ambito": ambitos_out,
+        "total": sum(len(v) for v in ambitos_out.values()),
+    }
 
 
 @router.patch("/{contrato_id}")

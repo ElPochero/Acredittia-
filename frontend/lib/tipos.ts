@@ -473,6 +473,7 @@ export type ContratoIn = {
     equipos?: string[];
     licencia?: string[];
   } | null;
+  plantilla_contrato_id?: string | null;
 };
 
 export type ContratoPatch = {
