@@ -318,10 +318,20 @@ def motor_admin(esquema):
 @pytest.fixture(scope="session")
 def _app_arrancada(esquema):
     """TestClient con el lifespan ejecutado una sola vez (siembra catálogos)."""
+    from app import seeds
+    from app.database import SessionLocal, reset_ctx, set_ctx
     from app.main import app
+
+    with SessionLocal() as db:
+        set_ctx(is_admin=True)
+        try:
+            seeds.run(db)
+        finally:
+            reset_ctx()
 
     with TestClient(app) as cliente:
         yield cliente
+
 
 
 @pytest.fixture
