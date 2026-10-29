@@ -934,3 +934,12 @@ export const certificacion = {
 };
 
 
+
+
+export const emails = {
+  preview: (contrato_id: string, plantilla: string) =>
+    api<{ plantilla: string; asunto: string; html: string; text: string }>(
+      `/emails/preview/${plantilla}`, { query: { contrato_id } }),
+  test: (body: { plantilla: string; para?: string }) =>
+    api<{ enviados: number; asunto: string }>("/emails/test", { body }),
+};

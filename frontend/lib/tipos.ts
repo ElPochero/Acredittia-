@@ -1254,3 +1254,10 @@ export type CumplimientoDashboardData = {
   alertas: string[];
 };
 
+
+export interface EmailPreview {
+  plantilla: string;
+  asunto: string;
+  html: string;
+  text: string;
+}

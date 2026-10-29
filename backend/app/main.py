@@ -28,7 +28,7 @@ from .routers import (actividad, admin, alertas, auth, blobs, calendario, cargos
                       company, contrato_requisitos, contratos, dashboard,
                       documentos, exportar, faenas, ia, integraciones, licencia_interna,
                       notificaciones, periodos_laborales, personas, plataformas, reportes,
-                      requisitos, sujetos, suscripcion, webhooks)
+                      requisitos, sujetos, suscripcion, emails, webhooks)
 # Importar los módulos de tareas registra las entradas de TAREAS que usa la cola.
 from .services import integraciones as _svc_integraciones  # noqa: F401
 from .services import tasks as _svc_tasks  # noqa: F401
@@ -218,6 +218,7 @@ app.include_router(suscripcion.router_planes, prefix=API)
 app.include_router(suscripcion.router, prefix=API)
 app.include_router(suscripcion.router_facturas, prefix=API)
 app.include_router(webhooks.router, prefix=API)
+app.include_router(emails.router, prefix=API)
 
 
 @app.get("/health")
