@@ -106,7 +106,7 @@ export default function AppHeader({
       <div className="hright">
         <button
           className="hico-btn"
-          onClick={() => alert("Centro de ayuda — próximamente")}
+          onClick={() => (window as any).abrirCentroAyuda?.()}
           title="Centro de ayuda"
         >
           ?

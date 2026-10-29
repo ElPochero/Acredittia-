@@ -1186,12 +1186,17 @@ export type Integracion = {
   nombre: string;
   estado: EstadoIntegracion;
   config: Record<string, unknown>;
+  frecuencia?: string | null;
+  credenciales_ref?: string | null;
+  credenciales_configuradas?: boolean;
+  conector_disponible?: boolean;
   ultima_sync_at: string | null;
   syncs_exitosas: number;
   syncs_fallidas: number;
   registros_sincronizados: number;
   ultimo_error: string | null;
   created_at: string | null;
+  updated_at?: string | null;
 };
 
 export type SyncLog = {

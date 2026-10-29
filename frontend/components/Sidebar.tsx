@@ -231,7 +231,7 @@ export default function Sidebar({
           </Link>
           <a
             className="snavi"
-            onClick={() => alert("Centro de ayuda — próximamente")}
+            onClick={() => (window as any).abrirCentroAyuda?.()}
             onMouseEnter={(e) => mostrarTip(e, "Ayuda")}
             onMouseLeave={() => setTip(null)}
             style={{ cursor: "pointer" }}
