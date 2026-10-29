@@ -383,6 +383,8 @@ class Contrato(Base):
     # Unidad de negocio a la que pertenece el contrato (v14). Es lo que agrupa
     # el listado y lo que da acceso a los encargados jerárquicos de la unidad.
     unidad_negocio: Mapped[str | None] = mapped_column(Text)
+    # Mandante libre definido en el contrato (v17). Fallback a faenas.mandante.
+    mandante: Mapped[str | None] = mapped_column(Text)
     # Configuración de alertas IA del contrato (v15): días de anticipación del
     # aviso de vencimiento, cada cuántos días se reenvía y cada cuántos se
     # recuerda la documentación faltante. Las lee el cron diario.
@@ -1101,9 +1103,9 @@ class ChatHistorial(Base):
 
 
 class DocumentoChunk(Base):
-    """Chunk de texto con embedding para RAG (v11, script 11_rag_pgvector.sql).
+    """Chunk de texto con embedding para RAG (v16, script 16_gemini_embeddings.sql).
 
-    El embedding es `vector(2048)` de `nvidia/nemotron-3-embed-1b` (NIM).
+    El embedding es `vector(768)` de `text-embedding-004` (Google Gemini).
     Aislamiento multi-tenant por `company_id` con RLS+FORCE (p_tenant).
     """
 
@@ -1117,7 +1119,7 @@ class DocumentoChunk(Base):
     ambito: Mapped[str | None] = mapped_column(Text)
     titulo: Mapped[str] = mapped_column(Text)
     texto: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list[float]] = mapped_column(VECTOR(2048))
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(768))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

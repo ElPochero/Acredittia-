@@ -265,6 +265,108 @@ def list_faenas(grupo: str | None = Query(None),
     return sobre(items, total, p)
 
 
+@router.get("/faenas/agrupado")
+def faenas_agrupado(
+    unidad_negocio: str | None = Query(None),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Contratos y personal agrupados por Faena (§6, H-19, Punto 14)."""
+    scope = contrato_scope(user)
+
+    # 1. Faenas de la plataforma
+    faenas = list(db.scalars(select(Faena).order_by(Faena.nombre)).all())
+    faena_map = {f.id: f for f in faenas}
+
+    # 2. Contratos de la empresa en scope
+    q_c = select(Contrato).where(Contrato.company_id == cid)
+    if scope:
+        q_c = q_c.where(Contrato.id == scope)
+    if unidad_negocio:
+        q_c = q_c.where(Contrato.unidad_negocio == unidad_negocio)
+    contratos = list(db.scalars(q_c.order_by(Contrato.nombre)).all())
+    contrato_ids = [c.id for c in contratos]
+
+    # 3. Agregación de dotación en SQL sin N+1
+    stats_personal: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+    stats_equipos: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+
+    if contrato_ids:
+        rows_sujetos = db.execute(
+            select(
+                Sujeto.contrato_id,
+                Sujeto.tipo,
+                func.count().label("total"),
+                func.count().filter(Sujeto.estado == "ok").label("acreditados")
+            ).where(
+                Sujeto.company_id == cid,
+                Sujeto.estado != "baja",
+                Sujeto.contrato_id.in_(contrato_ids)
+            ).group_by(Sujeto.contrato_id, Sujeto.tipo)
+        ).all()
+
+        for cid_c, tipo, tot, ok in rows_sujetos:
+            if tipo == "trabajador":
+                stats_personal[cid_c] = {"total": tot, "acreditados": ok}
+            elif tipo == "equipo":
+                stats_equipos[cid_c] = {"total": tot, "acreditados": ok}
+
+    agrupado: dict[uuid.UUID, list] = {f.id: [] for f in faenas}
+    for c in contratos:
+        if c.faena_id in agrupado:
+            p = stats_personal.get(c.id, {"total": 0, "acreditados": 0})
+            e = stats_equipos.get(c.id, {"total": 0, "acreditados": 0})
+            partes = []
+            if p["total"]: partes.append(p["acreditados"] / p["total"])
+            if e["total"]: partes.append(e["acreditados"] / e["total"])
+            cump_pct = round(100 * sum(partes) / len(partes)) if partes else 100
+
+            f_obj = faena_map.get(c.faena_id)
+            mandante_efectivo = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f_obj.mandante if f_obj else "") or "Sin Mandante"
+
+            agrupado[c.faena_id].append({
+                "id": str(c.id),
+                "nombre": c.nombre,
+                "codigo": c.codigo,
+                "mandante": mandante_efectivo,
+                "estado": c.estado,
+                "unidad_negocio": c.unidad_negocio,
+                "cumplimiento_pct": cump_pct,
+                "personal": p,
+                "equipos": e,
+            })
+
+    salida = []
+    for f in faenas:
+        conts = agrupado.get(f.id, [])
+        if scope and not conts:
+            continue
+
+        p_tot = sum(item["personal"]["total"] for item in conts)
+        p_ok = sum(item["personal"]["acreditados"] for item in conts)
+        e_tot = sum(item["equipos"]["total"] for item in conts)
+        e_ok = sum(item["equipos"]["acreditados"] for item in conts)
+        cump_prom = round(sum(item["cumplimiento_pct"] for item in conts) / len(conts)) if conts else 100
+
+        salida.append({
+            "faena_id": str(f.id),
+            "nombre": f.nombre,
+            "mandante_defecto": f.mandante,
+            "grupo": f.grupo,
+            "region": f.region,
+            "color": f.color,
+            "contratos_total": len(conts),
+            "cumplimiento_pct": cump_prom,
+            "personal": {"total": p_tot, "acreditados": p_ok},
+            "equipos": {"total": e_tot, "acreditados": e_ok},
+            "contratos": conts,
+        })
+
+    salida.sort(key=lambda x: (-x["contratos_total"], x["nombre"].lower()))
+    return salida
+
+
 @router.get("/faenas/{faena_id}")
 def detalle_faena(faena_id: uuid.UUID, db: Session = Depends(get_db),
                   cid: uuid.UUID = Depends(get_company_id),

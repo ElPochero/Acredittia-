@@ -294,8 +294,7 @@ def revisar_documento(
             if errores or review.resultado == "con_errores":
                 doc.estado = "falta"
 
-                # Desvincular y eliminar el archivo para obligar al usuario a subir uno nuevo
-                db.delete(archivo)
+                # El archivo se conserva para trazabilidad y descarga; el documento queda en falta
 
                 severidad = _peor(
                     [

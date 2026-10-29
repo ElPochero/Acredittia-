@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
     schema_dir: str = "/schema"
     schema_version_esperada: int = (
-        15  # scripts 01..15 aplicados (15 alertas IA por contrato)
+        17  # scripts 01..17 aplicados (17 mandante libre por contrato)
     )
     db_apply_schema_on_start: bool = False  # en Azure lo hace el job de migración
     db_rls_enabled: bool = True  # fija app.company_id/is_admin/user_id por request
@@ -53,23 +53,17 @@ class Settings(BaseSettings):
     keys_dir: str = "/data/keys"  # solo jwe_backend=local
     credencial_ttl_meses: int = 12
 
-    # --- Revisión IA: simulada | claude | nvidia | gemini ---------------
-    # `nvidia` queda como alias transitorio (advisory deprecated, ver
-    # services/nvidia_nim.py): get_reviewer() sigue resolviéndolo.
-    ia_backend: str = "simulada"
-    anthropic_api_key: str = ""
-    nvidia_nim_api_key: str = ""
+    # --- Revisión IA: simulada | gemini ------------------------------------
+    ia_backend: str = "gemini"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
     # Verificador post-generación del chat (Critic/Guardrail de razonabilidad).
-    # Modelo ligero y barato; el timeout acota la latencia extra en el peor caso.
     gemini_verifier_model: str = "gemini-1.5-flash"
     ia_verifier_enabled: bool = True
     ia_verifier_timeout_s: float = 6.0
-    # Embeddings para RAG (endpoint OpenAI-compatible de NIM).
-    # Verificado con la key actual: nemotron-3-embed-1b → 2048 dims.
-    nvidia_embedding_model: str = "nvidia/nemotron-3-embed-1b"
-    nvidia_embedding_dims: int = 2048
+    # Embeddings para RAG vía Google Gemini (OpenAI-compatible endpoint).
+    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_dims: int = 768
 
     # --- Notificaciones ----------------------------------------------------
     smtp_host: str = ""

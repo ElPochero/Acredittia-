@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..database import get_db
@@ -80,6 +80,8 @@ class ContratoIn(BaseModel):
     renovacion_automatica: bool = False
     # Unidad de negocio a la que pertenece el contrato (agrupa y da acceso).
     unidad_negocio: str | None = None
+    # Mandante libre por contrato (H-19, Punto 15). Fallback a faenas.mandante.
+    mandante: str | None = None
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
     ia_review_id: uuid.UUID | None = None
@@ -94,6 +96,7 @@ class ContratoPatch(BaseModel):
     renovacion_automatica: bool | None = None
     estado: str | None = None
     unidad_negocio: str | None = None
+    mandante: str | None = None
     # Configuración de alertas IA (v15). Ver `ALERTAS_ANTICIPACION`.
     alerta_anticipacion_dias: int | None = None
     alerta_frecuencia_dias: int | None = None
@@ -181,8 +184,11 @@ def _stats(db: Session, c: Contrato) -> dict:
 
 def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
     f = c.faena
+    m_efectivo = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante if f else None)
     d = {
         "id": str(c.id), "nombre": c.nombre, "codigo": c.codigo,
+        "mandante": m_efectivo,
+        "mandante_propio": c.mandante,
         "estado": c.estado,
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
@@ -204,6 +210,140 @@ def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
 # ============================================================================
 # §8.1 — CRUD
 # ============================================================================
+@router.get("/mandantes")
+def listar_mandantes(
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Lista los mandantes existentes en contratos y faenas para autocompletado (§8.1, H-19)."""
+    mandantes_faenas = db.scalars(
+        select(Faena.mandante).where(
+            Faena.mandante.isnot(None),
+            Faena.mandante != ""
+        ).distinct()
+    ).all()
+
+    mandantes_contratos = db.scalars(
+        select(Contrato.mandante).where(
+            Contrato.company_id == cid,
+            Contrato.mandante.isnot(None),
+            Contrato.mandante != ""
+        ).distinct()
+    ).all()
+
+    todos = set()
+    for m in list(mandantes_faenas) + list(mandantes_contratos):
+        if m and m.strip():
+            todos.add(m.strip())
+
+    return {"items": sorted(list(todos), key=lambda x: x.lower())}
+
+
+@router.get("/agrupado")
+def contratos_agrupado(
+    por: str = Query("mandante"),
+    unidad_negocio: str | None = Query(None),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Contratos y dotación agrupados por mandante efectivo (§8.1, H-19, Punto 15)."""
+    scope = contrato_scope(user)
+
+    q_c = select(Contrato).options(joinedload(Contrato.faena)).where(Contrato.company_id == cid)
+    if scope:
+        q_c = q_c.where(Contrato.id == scope)
+    if unidad_negocio:
+        q_c = q_c.where(Contrato.unidad_negocio == unidad_negocio)
+    contratos = list(db.scalars(q_c.order_by(Contrato.nombre)).unique().all())
+    contrato_ids = [c.id for c in contratos]
+
+    stats_personal: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+    stats_equipos: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+
+    if contrato_ids:
+        rows_sujetos = db.execute(
+            select(
+                Sujeto.contrato_id,
+                Sujeto.tipo,
+                func.count().label("total"),
+                func.count().filter(Sujeto.estado == "ok").label("acreditados")
+            ).where(
+                Sujeto.company_id == cid,
+                Sujeto.estado != "baja",
+                Sujeto.contrato_id.in_(contrato_ids)
+            ).group_by(Sujeto.contrato_id, Sujeto.tipo)
+        ).all()
+
+        for cid_c, tipo, tot, ok in rows_sujetos:
+            if tipo == "trabajador":
+                stats_personal[cid_c] = {"total": tot, "acreditados": ok}
+            elif tipo == "equipo":
+                stats_equipos[cid_c] = {"total": tot, "acreditados": ok}
+
+    grupos: dict[str, list] = {}
+    faenas_por_mandante: dict[str, dict[uuid.UUID, dict]] = {}
+
+    for c in contratos:
+        f = c.faena
+        mandante_norm = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante.strip() if f and f.mandante else None) or "Sin Mandante"
+        clave = mandante_norm
+
+        if clave not in grupos:
+            grupos[clave] = []
+            faenas_por_mandante[clave] = {}
+
+        p = stats_personal.get(c.id, {"total": 0, "acreditados": 0})
+        e = stats_equipos.get(c.id, {"total": 0, "acreditados": 0})
+        partes = []
+        if p["total"]: partes.append(p["acreditados"] / p["total"])
+        if e["total"]: partes.append(e["acreditados"] / e["total"])
+        cump_pct = round(100 * sum(partes) / len(partes)) if partes else 100
+
+        if f and f.id not in faenas_por_mandante[clave]:
+            faenas_por_mandante[clave][f.id] = {
+                "id": str(f.id),
+                "nombre": f.nombre,
+                "region": f.region,
+                "color": f.color,
+            }
+
+        grupos[clave].append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "estado": c.estado,
+            "mandante": mandante_norm,
+            "unidad_negocio": c.unidad_negocio,
+            "faena": {"id": str(f.id), "nombre": f.nombre, "color": f.color} if f else None,
+            "cumplimiento_pct": cump_pct,
+            "personal": p,
+            "equipos": e,
+        })
+
+    salida = []
+    for m_nombre, conts in grupos.items():
+        p_tot = sum(item["personal"]["total"] for item in conts)
+        p_ok = sum(item["personal"]["acreditados"] for item in conts)
+        e_tot = sum(item["equipos"]["total"] for item in conts)
+        e_ok = sum(item["equipos"]["acreditados"] for item in conts)
+        cump_prom = round(sum(item["cumplimiento_pct"] for item in conts) / len(conts)) if conts else 100
+
+        salida.append({
+            "mandante": m_nombre,
+            "contratos_total": len(conts),
+            "cumplimiento_pct": cump_prom,
+            "personal": {"total": p_tot, "acreditados": p_ok},
+            "equipos": {"total": e_tot, "acreditados": e_ok},
+            "faenas": list(faenas_por_mandante[m_nombre].values()),
+            "contratos": conts,
+        })
+
+    salida.sort(key=lambda x: (-x["contratos_total"], x["mandante"].lower()))
+    return salida
+
+
 @router.get("/unidades-negocio")
 def unidades_negocio(user: User = Depends(get_current_user)):
     """Catálogo de unidades de negocio. Va antes que `/{contrato_id}` porque
@@ -290,11 +430,13 @@ def crear(body: ContratoIn, db: Session = Depends(get_db),
             raise err(404, "NO_ENCONTRADO", "El job de IA no existe")
         origen = review.id
 
+    m_val = body.mandante.strip() if body.mandante and body.mandante.strip() else None
     c = Contrato(company_id=cid, faena_id=body.faena_id, nombre=body.nombre.strip(),
                  codigo=body.codigo, fecha_inicio=body.fecha_inicio,
                  fecha_termino=body.fecha_termino,
                  renovacion_automatica=body.renovacion_automatica,
                  unidad_negocio=unidad,
+                 mandante=m_val,
                  origen_ia_review_id=origen)
     db.add(c)
     try:
@@ -361,6 +503,8 @@ def editar(contrato_id: uuid.UUID, body: ContratoPatch,
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
     if "unidad_negocio" in data:
         data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
+    if "mandante" in data:
+        data["mandante"] = data["mandante"].strip() if data["mandante"] and data["mandante"].strip() else None
     if "alerta_anticipacion_dias" in data:
         minimo, maximo = ALERTAS_ANTICIPACION
         if (data["alerta_anticipacion_dias"] is None

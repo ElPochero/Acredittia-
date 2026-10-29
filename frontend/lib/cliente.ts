@@ -25,7 +25,7 @@ import type {
   Contrato, ContratoCreado, ContratoIn, ContratoPatch, Credencial,
   CumplimientoContrato, Documento, DocumentoFila, DownloadUrl, Ejemplo, Empresa,
   EmpresaDetalle, EquipoIn, EquipoPatch, EstadoAcceso, Eventos, Faena,
-  FaenaAdmin, FaenaDetalle, Integracion, JobEncolado, Kpis, LicenciaInterna,
+  FaenaAdmin, FaenaAgrupada, FaenaDetalle, MandanteAgrupado, Integracion, JobEncolado, Kpis, LicenciaInterna,
   Matriz, OlvidoPassword, Pagina, ParamsAlertas, ParamsDocumentos, ParamsEquipos,
   ParamsPagina, ParamsPersonal, PerfilActualizado, Persona, PlantillaAdmin,
   PlantillaRequisito, PlataformaContrato, PlataformaFaena, ProximoVencimiento,
@@ -179,6 +179,9 @@ export const faenas = {
     mandante?: string;
   }) => api<Pagina<Faena>>("/faenas", { query: q(params) }),
 
+  agrupado: (params?: { unidad_negocio?: string }) =>
+    api<FaenaAgrupada[]>("/faenas/agrupado", { query: q(params) }),
+
   detalle: (id: string) => api<FaenaDetalle>(`/faenas/${id}`),
 
   plataformas: (id: string, params?: ParamsPagina) =>
@@ -294,6 +297,11 @@ export const contratos = {
   /** Catálogo cerrado de unidades de negocio. */
   unidadesNegocio: () =>
     api<Conjunto<{ nombre: string }>>("/contratos/unidades-negocio"),
+
+  mandantes: () => api<Conjunto<string>>("/contratos/mandantes"),
+
+  agrupadoPorMandante: (params?: { unidad_negocio?: string }) =>
+    api<MandanteAgrupado[]>("/contratos/agrupado", { query: q({ por: "mandante", ...params }) }),
 
   detalle: (id: string) => api<Contrato>(`/contratos/${id}`),
 

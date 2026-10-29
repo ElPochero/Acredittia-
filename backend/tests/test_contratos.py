@@ -988,3 +988,92 @@ def test_marcar_subida_registra_en_historial(app_cliente, empresa_a, contrato_a)
         "00000000-0000-0000-0000-000000000000/subida",
         headers=empresa_a["headers"], json={})
     assert r.status_code == 404
+
+
+# ============================================================================
+# Pruebas Día 8 (Slice 2): Mandante libre, Autocompletado y Vistas Agrupadas
+# ============================================================================
+def test_contrato_mandante_propio_y_fallback(app_cliente, empresa_a, faena_pelambres):
+    # 1. Contrato con mandante libre
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Contrato Candelaria", "codigo": "LUNDIN-01",
+        "faena_id": faena_pelambres["id"],
+        "mandante": "Lundin Mining",
+        "fecha_inicio": date.today().isoformat()})
+    assert r.status_code == 201, r.text
+    c1 = r.json()
+    assert c1["mandante"] == "Lundin Mining"
+
+    # Verificar en detalle
+    r = app_cliente.get(f"{API}/contratos/{c1['id']}", headers=empresa_a["headers"])
+    assert r.status_code == 200
+    assert r.json()["mandante"] == "Lundin Mining"
+
+    # 2. Contrato sin mandante (fallback a faena)
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Contrato Pelambres Base", "codigo": "PEL-BASE-01",
+        "faena_id": faena_pelambres["id"],
+        "fecha_inicio": date.today().isoformat()})
+    assert r.status_code == 201, r.text
+    c2 = r.json()
+    assert c2["mandante"] == faena_pelambres["mandante"]
+
+    # 3. Modificar mandante con patch
+    r = app_cliente.patch(f"{API}/contratos/{c2['id']}", headers=empresa_a["headers"], json={
+        "mandante": "Antofagasta Minerals"
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["mandante"] == "Antofagasta Minerals"
+
+
+def test_listar_mandantes_autocompletado(app_cliente, empresa_a, faena_pelambres):
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Contrato Prueba Mandante", "codigo": "AUTO-MAND-01",
+        "faena_id": faena_pelambres["id"],
+        "mandante": "BHP Billiton",
+        "fecha_inicio": date.today().isoformat()})
+    assert r.status_code == 201
+
+    r = app_cliente.get(f"{API}/contratos/mandantes", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert "BHP Billiton" in items
+
+
+def test_contratos_agrupado_por_mandante(app_cliente, empresa_a, contrato_a, faena_pelambres):
+    # Crear un contrato con mandante explícito
+    r = app_cliente.post(f"{API}/contratos", headers=empresa_a["headers"], json={
+        "nombre": "Contrato Agrupado Test", "codigo": "AGR-TEST-01",
+        "faena_id": faena_pelambres["id"],
+        "mandante": "Anglo American",
+        "fecha_inicio": date.today().isoformat()})
+    assert r.status_code == 201
+
+    r = app_cliente.get(f"{API}/contratos/agrupado?por=mandante", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    grupos = r.json()
+    assert isinstance(grupos, list)
+    mandantes_encontrados = [g["mandante"] for g in grupos]
+    assert "Anglo American" in mandantes_encontrados
+    anglo = next(g for g in grupos if g["mandante"] == "Anglo American")
+    assert anglo["contratos_total"] >= 1
+    assert "personal" in anglo
+    assert "equipos" in anglo
+    assert "faenas" in anglo
+    assert len(anglo["contratos"]) >= 1
+
+
+def test_faenas_agrupado(app_cliente, empresa_a, contrato_a):
+    r = app_cliente.get(f"{API}/faenas/agrupado", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    faenas = r.json()
+    assert isinstance(faenas, list)
+    assert len(faenas) > 0
+    f = faenas[0]
+    assert "faena_id" in f
+    assert "nombre" in f
+    assert "contratos_total" in f
+    assert "cumplimiento_pct" in f
+    assert "personal" in f
+    assert "equipos" in f
+    assert "contratos" in f

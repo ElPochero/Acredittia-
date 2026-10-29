@@ -425,6 +425,8 @@ export type Contrato = {
   id: string;
   nombre: string;
   codigo: string | null;
+  mandante?: string | null;
+  mandante_propio?: string | null;
   estado: EstadoContrato;
   fecha_inicio: string | null;
   fecha_termino: string | null;
@@ -458,6 +460,8 @@ export type ContratoIn = {
   fecha_inicio?: string | null;
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
+  /** Mandante libre (H-19, Punto 15). Fallback a faenas.mandante. */
+  mandante?: string | null;
   /** Unidad de negocio a la que pertenece el contrato. */
   unidad_negocio?: string | null;
   /** Job de `POST /contratos/analizar` que originó el alta. */
@@ -478,6 +482,7 @@ export type ContratoPatch = {
   fecha_termino?: string | null;
   renovacion_automatica?: boolean;
   estado?: EstadoContrato;
+  mandante?: string | null;
   unidad_negocio?: string | null;
   alerta_anticipacion_dias?: number;
   alerta_frecuencia_dias?: number;
@@ -1030,6 +1035,52 @@ export type Eventos = {
   desde: string;
   hasta: string;
   truncado: boolean;
+};
+
+
+export type FaenaAgrupada = {
+  faena_id: string;
+  nombre: string;
+  mandante_defecto: string;
+  grupo: string | null;
+  region: string | null;
+  color: string | null;
+  contratos_total: number;
+  cumplimiento_pct: number;
+  personal: { total: number; acreditados: number };
+  equipos: { total: number; acreditados: number };
+  contratos: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    mandante: string;
+    estado: string;
+    unidad_negocio: string | null;
+    cumplimiento_pct: number;
+    personal: { total: number; acreditados: number };
+    equipos: { total: number; acreditados: number };
+  }[];
+};
+
+export type MandanteAgrupado = {
+  mandante: string;
+  contratos_total: number;
+  cumplimiento_pct: number;
+  personal: { total: number; acreditados: number };
+  equipos: { total: number; acreditados: number };
+  faenas: { id: string; nombre: string; region: string | null; color: string | null }[];
+  contratos: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    estado: string;
+    mandante: string;
+    unidad_negocio: string | null;
+    faena: { id: string; nombre: string; color: string | null } | null;
+    cumplimiento_pct: number;
+    personal: { total: number; acreditados: number };
+    equipos: { total: number; acreditados: number };
+  }[];
 };
 
 // ============================================================================
