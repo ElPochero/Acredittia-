@@ -120,7 +120,7 @@ export default function LandingFaenas() {
               src={faena.image}
               alt={faena.alt}
               fill
-              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 333px"
               className="object-cover"
             />
 

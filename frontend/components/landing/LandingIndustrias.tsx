@@ -113,7 +113,7 @@ export default function LandingIndustrias() {
                   src={item.image}
                   alt={item.alt}
                   fill
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 440px"
                   className="object-cover transition-transform duration-500 group-hover:scale-105"
                   onError={() => handleImageError(item.id)}
                 />
