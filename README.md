@@ -125,5 +125,3 @@ Los archivos de configuración de infraestructura como código (YAML) se encuent
 .\deploy.ps1 -YamlFile api.yaml
 ```
 
-Para ver el detalle completo de la arquitectura y pasos de migración, revisa el documento `plan_migracion_azure.md`.
-
