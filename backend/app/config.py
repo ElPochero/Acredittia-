@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
     schema_dir: str = "/schema"
     schema_version_esperada: int = (
-        17  # scripts 01..17 aplicados (17 mandante libre por contrato)
+        18  # scripts 01..18 aplicados (18 mandante libre por contrato)
     )
     db_apply_schema_on_start: bool = False  # en Azure lo hace el job de migración
     db_rls_enabled: bool = True  # fija app.company_id/is_admin/user_id por request

@@ -512,3 +512,14 @@ CREATE TABLE bitacora_cambios (
 COMMENT ON TABLE sujetos IS 'Trabajadores y equipos (single-table, discriminador tipo). Un sujeto pertenece a un contrato.';
 COMMENT ON TABLE documentos IS 'Instancias de requisitos documentales. Dueño exclusivo: sujeto (personal/equipo/emsipor) XOR contrato (empresa).';
 COMMENT ON TABLE bitacora_cambios IS 'Auditoría técnica por triggers en tablas críticas. La actividad de negocio la escribe la aplicación en la tabla actividad.';
+
+-- ============================================================================
+-- 6. CONTROL DE MIGRACIONES
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS app_schema_migrations (
+    version integer PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO app_schema_migrations (version) VALUES (1) ON CONFLICT DO NOTHING;
+

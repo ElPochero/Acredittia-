@@ -13,3 +13,6 @@ ALTER TABLE users    ADD COLUMN IF NOT EXISTS unidad_negocio TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_contratos_unidad_negocio ON contratos (unidad_negocio);
 CREATE INDEX IF NOT EXISTS ix_users_unidad_negocio    ON users (unidad_negocio);
+
+
+INSERT INTO app_schema_migrations (version) VALUES (15) ON CONFLICT DO NOTHING;

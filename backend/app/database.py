@@ -76,12 +76,13 @@ SCHEMA_SCRIPTS = [
     "11_rag_pgvector.sql",
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
-    "14_unidad_negocio.sql",
-    "15_alertas_ia.sql",
-    "16_gemini_embeddings.sql",
-    "17_contratos_mandante.sql",
+    "14_cascadas_integridad.sql",
+    "15_unidad_negocio.sql",
+    "16_alertas_ia.sql",
+    "17_gemini_embeddings.sql",
+    "18_contratos_mandante.sql",
 ]
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -253,18 +254,29 @@ def _indice_existe(conn, tabla: str, indice: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = unidad de negocio · 15 = alertas IA por contrato · 16 = embeddings Gemini 768 dims."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = cascadas integridad · 15 = unidad de negocio · 16 = alertas IA por contrato · 17 = embeddings Gemini 768 dims · 18 = contratos mandante."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
+        if _tabla_existe(c, "app_schema_migrations"):
+            v = c.execute(text("SELECT max(version) FROM app_schema_migrations")).scalar()
+            if v is not None:
+                return int(v)
         if _tabla_existe(c, "documento_chunk"):
             if _columna_existe(c, "contratos", "mandante"):
-                return 17
+                return 18
             if _indice_existe(c, "documento_chunk", "ix_chunk_embedding_hnsw"):
-                return 16
+                return 17
             if _columna_existe(c, "contratos", "alerta_anticipacion_dias"):
-                return 15
+                return 16
             if _columna_existe(c, "contratos", "unidad_negocio"):
+                return 15
+            if c.execute(
+                text(
+                    "SELECT 1 FROM pg_constraint "
+                    "WHERE conname = 'periodo_documentos_sujeto_id_fkey' AND confdeltype = 'c'"
+                )
+            ).first() is not None:
                 return 14
             if _enum_tiene(c, "user_role", "visor"):
                 return 13
@@ -375,6 +387,7 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 14: SCHEMA_SCRIPTS[13:],
                 15: SCHEMA_SCRIPTS[14:],
                 16: SCHEMA_SCRIPTS[15:],
+                17: SCHEMA_SCRIPTS[16:],
             }
             pendientes = scripts_por_version.get(actual, [])
 

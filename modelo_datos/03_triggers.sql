@@ -187,3 +187,6 @@ CREATE TRIGGER trg_actividad_inmutable
 CREATE TRIGGER trg_bitacora_inmutable
   BEFORE UPDATE OR DELETE ON bitacora_cambios
   FOR EACH ROW EXECUTE FUNCTION fn_solo_insert();
+
+
+INSERT INTO app_schema_migrations (version) VALUES (3) ON CONFLICT DO NOTHING;

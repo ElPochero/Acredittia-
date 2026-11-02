@@ -13,3 +13,6 @@ ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'visor';
 ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_contrato;
 ALTER TABLE users ADD CONSTRAINT ck_users_contrato
   CHECK ( (role IN ('contract_admin', 'visor')) = (contrato_id IS NOT NULL) );
+
+
+INSERT INTO app_schema_migrations (version) VALUES (13) ON CONFLICT DO NOTHING;

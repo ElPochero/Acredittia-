@@ -81,10 +81,11 @@ SCRIPTS = [
     "11_rag_pgvector.sql",
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
-    "14_unidad_negocio.sql",
-    "15_alertas_ia.sql",
-    "16_gemini_embeddings.sql",
-    "17_contratos_mandante.sql",
+    "14_cascadas_integridad.sql",
+    "15_unidad_negocio.sql",
+    "16_alertas_ia.sql",
+    "17_gemini_embeddings.sql",
+    "18_contratos_mandante.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), f"acredittia_pruebas_{os.getpid()}")
@@ -97,6 +98,7 @@ PSQL = os.path.join(os.path.dirname(pgserver.__file__), "pginstall", "bin", "psq
 
 # Catálogos globales sembrados al arrancar: NO se vacían entre pruebas.
 CATALOGOS = {
+    "app_schema_migrations",
     "faenas",
     "faena_plataformas",
     "doc_ejemplos",

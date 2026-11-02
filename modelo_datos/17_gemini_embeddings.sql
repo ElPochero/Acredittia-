@@ -17,3 +17,6 @@ ALTER TABLE documento_chunk ALTER COLUMN embedding TYPE vector(768);
 -- Índice HNSW para búsqueda coseno ultra-rápida (soportado en pgvector para <= 2000 dims)
 CREATE INDEX IF NOT EXISTS ix_chunk_embedding_hnsw
     ON documento_chunk USING hnsw (embedding vector_cosine_ops);
+
+
+INSERT INTO app_schema_migrations (version) VALUES (17) ON CONFLICT DO NOTHING;

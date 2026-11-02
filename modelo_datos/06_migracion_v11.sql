@@ -535,6 +535,12 @@ CREATE OR REPLACE VIEW v_plataforma_credenciales
 
 GRANT SELECT ON v_plataforma_credenciales TO acredittia_app, acredittia_worker;
 
+CREATE TABLE IF NOT EXISTS app_schema_migrations (
+    version integer PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+GRANT SELECT ON app_schema_migrations TO acredittia_app, acredittia_worker;
+
 -- 10.4 Política multi-tenant en las tablas nuevas con company_id NOT NULL.
 DO $$
 DECLARE t text;
@@ -693,3 +699,6 @@ SELECT
 -- ============================================================================
 -- Fin de 06_migracion_v11.sql
 -- ============================================================================
+
+
+INSERT INTO app_schema_migrations (version) VALUES (6) ON CONFLICT DO NOTHING;

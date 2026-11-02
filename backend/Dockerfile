@@ -16,7 +16,7 @@ COPY app ./app
 COPY worker ./worker
 COPY migrate ./migrate
 COPY tests ./tests
-COPY schema /schema
+RUN mkdir -p /schema
 
 # Usuario sin privilegios; los directorios de datos se montan como volumen.
 RUN useradd --create-home --uid 10001 acredittia \

@@ -10,3 +10,6 @@
 ALTER TABLE contratos ADD COLUMN IF NOT EXISTS mandante TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_contratos_mandante ON contratos (mandante);
+
+
+INSERT INTO app_schema_migrations (version) VALUES (18) ON CONFLICT DO NOTHING;

@@ -337,7 +337,7 @@ def test_tendencia_con_dos_periodos_calcula_el_delta(app_cliente, empresa_a,
     _snapshots(empresa_a["company_id"], None,
                (mes_pasado - timedelta(days=5), 50, 50, 100),
                (mes_pasado, 76, 76, 100),
-               (hoy.replace(day=1), 80, 80, 100),
+               *((hoy.replace(day=1), 80, 80, 100),) if hoy.day > 1 else (),
                (hoy, 82, 82, 100))
 
     r = app_cliente.get(f"{API}/dashboard/tendencia?periodo=mes",

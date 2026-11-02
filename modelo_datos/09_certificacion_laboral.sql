@@ -58,3 +58,6 @@ CREATE TABLE auditoria_documentos (
     fecha TIMESTAMP WITH TIME ZONE NOT NULL,
     version INTEGER NOT NULL
 );
+
+
+INSERT INTO app_schema_migrations (version) VALUES (9) ON CONFLICT DO NOTHING;
