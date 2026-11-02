@@ -2,27 +2,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import * as Api from "@/lib/cliente";
+import * as Api from "@/lib/platform/cliente";
 import type {
   ActividadFila, Alerta, Contrato, Documento, Matriz, Pagina, Revision, Sujeto, PlataformaContrato
-} from "@/lib/tipos";
-import { Chip, Modal, Paginador, SEVERIDAD_LABEL, Spinner } from "@/components/ui";
-import { AgregarPlataformaModal, GestionarUsuariosModal } from "@/components/PlataformaModals";
-import { TabRequisitosContrato } from "@/components/contratos/TabRequisitosContrato";
-import { TabPersonalContrato } from "@/components/contratos/TabPersonalContrato";
-import { TabEquiposContrato } from "@/components/contratos/TabEquiposContrato";
-import { TabDocumentosContrato } from "@/components/contratos/TabDocumentosContrato";
-import { TabDocumentosFaena } from "@/components/contratos/TabDocumentosFaena";
-import { TabCarpetaArranque } from "@/components/contratos/TabCarpetaArranque";
-import { TabEmpresaContrato } from "@/components/contratos/TabEmpresaContrato";
-import { TabLicenciaInternaContrato } from "@/components/contratos/TabLicenciaInternaContrato";
-import { CorreosContratoModal } from "@/components/contratos/CorreosContratoModal";
-import { ContratoLayout } from "@/components/contratos/ContratoLayout";
-import { TabResumen } from "@/components/contratos/TabResumen";
-import { TabChatContrato } from "@/components/contratos/TabChatContrato";
-import { TabAgentesContrato } from "@/components/contratos/TabAgentesContrato";
+} from "@/lib/platform/tipos";
+import { Chip, Modal, Paginador, SEVERIDAD_LABEL, Spinner } from "@/components/shared/ui";
+import { AgregarPlataformaModal, GestionarUsuariosModal } from "@/components/platform/PlataformaModals";
+import { TabRequisitosContrato } from "@/components/platform/contratos/TabRequisitosContrato";
+import { TabPersonalContrato } from "@/components/platform/contratos/TabPersonalContrato";
+import { TabEquiposContrato } from "@/components/platform/contratos/TabEquiposContrato";
+import { TabDocumentosContrato } from "@/components/platform/contratos/TabDocumentosContrato";
+import { TabDocumentosFaena } from "@/components/platform/contratos/TabDocumentosFaena";
+import { TabCarpetaArranque } from "@/components/platform/contratos/TabCarpetaArranque";
+import { TabEmpresaContrato } from "@/components/platform/contratos/TabEmpresaContrato";
+import { TabLicenciaInternaContrato } from "@/components/platform/contratos/TabLicenciaInternaContrato";
+import { CorreosContratoModal } from "@/components/platform/contratos/CorreosContratoModal";
+import { ContratoLayout } from "@/components/platform/contratos/ContratoLayout";
+import { TabResumen } from "@/components/platform/contratos/TabResumen";
+import { TabChatContrato } from "@/components/platform/contratos/TabChatContrato";
+import { TabAgentesContrato } from "@/components/platform/contratos/TabAgentesContrato";
 
-import { Tab, TABS, slugTab, tabDesdeSlug } from "@/components/contratos/ContratoTabs";
+import { Tab, TABS, slugTab, tabDesdeSlug } from "@/components/platform/contratos/ContratoTabs";
 
 
 export default function ContratoDetalle() {

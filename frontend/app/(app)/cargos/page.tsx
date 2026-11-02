@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-import * as Api from "@/lib/cliente";
-import type { Cargo, PlantillaRequisito } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { Cargo, PlantillaRequisito } from "@/lib/platform/tipos";
 
 // --- Íconos SVG limpios ---
 const BadgeIcon = () => (

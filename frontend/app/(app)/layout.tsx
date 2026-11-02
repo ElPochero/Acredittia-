@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Sidebar from "@/components/Sidebar";
-import AppHeader from "@/components/AppHeader";
-import BottomNav from "@/components/BottomNav";
-import { currentUser } from "@/lib/api";
+import Sidebar from "@/components/platform/Sidebar";
+import AppHeader from "@/components/platform/AppHeader";
+import BottomNav from "@/components/platform/BottomNav";
+import { currentUser } from "@/lib/platform/api";
 
 import DashboardPage from "./dashboard/page";
 import ContratosPage from "./contratos/page";
@@ -23,7 +23,7 @@ import IntegracionesPage from "./integraciones/page";
 import ConfigPage from "./config/page";
 import AdminPage from "./admin/page";
 import CertificacionLaboralPage from "./certificacion-laboral/page";
-import CentroAyudaModal from "@/components/CentroAyudaModal";
+import CentroAyudaModal from "@/components/platform/CentroAyudaModal";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();

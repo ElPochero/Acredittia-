@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import * as Api from "@/lib/cliente";
+import * as Api from "@/lib/platform/cliente";
 import type {
   Kpis,
   CumplimientoContrato,
@@ -11,15 +11,15 @@ import type {
   ActividadFila,
   Tendencia,
   Usuario,
-} from "@/lib/tipos";
-import DashboardKpis from "@/components/dashboard/DashboardKpis";
-import VigiaBanner from "@/components/dashboard/VigiaBanner";
-import AccionesPendientesCard from "@/components/dashboard/AccionesPendientesCard";
-import CumplimientoContratosTable from "@/components/dashboard/CumplimientoContratosTable";
-import AlertasImportantesCard from "@/components/dashboard/AlertasImportantesCard";
-import AcreditacionesEstadoCard from "@/components/dashboard/AcreditacionesEstadoCard";
-import ActividadRecienteCard from "@/components/dashboard/ActividadRecienteCard";
-import ProximosVencimientosCard from "@/components/dashboard/ProximosVencimientosCard";
+} from "@/lib/platform/tipos";
+import DashboardKpis from "@/components/platform/dashboard/DashboardKpis";
+import VigiaBanner from "@/components/platform/dashboard/VigiaBanner";
+import AccionesPendientesCard from "@/components/platform/dashboard/AccionesPendientesCard";
+import CumplimientoContratosTable from "@/components/platform/dashboard/CumplimientoContratosTable";
+import AlertasImportantesCard from "@/components/platform/dashboard/AlertasImportantesCard";
+import AcreditacionesEstadoCard from "@/components/platform/dashboard/AcreditacionesEstadoCard";
+import ActividadRecienteCard from "@/components/platform/dashboard/ActividadRecienteCard";
+import ProximosVencimientosCard from "@/components/platform/dashboard/ProximosVencimientosCard";
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);

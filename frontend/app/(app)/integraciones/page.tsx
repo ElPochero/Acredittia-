@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import * as Api from "@/lib/cliente";
-import type { Integracion, SyncLog } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { Integracion, SyncLog } from "@/lib/platform/tipos";
 
 export default function IntegracionesPage() {
   const [loading, setLoading] = useState(true);

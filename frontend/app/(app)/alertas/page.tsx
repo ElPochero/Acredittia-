@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import * as Api from "@/lib/cliente";
-import type { Alerta, AlertaPatch, OrigenAlerta, ParamsAlertas, ResumenAlertas } from "@/lib/tipos";
-import { Chip, Modal, SEVERIDAD_LABEL } from "@/components/ui";
+import * as Api from "@/lib/platform/cliente";
+import type { Alerta, AlertaPatch, OrigenAlerta, ParamsAlertas, ResumenAlertas } from "@/lib/platform/tipos";
+import { Chip, Modal, SEVERIDAD_LABEL } from "@/components/shared/ui";
 
 const ORIGEN_LBL: Record<string, string> = {
   vencimiento: "Vencimiento", ia: "IA", integracion: "Integración", sistema: "Sistema",

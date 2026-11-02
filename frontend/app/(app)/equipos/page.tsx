@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import * as Api from "@/lib/cliente";
-import type { Sujeto } from "@/lib/tipos";
-import { ExportarDocumentosModal } from "@/components/ExportarDocumentosModal";
+import * as Api from "@/lib/platform/cliente";
+import type { Sujeto } from "@/lib/platform/tipos";
+import { ExportarDocumentosModal } from "@/components/platform/ExportarDocumentosModal";
 
 export default function EquiposPage() {
   const [loading, setLoading] = useState(true);

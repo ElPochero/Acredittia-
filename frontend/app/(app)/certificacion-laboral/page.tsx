@@ -1,10 +1,10 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as Api from "@/lib/cliente";
-import type { PeriodoLaboral, Contrato } from "@/lib/tipos";
-import PeriodoCard from "@/components/PeriodoCard";
-import { Modal, Spinner, Kpi } from "@/components/ui";
+import * as Api from "@/lib/platform/cliente";
+import type { PeriodoLaboral, Contrato } from "@/lib/platform/tipos";
+import PeriodoCard from "@/components/platform/PeriodoCard";
+import { Modal, Spinner, Kpi } from "@/components/shared/ui";
 
 export default function CertificacionLaboralPage() {
   const router = useRouter();

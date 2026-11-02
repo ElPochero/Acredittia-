@@ -1,17 +1,17 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import * as Api from "@/lib/cliente";
+import * as Api from "@/lib/platform/cliente";
 import type {
   MatrizCumplimientoData,
   PeriodoDocumento,
   CumplimientoDashboardData,
   AuditoriaDocumento,
-} from "@/lib/tipos";
-import MatrizDocumental from "@/components/MatrizDocumental";
-import AuditoriaModal from "@/components/AuditoriaModal";
-import CumplimientoDashboard from "@/components/CumplimientoDashboard";
-import { Chip, Spinner, Donut } from "@/components/ui";
+} from "@/lib/platform/tipos";
+import MatrizDocumental from "@/components/platform/MatrizDocumental";
+import AuditoriaModal from "@/components/platform/AuditoriaModal";
+import CumplimientoDashboard from "@/components/platform/CumplimientoDashboard";
+import { Chip, Spinner, Donut } from "@/components/shared/ui";
 
 export default function PeriodoDetallePage() {
   const params = useParams();

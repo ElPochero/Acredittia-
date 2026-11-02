@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import * as Api from "@/lib/cliente";
-import type { Contrato, ReportesResumen, TipoReporte } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { Contrato, ReportesResumen, TipoReporte } from "@/lib/platform/tipos";
 
 type GenerandoEstado = {
   status: "queued" | "processing" | "downloading";

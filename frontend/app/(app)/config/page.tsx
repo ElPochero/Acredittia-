@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import * as Api from "@/lib/cliente";
-import type { Usuario, EmpresaDetalle } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { Usuario, EmpresaDetalle } from "@/lib/platform/tipos";
 
 interface EventoPref {
   evento: string;

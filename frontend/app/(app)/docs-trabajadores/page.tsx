@@ -10,9 +10,9 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import * as Api from "@/lib/cliente";
-import type { Documento, DocumentoFila, Sujeto } from "@/lib/tipos";
-import { Barra, Chip, Modal, Spinner, Stepper } from "@/components/ui";
+import * as Api from "@/lib/platform/cliente";
+import type { Documento, DocumentoFila, Sujeto } from "@/lib/platform/tipos";
+import { Barra, Chip, Modal, Spinner, Stepper } from "@/components/shared/ui";
 
 /** Extensiones que acepta el backend (`ALLOWED_EXTENSIONS`). */
 const EXTENSIONES = [".pdf", ".jpg", ".jpeg", ".png"];

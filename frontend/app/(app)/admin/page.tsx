@@ -1,9 +1,9 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import * as Api from "@/lib/cliente";
-import type { AdminStats, Empresa } from "@/lib/tipos";
-import { Chip, Kpi, Spinner } from "@/components/ui";
+import * as Api from "@/lib/platform/cliente";
+import type { AdminStats, Empresa } from "@/lib/platform/tipos";
+import { Chip, Kpi, Spinner } from "@/components/shared/ui";
 
 export default function AdminPage() {
   const router = useRouter();
