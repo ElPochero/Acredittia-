@@ -113,7 +113,7 @@ _ENUM_VALUES = {
         "comentario",
     ),
     "periodo_tipo": ("mensual", "quincenal", "otro"),
-    "periodo_estado": ("abierto", "en_revision", "cerrado"),
+    "periodo_estado": ("abierto", "en_revision", "cerrado", "en_auditoria"),
     "periodo_doc_estado": (
         "pendiente",
         "cargado",
@@ -121,6 +121,8 @@ _ENUM_VALUES = {
         "aprobado",
         "observado",
         "rechazado",
+        "vencido",
+        "no_aplica",
     ),
     "auditoria_accion": ("aprobar", "observar", "rechazar"),
 }
@@ -1006,6 +1008,10 @@ class PeriodoLaboral(Base):
     fecha_fin: Mapped[date] = mapped_column(Date)
     estado: Mapped[str] = mapped_column(pg_enum("periodo_estado"), default="abierto")
     porcentaje_cumplimiento: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0)
+    mes_anio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fecha_limite: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nomina_snapshot: Mapped[list | dict | None] = mapped_column(JSONB, default=list)
+    cerrado_por: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
@@ -1039,10 +1045,15 @@ class PeriodoDocumento(Base):
         UUID(as_uuid=True), primary_key=True, default=_uuid
     )
     periodo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("periodos_laborales.id"))
-    sujeto_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sujetos.id"))
-    requisito_template_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("requisito_templates.id")
+    sujeto_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sujetos.id"), nullable=True)
+    requisito_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("requisito_templates.id"), nullable=True
     )
+    contrato_requisito_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("contrato_requisitos_laborales.id", ondelete="CASCADE"), nullable=True
+    )
+    nombre: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ambito: Mapped[str | None] = mapped_column(Text, default="trabajador")
     archivo_url: Mapped[str | None] = mapped_column(Text)
     estado: Mapped[str] = mapped_column(
         pg_enum("periodo_doc_estado"), default="pendiente"
@@ -1072,6 +1083,48 @@ class AuditoriaDocumento(Base):
         DateTime(timezone=True), default=datetime.utcnow
     )
     version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+
+
+class ContratoRequisitoLaboral(Base):
+    __tablename__ = "contrato_requisitos_laborales"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_uuid
+    )
+    contrato_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contratos.id", ondelete="CASCADE"))
+    nombre: Mapped[str] = mapped_column(Text)
+    ambito: Mapped[str] = mapped_column(Text, default="contrato")
+    fuente: Mapped[str] = mapped_column(Text, default="manual")
+    obligatorio: Mapped[bool] = mapped_column(Boolean, default=True)
+    regla_no_aplica: Mapped[str] = mapped_column(Text, default="excluir")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class PeriodoDocumentoVersion(Base):
+    __tablename__ = "periodo_documento_versiones"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_uuid
+    )
+    periodo_documento_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("periodo_documentos.id", ondelete="CASCADE")
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    archivo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archivo_nombre: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subido_por: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    estado: Mapped[str] = mapped_column(Text, default="en_revision")
+    observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revisado_por: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    abierto_por_adc: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
 
 
 class ChatHistorial(Base):
