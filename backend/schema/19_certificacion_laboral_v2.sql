@@ -111,3 +111,4 @@ CROSS JOIN (
         ('Comprobante de Vacaciones y Feriado Legal', 'trabajador', 'buk', FALSE, 'excluir')
 ) AS r(nombre, ambito, fuente, obligatorio, regla_no_aplica)
 ON CONFLICT (contrato_id, nombre) DO NOTHING;
+

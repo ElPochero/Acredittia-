@@ -63,3 +63,4 @@ def test_contrato_requisitos_laborales_crud(client, user_token, session):
     req_actualizado = resp_patch.json()
     assert req_actualizado["obligatorio"] == patch_payload["obligatorio"]
     assert req_actualizado["regla_no_aplica"] == patch_payload["regla_no_aplica"]
+
