@@ -8,7 +8,7 @@ Dos procesos separados, ambos con la misma imagen que la API:
 Los routers nunca importan Celery: encolan con `services.jobs.enqueue(nombre,
 **kwargs)`, que aquí se traduce a una única tarea `ejecutar_tarea` que resuelve
 el nombre en el registro `TAREAS`. Así añadir una tarea de negocio no obliga a
-tocar la configuración de la cola ni a redespleg­ar el worker con rutas nuevas.
+tocar la configuración de la cola ni a redesplegar el worker con rutas nuevas.
 
 El worker se conecta con el rol `acredittia_worker`, que es el único con SELECT
 sobre `plataforma_credenciales.credencial_jwe`. Si el worker corriera con el rol
@@ -21,18 +21,14 @@ import logging
 import os
 
 from celery import Celery
-from celery.schedules import crontab
 
 # El rol del worker es distinto del de la API (§7.3 del modelo de datos).
 if os.environ.get("WORKER_DATABASE_URL"):
     os.environ["DATABASE_URL"] = os.environ["WORKER_DATABASE_URL"]
 
 from app.config import settings  # noqa: E402
-# Importar los módulos de tareas puebla el registro TAREAS.
-from app.services import integraciones as _svc_integraciones  # noqa: E402,F401
-from app.services import tasks as _svc_tasks  # noqa: E402,F401
-from app.services import email as _svc_email  # noqa: E402,F401
-from app.services.jobs import TAREAS  # noqa: E402
+from app.services.platform.jobs import TAREAS  # noqa: E402
+from worker.platform_tasks import registrar_platform  # noqa: E402
 
 log = logging.getLogger("acredittia.worker")
 
@@ -71,78 +67,18 @@ def ejecutar_tarea(self, nombre: str, kwargs: dict | None = None):
         raise self.retry(exc=exc, countdown=30)
 
 
-# --------------------------------------------------------------------- cron
-@celery.task(name="acredittia.cron_diario")
-def cron_diario():
-    """00:30 America/Santiago (§10.1 de la especificación).
+# Registrar tareas periódicas de plataforma y beat schedule
+_platform_tasks = registrar_platform(celery)
+cron_diario = _platform_tasks["cron_diario"]
+cron_reportes_programados = _platform_tasks["cron_reportes_programados"]
+cron_purga_temporales = _platform_tasks["cron_purga_temporales"]
+cron_resumen_mensual = _platform_tasks["cron_resumen_mensual"]
 
-    Recalcula `estado_calc` de los documentos con vencimiento, actualiza el
-    estado agregado de sujetos y contratos, genera alertas, escribe los
-    snapshots de cumplimiento del día y marca las credenciales expiradas.
-    """
-    from app.database import worker_session
-    from app.services.vencimientos import (
-        expirar_credenciales, escribir_snapshots, recalcular_documentos, alertar_vencimiento_contratos)
-
-    with worker_session(is_admin=True) as db:
-        docs = recalcular_documentos(db)
-        contratos = alertar_vencimiento_contratos(db)
-        snaps = escribir_snapshots(db)
-        creds = expirar_credenciales(db)
-    log.info("Cron diario: %s documentos, %s contratos, %s snapshots, %s credenciales expiradas",
-             docs, contratos, snaps, creds)
-    return {"documentos": docs, "contratos": contratos, "snapshots": snaps, "credenciales": creds}
-
-
-@celery.task(name="acredittia.cron_reportes_programados")
-def cron_reportes_programados():
-    """Cada hora: dispara los `reportes_programados` cuyo cron toca ahora."""
-    from app.database import worker_session
-    from app.services.programados import disparar_pendientes
-
-    with worker_session(is_admin=True) as db:
-        n = disparar_pendientes(db)
-    log.info("Reportes programados disparados: %s", n)
-    return {"disparados": n}
-
-
-@celery.task(name="acredittia.cron_purga_temporales")
-def cron_purga_temporales():
-    """Purga los blobs temporales y el historial de chats de IA con más de 3 meses."""
-    from app.services.tasks import purgar_temporales, purgar_chat_historial
-    n = purgar_temporales()
-    chats_purgados = purgar_chat_historial()
-    log.info("Blobs temporales purgados: %s, Chats purgados: %s", n, chats_purgados)
-    return {"blobs_purgados": n, "chats_purgados": chats_purgados}
-
-
-@celery.task(name="acredittia.cron_resumen_mensual")
-def cron_resumen_mensual():
-    """Día 1 de cada mes, 07:00: resumen de vencimientos por contrato."""
-    from app.database import worker_session
-    from app.services.email import enviar_resumen_mensual
-
-    with worker_session(is_admin=True) as db:
-        n = enviar_resumen_mensual(db)
-    log.info("Resumen mensual encolado para %s destinatarios", n)
-    return {"destinatarios": n}
-
-
-celery.conf.beat_schedule = {
-    "cron-diario": {
-        "task": "acredittia.cron_diario",
-        "schedule": crontab(hour=0, minute=30),
-    },
-    "resumen-mensual": {
-        "task": "acredittia.cron_resumen_mensual",
-        "schedule": crontab(day_of_month=1, hour=7, minute=0),
-    },
-    "reportes-programados": {
-        "task": "acredittia.cron_reportes_programados",
-        "schedule": crontab(minute=5),          # cada hora, al minuto 5
-    },
-    "purga-temporales": {
-        "task": "acredittia.cron_purga_temporales",
-        "schedule": crontab(hour=4, minute=0),
-    },
-}
+__all__ = [
+    "celery",
+    "ejecutar_tarea",
+    "cron_diario",
+    "cron_reportes_programados",
+    "cron_purga_temporales",
+    "cron_resumen_mensual",
+]

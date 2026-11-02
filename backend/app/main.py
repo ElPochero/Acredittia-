@@ -24,16 +24,16 @@ from .database import (SessionLocal, apply_schema, assert_schema_version,
                        auth_session, reset_ctx, schema_version, set_ctx, wait_for_db)
 from .models import User
 from .security import decode_access_token
-from .routers import (actividad, admin, alertas, auth, blobs, calendario, cargos,
-                      company, contrato_requisitos, contratos, dashboard,
-                      documentos, exportar, faenas, ia, integraciones, licencia_interna,
-                      notificaciones, periodos_laborales, personas, plataformas, reportes,
-                      requisitos, sujetos, suscripcion, emails, webhooks)
+from .routers.platform import (actividad, admin, alertas, auth, blobs, calendario, cargos,
+                               company, contrato_requisitos, contratos, dashboard,
+                               documentos, exportar, faenas, ia, integraciones, licencia_interna,
+                               notificaciones, periodos_laborales, personas, plataformas, reportes,
+                               requisitos, sujetos, suscripcion, emails, webhooks)
 # Importar los módulos de tareas registra las entradas de TAREAS que usa la cola.
-from .services import integraciones as _svc_integraciones  # noqa: F401
-from .services import tasks as _svc_tasks  # noqa: F401
-from .services import email as _svc_email  # noqa: F401
-from .services.vencimientos import recalcular_documentos, alertar_vencimiento_contratos
+from .services.platform import integraciones as _svc_integraciones  # noqa: F401
+from .services.platform import tasks as _svc_tasks  # noqa: F401
+from .services.platform import email as _svc_email  # noqa: F401
+from .services.platform.vencimientos import recalcular_documentos, alertar_vencimiento_contratos
 
 log = logging.getLogger("acredittia")
 
