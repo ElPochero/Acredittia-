@@ -1163,9 +1163,12 @@ export type ContratoCertificacionLaboral = {
   nombre: string;
   codigo?: string | null;
   empresa_proveedora?: string | null;
+  empresa_nombre?: string | null;
   mandante?: string | null;
+  mandante_nombre?: string | null;
   faena_nombre?: string | null;
   estado: string;
+  estado_contractual?: string;
   fecha_inicio?: string | null;
   fecha_termino?: string | null;
   periodo_vigente_id?: string | null;
@@ -1202,6 +1205,9 @@ export type PeriodoLaboral = {
   fecha_fin: string;
   estado: EstadoPeriodo;
   porcentaje_cumplimiento: number;
+  mes_anio?: string | null;
+  fecha_limite?: string | null;
+  por_revisar_count?: number;
   total_requeridos?: number;
   total_aprobados?: number;
   total_pendientes?: number;
@@ -1281,3 +1287,33 @@ export type CumplimientoDashboardData = {
   alertas: string[];
 };
 
+
+
+export type TrabajadorNominaItem = {
+  id: string;
+  nombre: string;
+  rut: string;
+  cargo: string;
+  estado: string;
+  fecha_ingreso?: string | null;
+};
+
+export type ResumenNominaPeriodo = {
+  total_vigentes: number;
+  total_incorporaciones: number;
+  total_bajas: number;
+  total_nomina: number;
+};
+
+export type NominaPeriodoRespuesta = {
+  periodo_id: string;
+  periodo_nombre: string;
+  estado_periodo: string;
+  inmutable: boolean;
+  datos: {
+    resumen: ResumenNominaPeriodo;
+    vigentes: TrabajadorNominaItem[];
+    incorporaciones: TrabajadorNominaItem[];
+    bajas: TrabajadorNominaItem[];
+  };
+};

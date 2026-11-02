@@ -33,7 +33,7 @@ import type {
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
-  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral,
+  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
   CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
   SeccionExport,
@@ -852,6 +852,21 @@ export const suscripcion = {
 // §16 — Certificación Laboral (Dev 4)
 // ============================================================================
 export const certificacion = {
+  listarPeriodosContrato: async (
+    contratoId: string,
+    params?: ParamsPagina & { estado?: string; orden?: string }
+  ) => {
+    return await api<Pagina<PeriodoLaboral>>(`/contratos/${contratoId}/periodos`, { query: q(params) });
+  },
+
+  obtenerNominaPeriodo: async (contratoId: string, periodoId: string) => {
+    return await api<NominaPeriodoRespuesta>(`/contratos/${contratoId}/periodos/${periodoId}/nomina`);
+  },
+
+  obtenerContrato: async (contratoId: string) => {
+    return await api<ContratoCertificacionLaboral>(`/certificacion-laboral/contratos/${contratoId}`);
+  },
+
   listarContratos: async (params?: ParamsPagina & { busqueda?: string; estado?: string }) => {
     return await api<Pagina<ContratoCertificacionLaboral>>("/certificacion-laboral/contratos", { query: q(params) });
   },

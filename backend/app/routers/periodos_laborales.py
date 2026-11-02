@@ -204,6 +204,75 @@ def listar_contratos_certificacion(
     }
 
 
+@router.get("/certificacion-laboral/contratos/{contrato_id}")
+def obtener_contrato_certificacion(
+    contrato_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Retorna la cabecera y metadata de certificación laboral para un contrato (CA 2).
+    Asegura los períodos mensuales según vigencia automáticamente.
+    """
+    c = _get_contrato(db, cid, contrato_id)
+    asegurar_periodos_contrato(db, c)
+    
+    faena_nombre = c.faena.nombre if c.faena else "Sin faena asignada"
+    mandante_nombre = getattr(c.faena, "mandante", None) or "Mandante Principal"
+    empresa_proveedora = c.unidad_negocio or "Empresa Proveedora Principal"
+    
+    p_vigente = db.execute(
+        select(PeriodoLaboral)
+        .where(PeriodoLaboral.contrato_id == c.id)
+        .order_by(
+            case(
+                (PeriodoLaboral.estado.in_(["abierto", "en_auditoria", "en_revision"]), 1),
+                else_=2
+            ),
+            PeriodoLaboral.fecha_inicio.desc()
+        )
+    ).scalars().first()
+    
+    vigente_data = None
+    if p_vigente:
+        docs = db.execute(
+            select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == p_vigente.id)
+        ).scalars().all()
+        ok = sum(1 for d in docs if d.estado == "aprobado")
+        ob = sum(1 for d in docs if d.estado in ("observado", "rechazado"))
+        revisar = sum(1 for d in docs if d.estado == "en_revision")
+        pend = sum(1 for d in docs if d.estado in ("pendiente", "cargado")) + ob
+        
+        vigente_data = {
+            "id": str(p_vigente.id),
+            "nombre": p_vigente.nombre,
+            "mes_anio": p_vigente.mes_anio,
+            "estado": p_vigente.estado,
+            "porcentaje_cumplimiento": float(p_vigente.porcentaje_cumplimiento or 0.0),
+            "total_requeridos": len(docs),
+            "total_aprobados": ok,
+            "total_observados": ob,
+            "total_pendientes": pend,
+            "por_revisar_count": revisar,
+        }
+        
+    return {
+        "id": str(c.id),
+        "nombre": c.nombre,
+        "codigo": c.codigo,
+        "empresa_nombre": empresa_proveedora,
+        "empresa_proveedora": empresa_proveedora,
+        "mandante_nombre": mandante_nombre,
+        "faena_nombre": faena_nombre,
+        "estado_contractual": c.estado,
+        "adc_asignado": "Andrea Castillo (ADC)",
+        "rrhh_asignado": "María Fernández (RR.HH.)",
+        "periodo_vigente": vigente_data,
+        "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+        "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
+    }
+
+
 @router.get("/contratos/{contrato_id}/requisitos-laborales")
 def listar_requisitos_laborales_contrato(
     contrato_id: uuid.UUID,
@@ -271,6 +340,151 @@ def actualizar_requisito_laboral_contrato(
     return req
 
 
+
+def asegurar_periodos_contrato(db: Session, contrato: Contrato) -> list[PeriodoLaboral]:
+    """
+    Genera automáticamente y de forma idempotente los períodos mensuales
+    según la vigencia del contrato (fecha_inicio a min(fecha_termino, mes_actual + 1 mes)).
+    Cumple con CA 2 y CA 15.
+    """
+    from datetime import timedelta
+    
+    MESES = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ]
+    
+    today = date.today()
+    if contrato.fecha_inicio:
+        inicio = contrato.fecha_inicio.replace(day=1)
+    elif contrato.created_at:
+        inicio = contrato.created_at.date().replace(day=1)
+    else:
+        inicio = today.replace(day=1)
+        
+    if today.month == 12:
+        mes_futuro = date(today.year + 1, 1, 1)
+    else:
+        mes_futuro = date(today.year, today.month + 1, 1)
+        
+    if contrato.fecha_termino:
+        fin = min(contrato.fecha_termino, mes_futuro)
+    else:
+        fin = mes_futuro
+        
+    if inicio > fin:
+        fin = inicio
+        
+    reqs = db.execute(
+        select(ContratoRequisitoLaboral).where(ContratoRequisitoLaboral.contrato_id == contrato.id)
+    ).scalars().all()
+    if not reqs:
+        for r_def in DEFAULT_REQUISITOS_CL:
+            nuevo_req = ContratoRequisitoLaboral(
+                contrato_id=contrato.id,
+                nombre=r_def["nombre"],
+                ambito=r_def["ambito"],
+                fuente=r_def["fuente"],
+                obligatorio=r_def["obligatorio"],
+                regla_no_aplica=r_def["regla_no_aplica"],
+            )
+            db.add(nuevo_req)
+        db.flush()
+        reqs = db.execute(
+            select(ContratoRequisitoLaboral).where(ContratoRequisitoLaboral.contrato_id == contrato.id)
+        ).scalars().all()
+        
+    curr_y = inicio.year
+    curr_m = inicio.month
+    
+    while (curr_y < fin.year) or (curr_y == fin.year and curr_m <= fin.month):
+        mes_anio = f"{curr_y:04d}-{curr_m:02d}"
+        nombre = f"{MESES[curr_m - 1]} {curr_y}"
+        
+        d_inicio = date(curr_y, curr_m, 1)
+        if curr_m == 12:
+            d_fin = date(curr_y, 12, 31)
+            fecha_limite = date(curr_y + 1, 1, 10)
+        else:
+            d_fin = date(curr_y, curr_m + 1, 1) - timedelta(days=1)
+            fecha_limite = date(curr_y, curr_m + 1, 10)
+            
+        p = db.execute(
+            select(PeriodoLaboral).where(
+                PeriodoLaboral.contrato_id == contrato.id,
+                (PeriodoLaboral.mes_anio == mes_anio) | (PeriodoLaboral.nombre == nombre)
+            )
+        ).scalars().first()
+        
+        if not p:
+            p = PeriodoLaboral(
+                contrato_id=contrato.id,
+                nombre=nombre,
+                tipo="mensual",
+                fecha_inicio=d_inicio,
+                fecha_fin=d_fin,
+                mes_anio=mes_anio,
+                fecha_limite=fecha_limite,
+                estado="abierto",
+                porcentaje_cumplimiento=0.0,
+                nomina_snapshot=[]
+            )
+            db.add(p)
+            db.flush()
+            
+            for r in reqs:
+                if r.ambito == "contrato":
+                    doc = PeriodoDocumento(
+                        periodo_id=p.id,
+                        sujeto_id=None,
+                        contrato_requisito_id=r.id,
+                        nombre=r.nombre,
+                        ambito="contrato",
+                        estado="pendiente"
+                    )
+                    db.add(doc)
+                    
+            sujetos = db.execute(
+                select(Sujeto).where(
+                    Sujeto.contrato_id == contrato.id,
+                    Sujeto.tipo == "trabajador",
+                    Sujeto.estado != "baja"
+                )
+            ).scalars().all()
+            
+            for s in sujetos:
+                for r in reqs:
+                    if r.ambito == "trabajador":
+                        doc = PeriodoDocumento(
+                            periodo_id=p.id,
+                            sujeto_id=s.id,
+                            contrato_requisito_id=r.id,
+                            nombre=r.nombre,
+                            ambito="trabajador",
+                            estado="pendiente"
+                        )
+                        db.add(doc)
+        else:
+            if not p.mes_anio:
+                p.mes_anio = mes_anio
+            if not p.fecha_limite:
+                p.fecha_limite = fecha_limite
+                
+        if curr_m == 12:
+            curr_y += 1
+            curr_m = 1
+        else:
+            curr_m += 1
+            
+    db.commit()
+    
+    return db.execute(
+        select(PeriodoLaboral)
+        .where(PeriodoLaboral.contrato_id == contrato.id)
+        .order_by(PeriodoLaboral.fecha_inicio.asc())
+    ).scalars().all()
+
+
 @router.post("/contratos/{contrato_id}/periodos")
 def crear_periodo(
     contrato_id: uuid.UUID,
@@ -305,8 +519,9 @@ def listar_periodos_contrato(
     pag: Page = Depends(paginacion),
     orden: str = Query("-fecha_inicio")
 ):
-    """Lista los perÃ­odos laborales de un contrato."""
-    _get_contrato(db, cid, contrato_id)
+    """Lista los períodos laborales de un contrato asegurando generación según vigencia (CA 2)."""
+    c = _get_contrato(db, cid, contrato_id)
+    asegurar_periodos_contrato(db, c)
     
     q = select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id)
     if estado:
@@ -314,19 +529,47 @@ def listar_periodos_contrato(
         
     q = aplicar_orden(q, PeriodoLaboral, orden, ORDEN_PERIODOS, "-fecha_inicio")
     
-    total = db.scalar(select(select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id).subquery().count()))
-    if estado:
-         total = db.scalar(select(select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id, PeriodoLaboral.estado == estado).subquery().count()))
-         
-    items = db.execute(q.offset(pag.offset).limit(pag.page_size)).scalars().all()
+    total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    periodos = db.execute(q.offset(pag.offset).limit(pag.page_size)).scalars().all()
+    
+    items = []
+    for p in periodos:
+        docs = db.execute(
+            select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == p.id)
+        ).scalars().all()
+        
+        ok = sum(1 for d in docs if d.estado == "aprobado")
+        ob = sum(1 for d in docs if d.estado in ("observado", "rechazado"))
+        revisar = sum(1 for d in docs if d.estado == "en_revision")
+        pend = sum(1 for d in docs if d.estado in ("pendiente", "cargado")) + ob
+        tot = len(docs)
+        
+        items.append({
+            "id": str(p.id),
+            "contrato_id": str(p.contrato_id),
+            "contrato_nombre": c.nombre,
+            "nombre": p.nombre,
+            "tipo": p.tipo,
+            "fecha_inicio": p.fecha_inicio.isoformat(),
+            "fecha_fin": p.fecha_fin.isoformat(),
+            "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
+            "mes_anio": p.mes_anio,
+            "estado": p.estado,
+            "porcentaje_cumplimiento": float(p.porcentaje_cumplimiento or 0.0),
+            "total_requeridos": tot,
+            "total_aprobados": ok,
+            "total_observados": ob,
+            "total_pendientes": pend,
+            "por_revisar_count": revisar,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
     
     return {
         "items": items,
-        "total": total or 0,
+        "total": total,
         "page": pag.page,
         "page_size": pag.page_size,
     }
-
 
 @router.get("/periodos")
 def listar_todos_los_periodos(
@@ -747,3 +990,85 @@ def matriz_documental(
 
 
 
+
+
+@router.get("/contratos/{contrato_id}/periodos/{periodo_id}/nomina")
+def obtener_nomina_periodo(
+    contrato_id: uuid.UUID,
+    periodo_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna la nómina de trabajadores del contrato para el período mensual (CA 6).
+    Si el período está cerrado, retorna la foto inmutable guardada en nomina_snapshot.
+    Si está abierto o en auditoría, consulta los trabajadores en tiempo real, clasificados
+    en vigentes, incorporaciones del mes y bajas, y actualiza el snapshot.
+    """
+    c = _get_contrato(db, cid, contrato_id)
+    p = _get_periodo(db, cid, periodo_id)
+    if p.contrato_id != contrato_id:
+        raise err(404, "NO_ENCONTRADO", "Período no pertenece al contrato")
+        
+    if p.estado == "cerrado" and p.nomina_snapshot and isinstance(p.nomina_snapshot, dict) and "resumen" in p.nomina_snapshot:
+        return {
+            "periodo_id": str(p.id),
+            "periodo_nombre": p.nombre,
+            "estado_periodo": p.estado,
+            "inmutable": True,
+            "datos": p.nomina_snapshot
+        }
+        
+    sujetos = db.execute(
+        select(Sujeto).where(
+            Sujeto.contrato_id == contrato_id,
+            Sujeto.tipo == "trabajador"
+        ).order_by(Sujeto.nombre.asc())
+    ).scalars().all()
+    
+    d_inicio = p.fecha_inicio
+    d_fin = p.fecha_fin
+    
+    vigentes = []
+    incorporaciones = []
+    bajas = []
+    
+    for s in sujetos:
+        item = {
+            "id": str(s.id),
+            "nombre": s.nombre,
+            "rut": s.rut or "Sin RUT",
+            "cargo": s.cargo or "Sin cargo",
+            "estado": s.estado,
+            "fecha_ingreso": s.created_at.date().isoformat() if s.created_at else None
+        }
+        
+        if s.estado == "baja":
+            bajas.append(item)
+        else:
+            vigentes.append(item)
+            if s.created_at and d_inicio <= s.created_at.date() <= d_fin:
+                incorporaciones.append(item)
+                
+    snapshot = {
+        "resumen": {
+            "total_vigentes": len(vigentes),
+            "total_incorporaciones": len(incorporaciones),
+            "total_bajas": len(bajas),
+            "total_nomina": len(vigentes)
+        },
+        "vigentes": vigentes,
+        "incorporaciones": incorporaciones,
+        "bajas": bajas
+    }
+    
+    p.nomina_snapshot = snapshot
+    db.commit()
+    
+    return {
+        "periodo_id": str(p.id),
+        "periodo_nombre": p.nombre,
+        "estado_periodo": p.estado,
+        "inmutable": p.estado == "cerrado",
+        "datos": snapshot
+    }
