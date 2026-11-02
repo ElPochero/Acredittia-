@@ -1147,14 +1147,50 @@ export type RequisitoFila = {
 // ============================================================================
 // Certificación Laboral (Dev 4)
 // ============================================================================
-export type EstadoPeriodo = "abierto" | "en_revision" | "cerrado";
+export type EstadoPeriodo = "abierto" | "en_auditoria" | "en_revision" | "cerrado" | "sin_periodo";
 export type EstadoPeriodoDoc =
   | "pendiente"
   | "cargado"
   | "en_revision"
   | "aprobado"
   | "observado"
-  | "rechazado";
+  | "rechazado"
+  | "vencido"
+  | "no_aplica";
+
+export type ContratoCertificacionLaboral = {
+  id: string;
+  nombre: string;
+  codigo?: string | null;
+  empresa_proveedora?: string | null;
+  mandante?: string | null;
+  faena_nombre?: string | null;
+  estado: string;
+  fecha_inicio?: string | null;
+  fecha_termino?: string | null;
+  periodo_vigente_id?: string | null;
+  periodo_vigente_nombre?: string | null;
+  estado_periodo?: string | null;
+  porcentaje_cumplimiento: number;
+  pendientes_carga_count: number;
+  por_revisar_count: number;
+  aprobados_count: number;
+  observados_count: number;
+  adc_asignado?: string | null;
+  rrhh_asignado?: string | null;
+};
+
+export type ContratoRequisitoLaboral = {
+  id: string;
+  contrato_id: string;
+  nombre: string;
+  ambito: "contrato" | "trabajador";
+  fuente: "manual" | "buk";
+  obligatorio: boolean;
+  regla_no_aplica: "excluir" | "cumplido";
+  created_at?: string;
+  updated_at?: string;
+};
 
 export type PeriodoLaboral = {
   id: string;

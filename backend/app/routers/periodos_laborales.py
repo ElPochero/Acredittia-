@@ -1,4 +1,4 @@
-﻿"""CertificaciÃ³n Laboral: GestiÃ³n de PerÃ­odos Laborales.
+"""CertificaciÃ³n Laboral: GestiÃ³n de PerÃ­odos Laborales.
 
 Endpoints:
 - POST /contratos/{id}/periodos
@@ -15,12 +15,12 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import Page, aplicar_orden, err, get_company_id, paginacion, get_current_user
-from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User
+from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User, ContratoRequisitoLaboral, PeriodoDocumentoVersion
 
 logger = logging.getLogger("acredittia.periodos_laborales")
 
@@ -74,6 +74,201 @@ def _get_periodo(db: Session, cid: uuid.UUID, periodo_id: uuid.UUID) -> PeriodoL
     if not c or c.company_id != cid:
         raise err(404, "NO_ENCONTRADO", "PerÃ­odo Laboral no existe")
     return p
+
+
+
+# ============================================================================
+# Requisitos Laborales por Contrato y Listado de Contratos con KPIs
+# ============================================================================
+
+DEFAULT_REQUISITOS_CL = [
+    {"nombre": "F30-1 (Certificado de Antecedentes Laborales y Previsionales)", "ambito": "contrato", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Planilla y Comprobante de Pago Previsionales (Previred)", "ambito": "contrato", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Libro de Remuneraciones Electrónico (LRE)", "ambito": "contrato", "fuente": "buk", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Certificado F30 (Cumplimiento de Obligaciones Laborales)", "ambito": "contrato", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Liquidaciones de Sueldo Firmadas", "ambito": "trabajador", "fuente": "buk", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Comprobantes de Pago de Remuneraciones", "ambito": "trabajador", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Libro de Asistencia y Control de Jornada", "ambito": "trabajador", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Contratos de Trabajo y Anexos del Período", "ambito": "trabajador", "fuente": "buk", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Finiquitos y Ratificaciones del Mes", "ambito": "trabajador", "fuente": "manual", "obligatorio": True, "regla_no_aplica": "excluir"},
+    {"nombre": "Comprobante de Vacaciones y Feriado Legal", "ambito": "trabajador", "fuente": "buk", "obligatorio": False, "regla_no_aplica": "excluir"},
+]
+
+class ContratoRequisitoPatch(BaseModel):
+    obligatorio: bool | None = None
+    regla_no_aplica: str | None = None
+    fuente: str | None = None
+
+
+@router.get("/certificacion-laboral/contratos")
+def listar_contratos_certificacion(
+    busqueda: str | None = None,
+    estado: str | None = None,
+    cid: uuid.UUID = Depends(get_company_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    pag: Page = Depends(paginacion),
+):
+    """
+    Lista los contratos reales de la empresa con los KPIs calculados del período vigente
+    para la Pantalla 1 de Certificación Laboral (CA 1, CA 15).
+    """
+    q = select(Contrato).where(Contrato.company_id == cid)
+    
+    if busqueda:
+        term = f"%{busqueda.strip()}%"
+        q = q.where(Contrato.nombre.ilike(term) | Contrato.codigo.ilike(term))
+        
+    if estado and estado != "todos":
+        q = q.where(Contrato.estado == estado)
+        
+    total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    contratos = db.execute(q.order_by(Contrato.created_at.desc()).offset(pag.offset).limit(pag.page_size)).scalars().all()
+    
+    items = []
+    for c in contratos:
+        # Período vigente: abierto / en_auditoria / en_revision primero, luego fecha más reciente
+        p_vigente = db.execute(
+            select(PeriodoLaboral)
+            .where(PeriodoLaboral.contrato_id == c.id)
+            .order_by(
+                case(
+                    (PeriodoLaboral.estado.in_(["abierto", "en_auditoria", "en_revision"]), 1),
+                    else_=2
+                ),
+                PeriodoLaboral.fecha_inicio.desc()
+            )
+        ).scalars().first()
+        
+        pendientes_count = 0
+        por_revisar_count = 0
+        aprobados_count = 0
+        observados_count = 0
+        
+        if p_vigente:
+            docs = db.execute(
+                select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == p_vigente.id)
+            ).scalars().all()
+            for d in docs:
+                if d.estado == "en_revision":
+                    por_revisar_count += 1
+                elif d.estado in ("pendiente", "cargado"):
+                    pendientes_count += 1
+                elif d.estado in ("observado", "rechazado"):
+                    observados_count += 1
+                    pendientes_count += 1
+                elif d.estado == "aprobado":
+                    aprobados_count += 1
+                    
+            periodo_vigente_id = str(p_vigente.id)
+            periodo_vigente_nombre = p_vigente.nombre
+            estado_periodo = p_vigente.estado
+            porcentaje_cumplimiento = float(p_vigente.porcentaje_cumplimiento or 0.0)
+        else:
+            periodo_vigente_id = None
+            periodo_vigente_nombre = "Sin período generado"
+            estado_periodo = "sin_periodo"
+            porcentaje_cumplimiento = 0.0
+            
+        faena_nombre = c.faena.nombre if c.faena else "Sin faena asignada"
+        mandante_nombre = getattr(c.faena, "mandante", None) or "Mandante Principal"
+        empresa_proveedora = c.unidad_negocio or "Empresa Proveedora Principal"
+        
+        items.append({
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "empresa_proveedora": empresa_proveedora,
+            "mandante": mandante_nombre,
+            "faena_nombre": faena_nombre,
+            "estado": c.estado,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
+            "periodo_vigente_id": periodo_vigente_id,
+            "periodo_vigente_nombre": periodo_vigente_nombre,
+            "estado_periodo": estado_periodo,
+            "porcentaje_cumplimiento": porcentaje_cumplimiento,
+            "pendientes_carga_count": pendientes_count,
+            "por_revisar_count": por_revisar_count,
+            "aprobados_count": aprobados_count,
+            "observados_count": observados_count,
+            "adc_asignado": "Andrea Castillo",
+            "rrhh_asignado": "María Fernández"
+        })
+        
+    return {
+        "items": items,
+        "total": total,
+        "page": pag.page,
+        "page_size": pag.page_size
+    }
+
+
+@router.get("/contratos/{contrato_id}/requisitos-laborales")
+def listar_requisitos_laborales_contrato(
+    contrato_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Lista los requisitos laborales configurados para el contrato (Sección 6, CA 5).
+    Si el contrato no tiene requisitos configurados, inicializa los 10 documentos oficiales de CL_DOCS.
+    """
+    _get_contrato(db, cid, contrato_id)
+    reqs = db.execute(
+        select(ContratoRequisitoLaboral)
+        .where(ContratoRequisitoLaboral.contrato_id == contrato_id)
+        .order_by(ContratoRequisitoLaboral.created_at.asc())
+    ).scalars().all()
+    
+    if not reqs:
+        for r in DEFAULT_REQUISITOS_CL:
+            nuevo = ContratoRequisitoLaboral(
+                contrato_id=contrato_id,
+                nombre=r["nombre"],
+                ambito=r["ambito"],
+                fuente=r["fuente"],
+                obligatorio=r["obligatorio"],
+                regla_no_aplica=r["regla_no_aplica"]
+            )
+            db.add(nuevo)
+        db.commit()
+        reqs = db.execute(
+            select(ContratoRequisitoLaboral)
+            .where(ContratoRequisitoLaboral.contrato_id == contrato_id)
+            .order_by(ContratoRequisitoLaboral.created_at.asc())
+        ).scalars().all()
+        
+    return reqs
+
+
+@router.patch("/contratos/{contrato_id}/requisitos-laborales/{req_id}")
+def actualizar_requisito_laboral_contrato(
+    contrato_id: uuid.UUID,
+    req_id: uuid.UUID,
+    carga: ContratoRequisitoPatch,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db)
+):
+    """
+    Activa o desactiva obligaciones mensuales a nivel de contrato y propaga a períodos abiertos (Sección 6, CA 5).
+    """
+    _get_contrato(db, cid, contrato_id)
+    req = db.get(ContratoRequisitoLaboral, req_id)
+    if not req or req.contrato_id != contrato_id:
+        raise err(404, "NO_ENCONTRADO", "Requisito laboral no encontrado")
+        
+    if carga.obligatorio is not None:
+        req.obligatorio = carga.obligatorio
+    if carga.regla_no_aplica is not None:
+        req.regla_no_aplica = carga.regla_no_aplica
+    if carga.fuente is not None:
+        req.fuente = carga.fuente
+        
+    req.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+    return req
 
 
 @router.post("/contratos/{contrato_id}/periodos")
