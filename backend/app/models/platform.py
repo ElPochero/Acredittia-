@@ -131,6 +131,9 @@ def pg_enum(name: str) -> PGENUM:
     return PGENUM(*_ENUM_VALUES[name], name=name, create_type=False)
 
 
+_enum = pg_enum
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -177,6 +180,7 @@ class User(Base):
     nombre: Mapped[str | None] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(pg_enum("account_status"), default="pending")
+    auth_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
@@ -391,6 +395,12 @@ class Contrato(Base):
     alerta_anticipacion_dias: Mapped[int] = mapped_column(Integer, default=30)
     alerta_frecuencia_dias: Mapped[int] = mapped_column(Integer, default=1)
     alerta_faltantes_dias: Mapped[int] = mapped_column(Integer, default=3)
+    ciclo_estado: Mapped[str] = mapped_column(Text, default="activo", server_default="activo")
+    ciclo_actualizado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ciclo_motivo: Mapped[str | None] = mapped_column(Text)
+    ciclo_actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

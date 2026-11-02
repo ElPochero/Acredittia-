@@ -356,6 +356,14 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_faltantes_dias    INTEGER NOT NULL DEFAULT 3;
                 CREATE INDEX IF NOT EXISTS ix_contratos_unidad_negocio ON contratos (unidad_negocio);
                 CREATE INDEX IF NOT EXISTS ix_users_unidad_negocio ON users (unidad_negocio);
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_version integer NOT NULL DEFAULT 0;
+                ALTER TABLE contratos
+                  ADD COLUMN IF NOT EXISTS ciclo_estado text NOT NULL DEFAULT 'activo',
+                  ADD COLUMN IF NOT EXISTS ciclo_actualizado_at timestamptz,
+                  ADD COLUMN IF NOT EXISTS ciclo_motivo text,
+                  ADD COLUMN IF NOT EXISTS ciclo_actor_id uuid REFERENCES users(id) ON DELETE SET NULL;
+                CREATE INDEX IF NOT EXISTS ix_contratos_company_ciclo ON contratos (company_id, ciclo_estado, nombre);
+                CREATE INDEX IF NOT EXISTS ix_contratos_ciclo_actor ON contratos (ciclo_actor_id);
             """)
         finally:
             raw.close()
