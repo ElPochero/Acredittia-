@@ -9,7 +9,7 @@ import type {
   MatrizCumplimientoData,
   PeriodoDocumento,
   CumplimientoDashboardData,
-  AuditoriaDocumento,
+  AuditoriaDocumento, TrazabilidadEvento,
 } from "@/lib/tipos";
 import PeriodoCard from "@/components/PeriodoCard";
 import TabNominaPeriodo from "@/components/certificacion/TabNominaPeriodo";
@@ -52,6 +52,8 @@ export default function ContratoCertificacionDetallePage() {
   const [sujetoSelRut, setSujetoSelRut] = useState("");
   const [reqSelNombre, setReqSelNombre] = useState("");
   const [historialAuditoria, setHistorialAuditoria] = useState<AuditoriaDocumento[]>([]);
+  const [trazabilidadEventos, setTrazabilidadEventos] = useState<TrazabilidadEvento[]>([]);
+  const [cargandoTrazabilidad, setCargandoTrazabilidad] = useState(false);
 
   // 1. Cargar Contrato y sus Períodos Mensuales generados (CA 2)
   const cargarContratoYPeriodos = useCallback(async () => {
@@ -100,6 +102,26 @@ export default function ContratoCertificacionDetallePage() {
   useEffect(() => {
     cargarContratoYPeriodos();
   }, [cargarContratoYPeriodos]);
+
+  // Cargar eventos de trazabilidad
+  const cargarTrazabilidad = useCallback(async () => {
+    if (!periodoActivo?.id) return;
+    setCargandoTrazabilidad(true);
+    try {
+      const eventos = await Api.certificacion.listarTrazabilidad(periodoActivo.id);
+      setTrazabilidadEventos(eventos);
+    } catch (err) {
+      console.error("Error al cargar trazabilidad:", err);
+    } finally {
+      setCargandoTrazabilidad(false);
+    }
+  }, [periodoActivo?.id]);
+
+  useEffect(() => {
+    if (tabActiva === "trazabilidad") {
+      cargarTrazabilidad();
+    }
+  }, [tabActiva, cargarTrazabilidad]);
 
   // 2. Cargar datos del período activo (Matriz y Dashboard)
   useEffect(() => {
@@ -171,6 +193,46 @@ export default function ContratoCertificacionDetallePage() {
       setHistorialAuditoria([]);
     }
     setModalAuditoriaAbierto(true);
+  };
+
+  const handleSubirDirecto = async (docId: string, file: File) => {
+    if (!periodoActivo) return;
+    const urlFake = `https://storage.acredittia.cl/${file.name}`;
+    try {
+      await Api.certificacion.subirDocumentoDirecto(periodoActivo.id, docId, {
+        archivo_url: urlFake,
+        archivo_nombre: file.name,
+      });
+      // Recargar matriz, dashboard y contrato
+      const [mat, dash] = await Promise.all([
+        Api.certificacion.matrizDocumental(periodoActivo.id),
+        Api.certificacion.dashboardCumplimiento(periodoActivo.id),
+      ]);
+      setMatrizData(mat);
+      setDashboardData(dash);
+      if (tabActiva === "trazabilidad") {
+        cargarTrazabilidad();
+      }
+    } catch (err) {
+      console.error("Error en subida directa:", err);
+    }
+  };
+
+  const exportarTrazabilidadCSV = () => {
+    if (!trazabilidadEventos.length) return;
+    const encabezados = "Fecha,Usuario,Rol,Accion,Documento,Detalle\n";
+    const filas = trazabilidadEventos
+      .map(
+        (e) =>
+          `"${e.fecha}","${e.usuario_nombre}","${e.rol}","${e.accion}","${e.documento_nombre || ""}","${e.detalle}"`
+      )
+      .join("\n");
+    const blob = new Blob([encabezados + filas], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `trazabilidad_${periodoActivo?.nombre.replace(/\s+/g, "_") || "periodo"}.csv`;
+    a.click();
   };
 
   const handleSubirDocumento = async (file: File) => {
@@ -436,7 +498,8 @@ export default function ContratoCertificacionDetallePage() {
               <MatrizDocumental
                 data={matrizData}
                 onSelectCelda={abrirModalParaCelda}
-                onCargaMasiva={() => alert("Carga masiva activa")}
+                onSubirDirecto={handleSubirDirecto}
+                onCargaMasiva={() => alert("Carga masiva ZIP activada")}
               />
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">
@@ -492,59 +555,80 @@ export default function ContratoCertificacionDetallePage() {
           {/* Pestaña: Trazabilidad */}
           {tabActiva === "trazabilidad" && (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span>🕓</span> Registro Cronológico de Trazabilidad ({periodoActivo.nombre})
-                </h3>
-                <span className="text-xs text-slate-400 font-mono">Período ID: {periodoActivo.id}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <span>🕓</span> Registro Cronológico de Trazabilidad ({periodoActivo.nombre})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Historial inmutable de auditoría: quién, qué, cuándo y resultado de cada entrega (CA 4).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={cargarTrazabilidad}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+                  >
+                    ↻ Actualizar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportarTrazabilidadCSV}
+                    className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
+                  >
+                    📥 Exportar CSV
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-slate-500">
-                Historial inmutable de eventos, cargas documentales, revisiones y cambios de estado del período.
-              </p>
-              <div className="rounded-xl border border-slate-200 overflow-hidden">
-                <table className="w-full text-left text-xs text-slate-600">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold">
-                    <tr>
-                      <th className="px-4 py-2.5">Fecha y Hora</th>
-                      <th className="px-4 py-2.5">Usuario / Rol</th>
-                      <th className="px-4 py-2.5">Acción</th>
-                      <th className="px-4 py-2.5">Detalle / Documento</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    <tr>
-                      <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                        {periodoActivo.created_at?.slice(0, 16) || "2026-09-01 08:00"}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">Sistema Automático</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                          Generación
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        Período mensual generado automáticamente según vigencia contractual.
-                      </td>
-                    </tr>
-                    {periodoActivo.estado === "cerrado" && (
+
+              {cargandoTrazabilidad ? (
+                <div className="flex flex-col items-center justify-center p-12 text-slate-500">
+                  <Spinner texto="Cargando bitácora de trazabilidad..." />
+                </div>
+              ) : trazabilidadEventos.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 italic">
+                  No hay eventos registrados aún para este período.
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <table className="w-full text-left text-xs text-slate-600">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold uppercase text-[11px]">
                       <tr>
-                        <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                          {periodoActivo.fecha_fin} 18:00
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">Andrea Castillo (ADC)</td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            Cierre Período
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          Período certificado al 100% y snapshot de nómina archivado inmutable.
-                        </td>
+                        <th className="px-4 py-3">Fecha y Hora</th>
+                        <th className="px-4 py-3">Actor / Rol</th>
+                        <th className="px-4 py-3">Acción</th>
+                        <th className="px-4 py-3">Documento</th>
+                        <th className="px-4 py-3">Detalle</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {trazabilidadEventos.map((ev) => (
+                        <tr key={ev.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                            {ev.fecha ? ev.fecha.replace("T", " ").slice(0, 19) : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-slate-800">{ev.usuario_nombre}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">{ev.rol}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 capitalize">
+                              <span>{ev.icono}</span> {ev.accion}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-800">
+                            {ev.documento_nombre || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {ev.detalle}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
