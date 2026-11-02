@@ -1274,6 +1274,17 @@ export type MatrizCumplimientoData = {
   celdas: Record<string, PeriodoDocumento>;
 };
 
+export type DocumentoCumplimientoItem = {
+  nombre: string;
+  ambito: string;
+  total: number;
+  aprobados: number;
+  observados: number;
+  en_revision: number;
+  pendientes: number;
+  porcentaje: number;
+};
+
 export type CumplimientoDashboardData = {
   total_requeridos: number;
   pendientes: number;
@@ -1283,8 +1294,23 @@ export type CumplimientoDashboardData = {
   observados: number;
   rechazados: number;
   porcentaje_cumplimiento: number;
-  por_tipo: { tipo: string; porcentaje: number; total: number; aprobados: number }[];
+  etapa_actual?: number;
+  etapa_nombre?: string;
+  por_documento?: DocumentoCumplimientoItem[];
+  por_tipo?: { tipo: string; porcentaje: number; total: number; aprobados: number }[];
   alertas: string[];
+};
+
+export type TrazabilidadEvento = {
+  id: string;
+  fecha: string;
+  usuario_nombre: string;
+  rol: string;
+  accion: string;
+  icono: string;
+  detalle: string;
+  documento_nombre?: string | null;
+  version?: number;
 };
 
 

@@ -33,7 +33,7 @@ import type {
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
-  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta,
+  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
   CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
   SeccionExport,
@@ -938,6 +938,21 @@ export const certificacion = {
 
   historialAuditoria: async (documentoId: string): Promise<AuditoriaDocumento[]> => {
     return await api<AuditoriaDocumento[]>(`/periodos/documentos/${documentoId}/historial`);
+  },
+
+  subirDocumentoDirecto: async (
+    periodoId: string,
+    docId: string,
+    body: { archivo_url: string; archivo_nombre?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos/${docId}/subir`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  listarTrazabilidad: async (periodoId: string) => {
+    return await api<TrazabilidadEvento[]>(`/periodos/${periodoId}/trazabilidad`);
   },
 
   dashboardCumplimiento: async (periodoId: string): Promise<CumplimientoDashboardData> => {
