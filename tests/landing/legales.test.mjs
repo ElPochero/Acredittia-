@@ -9,8 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, "../..");
 const footerFile = path.join(repoRoot, "frontend/components/landing/LandingFooter.tsx");
-const privacidadFile = path.join(repoRoot, "frontend/app/privacidad/page.tsx");
-const terminosFile = path.join(repoRoot, "frontend/app/terminos/page.tsx");
+const privacidadFile = path.join(repoRoot, "frontend/app/(marketing)/privacidad/page.tsx");
+const terminosFile = path.join(repoRoot, "frontend/app/(marketing)/terminos/page.tsx");
 
 test("legales.test.mjs: footer contiene © 2026, sin debug string, y existen /privacidad y /terminos", () => {
   // 1. LandingFooter.tsx existe y cumple requisitos de aviso legal
