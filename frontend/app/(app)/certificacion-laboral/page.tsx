@@ -1,265 +1,434 @@
 "use client";
-import React, { useEffect, useState } from "react";
+
+import React, { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import * as Api from "@/lib/cliente";
-import type { PeriodoLaboral, Contrato } from "@/lib/tipos";
-import PeriodoCard from "@/components/PeriodoCard";
-import { Modal, Spinner, Kpi } from "@/components/ui";
+import type { ContratoCertificacionLaboral } from "@/lib/tipos";
+import { Spinner, Kpi, Chip } from "@/components/ui";
 
 export default function CertificacionLaboralPage() {
   const router = useRouter();
-  const [periodos, setPeriodos] = useState<PeriodoLaboral[]>([]);
-  const [contratos, setContratos] = useState<Contrato[]>([]);
+  const [contratos, setContratos] = useState<ContratoCertificacionLaboral[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Filters state
+  // Filtros
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
-  const [filtroContrato, setFiltroContrato] = useState<string>("todos");
+  const [vista, setVista] = useState<"tarjetas" | "tabla">("tarjetas");
 
-  // Create Modal state
-  const [modalCrearAbierto, setModalCrearAbierto] = useState(false);
-  const [nuevoNombre, setNuevoNombre] = useState("");
-  const [nuevoContratoId, setNuevoContratoId] = useState("");
-  const [nuevoTipo, setNuevoTipo] = useState("mensual");
-  const [nuevaFechaInicio, setNuevaFechaInicio] = useState("");
-  const [nuevaFechaFin, setNuevaFechaFin] = useState("");
-  const [guardando, setGuardando] = useState(false);
-
-  const cargarDatos = async () => {
+  const cargarContratos = async () => {
     setCargando(true);
+    setError(null);
     try {
-      const [resPeriodos, resContratos] = await Promise.all([
-        Api.certificacion.listarPeriodos(),
-        Api.contratos.listar().catch((err) => { console.error("CONTRATOS ERROR", err); return { items: [] as Contrato[] } }),
-      ]);
-      setPeriodos(resPeriodos.items);
-      setContratos(resContratos.items);
-      if (resContratos.items.length > 0) {
-        setNuevoContratoId(resContratos.items[0].id);
-      }
-    } catch (err) {
-      console.error("Error al cargar períodos:", err);
+      const res = await Api.certificacion.listarContratos({
+        busqueda: busqueda.trim() || undefined,
+        estado: filtroEstado !== "todos" ? filtroEstado : undefined,
+      });
+      setContratos(res.items || []);
+    } catch (err: any) {
+      console.error("Error al cargar contratos de certificación laboral:", err);
+      setError("No se pudieron cargar los contratos para Control Laboral.");
     } finally {
       setCargando(false);
     }
   };
 
   useEffect(() => {
-    cargarDatos();
-  }, []);
+    cargarContratos();
+  }, [filtroEstado]);
 
-  const handleCrearPeriodo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nuevoNombre.trim() || !nuevaFechaInicio || !nuevaFechaFin) {
-      alert("Por favor completa los campos obligatorios.");
-      return;
-    }
-    setGuardando(true);
-    try {
-      const nuevo = await Api.certificacion.crearPeriodo({
-        contrato_id: nuevoContratoId || (contratos.length > 0 ? contratos[0].id : ""),
-        nombre: nuevoNombre.trim(),
-        tipo: nuevoTipo,
-        fecha_inicio: nuevaFechaInicio,
-        fecha_fin: nuevaFechaFin,
-      });
-      setPeriodos([nuevo, ...periodos]);
-      setModalCrearAbierto(false);
-      setNuevoNombre("");
-      alert("Período laboral creado correctamente.");
-    } catch (err: any) {
-      alert(err?.message || "Error al crear período");
-    } finally {
-      setGuardando(false);
-    }
+  // Búsqueda en cliente para filtrado interactivo instantáneo
+  const contratosFiltrados = useMemo(() => {
+    if (!busqueda.trim()) return contratos;
+    const term = busqueda.toLowerCase().trim();
+    return contratos.filter(
+      (c) =>
+        c.nombre.toLowerCase().includes(term) ||
+        (c.codigo && c.codigo.toLowerCase().includes(term)) ||
+        (c.empresa_proveedora && c.empresa_proveedora.toLowerCase().includes(term)) ||
+        (c.mandante && c.mandante.toLowerCase().includes(term)) ||
+        (c.faena_nombre && c.faena_nombre.toLowerCase().includes(term))
+    );
+  }, [contratos, busqueda]);
+
+  // Cálculos de KPIs globales de la pantalla 1
+  const kpis = useMemo(() => {
+    const totalContratos = contratos.length;
+    const totalPorRevisar = contratos.reduce((acc, c) => acc + (c.por_revisar_count || 0), 0);
+    const totalPendientes = contratos.reduce((acc, c) => acc + (c.pendientes_carga_count || 0), 0);
+    const totalCumplimiento = contratos.reduce((acc, c) => acc + (c.porcentaje_cumplimiento || 0), 0);
+    const cumplimientoPromedio = totalContratos > 0 ? Math.round(totalCumplimiento / totalContratos) : 0;
+
+    return {
+      totalContratos,
+      totalPorRevisar,
+      totalPendientes,
+      cumplimientoPromedio,
+    };
+  }, [contratos]);
+
+  const irAContrato = (contratoId: string) => {
+    router.push(`/certificacion-laboral/${contratoId}`);
   };
 
-  // Filter periods
-  const periodosFiltrados = periodos.filter((p) => {
-    const txt = `${p.nombre} ${p.contrato_nombre || ""}`.toLowerCase();
-    const coincideBusqueda = txt.includes(busqueda.toLowerCase());
-    if (!coincideBusqueda) return false;
-
-    if (filtroEstado !== "todos" && p.estado !== filtroEstado) return false;
-    if (filtroContrato !== "todos" && p.contrato_id !== filtroContrato) return false;
-
-    return true;
-  });
-
-  // KPI Calculations
-  const totalPeriodos = periodos.length;
-  const enRevision = periodos.filter((p) => p.estado === "en_revision").length;
-  const abiertos = periodos.filter((p) => p.estado === "abierto").length;
-  const pctPromedio = Math.round(
-    periodos.reduce((acc, p) => acc + (p.porcentaje_cumplimiento || 0), 0) / (totalPeriodos || 1)
-  );
-
-  const irADetalle = (id: string) => {
-    router.push(`/certificacion-laboral/${id}`);
+  const colorCumplimiento = (pct: number) => {
+    if (pct >= 85) return "#16A34A"; // Verde
+    if (pct >= 50) return "#EAB308"; // Amarillo
+    return "#3D62F5"; // Azul
   };
 
   return (
-    <div className="space-y-6">
-      {/* View Header */}
-      <div className="view-head" style={{ justifyContent: "flex-end" }}>
-        <div className="view-head-actions">
+    <div className="mx-auto max-w-7xl space-y-6 pb-12">
+      {/* Cabecera Principal */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Certificación Laboral (Control Laboral)
+          </h1>
+          <p className="text-sm text-slate-500">
+            Control de cumplimiento mensual por contrato, auditoría documental F30-1 / Previred y trazabilidad laboral.
+          </p>
+        </div>
+
+        {/* Botón de recarga rápida */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setModalCrearAbierto(true)}
-            className="btn-primary flex items-center gap-2 text-xs"
+            onClick={() => cargarContratos()}
+            disabled={cargando}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95 disabled:opacity-50"
           >
-            <span>+</span> Nuevo Período Laboral
+            <span>🔄</span> Actualizar
           </button>
         </div>
       </div>
 
-      {/* KPI Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Kpi titulo="Total Períodos" valor={totalPeriodos} sub="registrados" />
-        <Kpi titulo="En Revisión" valor={enRevision} color="text-amber-600" />
-        <Kpi titulo="Períodos Abiertos" valor={abiertos} color="text-sky-600" />
-        <Kpi titulo="Cumplimiento Promed." valor={`${pctPromedio}%`} color="text-emerald-600" />
-      </div>
-
-      {/* Filter bar */}
-      <div className="view-filters flex flex-wrap items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <input
-          className="view-search flex-1 min-w-[200px] rounded-xl border border-slate-200 px-4 py-2 text-xs focus:border-cyan-500 focus:outline-none"
-          placeholder="Buscar período laboral o contrato..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
+      {/* Tarjetas de KPIs Generales */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi
+          titulo="Contratos en Control"
+          valor={kpis.totalContratos}
+          sub="Empresas y proyectos"
+          color="#3D62F5"
         />
-        <select
-          className="view-select rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 focus:border-cyan-500 focus:outline-none"
-          value={filtroEstado}
-          onChange={(e) => setFiltroEstado(e.target.value)}
-        >
-          <option value="todos">Estado: Todos</option>
-          <option value="abierto">Abiertos</option>
-          <option value="en_revision">En Revisión</option>
-          <option value="cerrado">Cerrados</option>
-        </select>
-        <select
-          className="view-select rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 focus:border-cyan-500 focus:outline-none"
-          value={filtroContrato}
-          onChange={(e) => setFiltroContrato(e.target.value)}
-        >
-          <option value="todos">Contrato: Todos</option>
-          {contratos.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
-            </option>
-          ))}
-        </select>
+        <Kpi
+          titulo="Cumplimiento Promedio"
+          valor={`${kpis.cumplimientoPromedio}%`}
+          sub="Período vigente"
+          color={colorCumplimiento(kpis.cumplimientoPromedio)}
+        />
+        <Kpi
+          titulo="Documentos Pendientes"
+          valor={kpis.totalPendientes}
+          sub="Por cargar en nóminas"
+          color="#F97316"
+        />
+        <Kpi
+          titulo="Entregas por Revisar"
+          valor={kpis.totalPorRevisar}
+          sub="Bandeja auditoría ADC"
+          color="#DC2626"
+        />
       </div>
 
-      {/* List / Grid of Periods */}
+      {/* Barra de Filtros y Búsqueda */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        {/* Input Buscador */}
+        <div className="relative flex-1">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+          <input
+            type="text"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre de contrato, código, faena o mandante..."
+            className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-4 text-sm text-slate-800 placeholder-slate-400 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          {busqueda && (
+            <button
+              onClick={() => setBusqueda("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Filtros de Estado */}
+        <div className="flex items-center gap-2">
+          <select
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none"
+          >
+            <option value="todos">Todos los Estados</option>
+            <option value="vigente">Activo / Vigente</option>
+            <option value="en_evaluacion">En Acreditación</option>
+            <option value="terminado">Finalizado</option>
+          </select>
+
+          {/* Toggle Vista: Cuadrícula vs Tabla */}
+          <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-0.5">
+            <button
+              onClick={() => setVista("tarjetas")}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                vista === "tarjetas" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+              title="Vista en tarjetas"
+            >
+              ⊞ Tarjetas
+            </button>
+            <button
+              onClick={() => setVista("tabla")}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                vista === "tabla" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+              title="Vista en tabla"
+            >
+              ☰ Tabla
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Contenido Principal */}
       {cargando ? (
-        <Spinner texto="Cargando períodos laborales..." />
-      ) : periodosFiltrados.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
-          No existen períodos laborales que coincidan con la búsqueda.
+        <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-slate-100 bg-white p-8">
+          <Spinner texto="Cargando contratos y KPIs de Control Laboral..." />
+        </div>
+      ) : error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-rose-700">
+          <p className="font-semibold">{error}</p>
+          <button
+            onClick={() => cargarContratos()}
+            className="mt-3 rounded-xl bg-rose-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : contratosFiltrados.length === 0 ? (
+        <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+          <span className="text-3xl">📂</span>
+          <h3 className="mt-2 text-base font-bold text-slate-800">No se encontraron contratos</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            {busqueda || filtroEstado !== "todos"
+              ? "Prueba ajustando los criterios de búsqueda o restableciendo los filtros."
+              : "No hay contratos dados de alta para esta empresa."}
+          </p>
+          {(busqueda || filtroEstado !== "todos") && (
+            <button
+              onClick={() => {
+                setBusqueda("");
+                setFiltroEstado("todos");
+              }}
+              className="mt-4 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+      ) : vista === "tarjetas" ? (
+        /* Vista en Cuadrícula de Tarjetas (.cl-cts / .cl-ct) */
+        <div className="cl-cts">
+          {contratosFiltrados.map((c) => {
+            const pct = c.porcentaje_cumplimiento || 0;
+            const barColor = colorCumplimiento(pct);
+
+            return (
+              <div
+                key={c.id}
+                onClick={() => irAContrato(c.id)}
+                className="cl-ct group"
+              >
+                {/* Parte Superior: Título y Código */}
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-base font-bold text-slate-900 group-hover:text-blue-600">
+                        {c.nombre}
+                      </h3>
+                      {c.codigo && (
+                        <span className="text-[11px] font-medium text-slate-500">
+                          Código: {c.codigo}
+                        </span>
+                      )}
+                    </div>
+                    <Chip estado={c.estado} />
+                  </div>
+
+                  {/* Metadata de Empresa y Faena */}
+                  <div className="mt-2.5 space-y-1 text-xs text-slate-600">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-slate-400">🏢</span>
+                      <span className="font-medium text-slate-700 truncate">
+                        {c.empresa_proveedora || "Empresa Principal"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-slate-400">📍</span>
+                      <span className="truncate">{c.faena_nombre || "Faena no asignada"}</span>
+                    </div>
+                  </div>
+
+                  {/* Período Vigente */}
+                  <div className="mt-3.5 rounded-xl border border-slate-100 bg-slate-50/80 p-2.5 text-xs">
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span className="font-semibold text-slate-800">
+                        🗓️ {c.periodo_vigente_nombre || "Sin período activo"}
+                      </span>
+                      {c.estado_periodo && (
+                        <span
+                          className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            c.estado_periodo === "cerrado"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : c.estado_periodo === "en_auditoria" || c.estado_periodo === "en_revision"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {c.estado_periodo}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Barra de Cumplimiento (.cl-mbar) */}
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 mb-1">
+                        <span>Cumplimiento período</span>
+                        <span style={{ color: barColor }}>{pct}%</span>
+                      </div>
+                      <div className="cl-mbar">
+                        <div
+                          className="cl-mbar-fill"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: barColor,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Badges de Estado y Acciones Rápidas */}
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {c.por_revisar_count > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-800 animate-pulse">
+                        🔍 {c.por_revisar_count} por revisar
+                      </span>
+                    )}
+
+                    {c.pendientes_carga_count > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                        ⏳ {c.pendientes_carga_count} pendientes
+                      </span>
+                    )}
+
+                    {c.aprobados_count > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        ✓ {c.aprobados_count} aprobados
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Botón Inferior: Ingresar al Contrato */}
+                <div className="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between">
+                  <div className="text-[11px] text-slate-400">
+                    ADC: <span className="font-medium text-slate-600">{c.adc_asignado || "No asignado"}</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 group-hover:translate-x-0.5 transition-transform">
+                    Ingresar al contrato →
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {periodosFiltrados.map((periodo) => (
-            <PeriodoCard
-              key={periodo.id}
-              periodo={periodo}
-              onVerMatriz={() => irADetalle(periodo.id)}
-              onAuditar={() => irADetalle(periodo.id)}
-              onVerDashboard={() => irADetalle(periodo.id)}
-            />
-          ))}
+        /* Vista en Tabla */
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full text-left text-xs text-slate-600">
+            <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Contrato / Código</th>
+                <th className="px-4 py-3">Empresa Proveedora</th>
+                <th className="px-4 py-3">Faena / Mandante</th>
+                <th className="px-4 py-3">Período Vigente</th>
+                <th className="px-4 py-3">Cumplimiento</th>
+                <th className="px-4 py-3">Estado Entregas</th>
+                <th className="px-4 py-3 text-right">Acción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {contratosFiltrados.map((c) => {
+                const pct = c.porcentaje_cumplimiento || 0;
+                const barColor = colorCumplimiento(pct);
+
+                return (
+                  <tr
+                    key={c.id}
+                    onClick={() => irAContrato(c.id)}
+                    className="cursor-pointer hover:bg-slate-50/80 transition"
+                  >
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      <div>{c.nombre}</div>
+                      {c.codigo && <div className="text-[10px] text-slate-400 font-normal">{c.codigo}</div>}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-slate-700">
+                      {c.empresa_proveedora || "Empresa Principal"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>{c.faena_nombre || "Sin faena"}</div>
+                      <div className="text-[10px] text-slate-400">{c.mandante || "Mandante Principal"}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-slate-800">{c.periodo_vigente_nombre}</div>
+                      <span className="text-[10px] text-slate-500 uppercase">{c.estado_periodo}</span>
+                    </td>
+                    <td className="px-4 py-3 min-w-[140px]">
+                      <div className="flex items-center justify-between font-bold mb-1" style={{ color: barColor }}>
+                        <span>{pct}%</span>
+                      </div>
+                      <div className="cl-mbar">
+                        <div className="cl-mbar-fill" style={{ width: `${pct}%`, backgroundColor: barColor }} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {c.por_revisar_count > 0 && (
+                          <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                            🔍 {c.por_revisar_count} por revisar
+                          </span>
+                        )}
+                        {c.pendientes_carga_count > 0 && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                            ⏳ {c.pendientes_carga_count} pend.
+                          </span>
+                        )}
+                        {c.aprobados_count > 0 && (
+                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                            ✓ {c.aprobados_count}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          irAContrato(c.id);
+                        }}
+                        className="rounded-lg bg-blue-50 px-3 py-1.5 font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
+                      >
+                        Ingresar →
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-
-      {/* Modal: Crear Período */}
-      <Modal
-        abierto={modalCrearAbierto}
-        titulo="Crear Nuevo Período Laboral"
-        onCerrar={() => setModalCrearAbierto(false)}
-      >
-        <form onSubmit={handleCrearPeriodo} className="space-y-4 text-xs">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Nombre del Período *</label>
-            <input
-              type="text"
-              required
-              placeholder="Ej: Período Octubre 2026"
-              value={nuevoNombre}
-              onChange={(e) => setNuevoNombre(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 p-2.5 text-xs focus:border-cyan-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Contrato Asociado</label>
-            <select
-              value={nuevoContratoId}
-              onChange={(e) => setNuevoContratoId(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 p-2.5 text-xs focus:border-cyan-500 focus:outline-none"
-            >
-{contratos.length === 0 && <option value="">Sin contratos disponibles</option>}
-{contratos.map((c) => (<option key={c.id} value={c.id}>{c.nombre}</option>))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Fecha Inicio *</label>
-              <input
-                type="date"
-                required
-                value={nuevaFechaInicio}
-                onChange={(e) => setNuevaFechaInicio(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs focus:border-cyan-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Fecha Término *</label>
-              <input
-                type="date"
-                required
-                value={nuevaFechaFin}
-                onChange={(e) => setNuevaFechaFin(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 p-2.5 text-xs focus:border-cyan-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Tipo de Período</label>
-            <select
-              value={nuevoTipo}
-              onChange={(e) => setNuevoTipo(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 p-2.5 text-xs focus:border-cyan-500 focus:outline-none"
-            >
-              <option value="mensual">Mensual</option>
-              <option value="quincenal">Quincenal</option>
-              <option value="otro">Especial / Eventual</option>
-            </select>
-          </div>
-
-          <div className="pt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setModalCrearAbierto(false)}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={guardando}
-              className="rounded-xl bg-cyan-600 px-5 py-2 text-xs font-bold text-white hover:bg-cyan-700 disabled:opacity-50"
-            >
-              {guardando ? "Creando..." : "Crear Período"}
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }
-
