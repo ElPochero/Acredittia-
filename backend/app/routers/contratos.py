@@ -1086,8 +1086,8 @@ def matriz(contrato_id: uuid.UUID,
 
 
 class CompartirContratoIn(BaseModel):
-    nombre: str
-    email: EmailStr
+    email: str
+    nombre: str | None = None
     role: str = "rrhh"
     unidad_negocio: str | None = None
 

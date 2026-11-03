@@ -20,11 +20,22 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import Page, aplicar_orden, err, get_company_id, paginacion, get_current_user
-from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User, ContratoRequisitoLaboral, PeriodoDocumentoVersion, Sujeto
+from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User, ContratoRequisitoLaboral, PeriodoDocumentoVersion, Sujeto, ContratoUsuarioRol
 
 logger = logging.getLogger("acredittia.periodos_laborales")
 
 router = APIRouter(tags=["certificacion_laboral"])
+
+
+def _contratos_asignados_rrhh_ids(db: Session, user: User) -> list[uuid.UUID]:
+    ids = []
+    if getattr(user, "contrato_id", None):
+        ids.append(user.contrato_id)
+    rol_ids = db.execute(
+        select(ContratoUsuarioRol.contrato_id).where(ContratoUsuarioRol.user_id == user.id)
+    ).scalars().all()
+    ids.extend(rol_ids)
+    return list(set(ids))
 
 ORDEN_PERIODOS = {"nombre", "fecha_inicio", "fecha_fin", "estado", "porcentaje_cumplimiento"}
 
@@ -114,6 +125,11 @@ def listar_contratos_certificacion(
     para la Pantalla 1 de Certificación Laboral (CA 1, CA 15).
     """
     q = select(Contrato).where(Contrato.company_id == cid)
+    if getattr(current_user, "role", None) == "rrhh":
+        c_ids = _contratos_asignados_rrhh_ids(db, current_user)
+        if not c_ids:
+            return {"items": [], "total": 0, "page": pag.page, "page_size": pag.page_size}
+        q = q.where(Contrato.id.in_(c_ids))
     
     if busqueda:
         term = f"%{busqueda.strip()}%"
@@ -180,6 +196,8 @@ def listar_contratos_certificacion(
             "codigo": c.codigo,
             "empresa_proveedora": empresa_proveedora,
             "mandante": mandante_nombre,
+            "mandante_nombre": mandante_nombre,
+            "faena": faena_nombre,
             "faena_nombre": faena_nombre,
             "estado": c.estado,
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
@@ -208,6 +226,7 @@ def listar_contratos_certificacion(
 def obtener_contrato_certificacion(
     contrato_id: uuid.UUID,
     cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -216,14 +235,8 @@ def obtener_contrato_certificacion(
     """
     c = _get_contrato(db, cid, contrato_id)
     if getattr(user, "role", None) == "rrhh":
-        from ..models import ContratoUsuarioRol
-        asignado = (user.contrato_id == contrato_id) or bool(db.execute(
-            select(ContratoUsuarioRol).where(
-                ContratoUsuarioRol.contrato_id == contrato_id,
-                ContratoUsuarioRol.user_id == user.id
-            )
-        ).scalars().first())
-        if not asignado:
+        c_ids = _contratos_asignados_rrhh_ids(db, user)
+        if contrato_id not in c_ids:
             raise err(403, "FORBIDDEN", "No tiene acceso a este contrato")
     asegurar_periodos_contrato(db, c)
     
@@ -277,6 +290,7 @@ def obtener_contrato_certificacion(
         "estado_contractual": c.estado,
         "adc_asignado": "Andrea Castillo (ADC)",
         "rrhh_asignado": "María Fernández (RR.HH.)",
+        "encargado_rrhh": "María Fernández (RR.HH.)",
         "periodo_vigente": vigente_data,
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
@@ -327,8 +341,11 @@ def actualizar_requisito_laboral_contrato(
     req_id: uuid.UUID,
     carga: ContratoRequisitoPatch,
     cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "El rol RR.HH. no tiene permisos para configurar requisitos")
     """
     Activa o desactiva obligaciones mensuales a nivel de contrato y propaga a períodos abiertos (Sección 6, CA 5).
     """
@@ -500,8 +517,11 @@ def crear_periodo(
     contrato_id: uuid.UUID,
     carga: PeriodoLaboralIn,
     cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "El rol RR.HH. no tiene permisos para crear períodos")
     """Crea un nuevo perÃ­odo laboral para el contrato."""
     _get_contrato(db, cid, contrato_id)
     
@@ -525,12 +545,17 @@ def listar_periodos_contrato(
     contrato_id: uuid.UUID,
     estado: str | None = None,
     cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     pag: Page = Depends(paginacion),
     orden: str = Query("-fecha_inicio")
 ):
     """Lista los períodos laborales de un contrato asegurando generación según vigencia (CA 2)."""
     c = _get_contrato(db, cid, contrato_id)
+    if getattr(user, "role", None) == "rrhh":
+        c_ids = _contratos_asignados_rrhh_ids(db, user)
+        if contrato_id not in c_ids:
+            raise err(403, "FORBIDDEN", "No tiene acceso a este contrato")
     asegurar_periodos_contrato(db, c)
     
     q = select(PeriodoLaboral).where(PeriodoLaboral.contrato_id == contrato_id)
@@ -1522,8 +1547,14 @@ def obtener_nomina_periodo(
     contrato_id: uuid.UUID,
     periodo_id: uuid.UUID,
     cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    c = _get_contrato(db, cid, contrato_id)
+    if getattr(user, "role", None) == "rrhh":
+        c_ids = _contratos_asignados_rrhh_ids(db, user)
+        if contrato_id not in c_ids:
+            raise err(403, "FORBIDDEN", "No tiene acceso a este contrato")
     """
     Retorna la nómina de trabajadores del contrato para el período mensual (CA 6).
     Si el período está cerrado, retorna la foto inmutable guardada en nomina_snapshot.
@@ -1732,6 +1763,7 @@ def obtener_mis_pendientes_rrhh(
                     observados_rechazados.append({
                         "id": str(d.id),
                         "doc_id": str(d.id),
+                        "documento_id": str(d.id),
                         "nombre": d.nombre or "Documento",
                         "ambito": d.ambito or "contrato",
                         "contrato_id": str(c.id),

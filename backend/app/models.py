@@ -124,7 +124,7 @@ _ENUM_VALUES = {
         "vencido",
         "no_aplica",
     ),
-    "auditoria_accion": ("aprobar", "observar", "rechazar"),
+    "auditoria_accion": ("aprobar", "observar", "rechazar", "cargar", "no_aplica"),
 }
 
 

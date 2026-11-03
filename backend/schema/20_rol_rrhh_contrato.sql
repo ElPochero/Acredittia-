@@ -18,7 +18,16 @@ BEGIN
     END IF;
 END $$;
 
--- 2. Tabla de asignación de usuarios y roles por contrato
+-- 2. Asegurar enum integracion_tipo con 'buk'
+DO $$
+BEGIN
+    BEGIN
+        ALTER TYPE integracion_tipo ADD VALUE IF NOT EXISTS 'buk';
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END;
+END $$;
+
+-- 3. Tabla de asignación de usuarios y roles por contrato
 CREATE TABLE IF NOT EXISTS contrato_usuarios_rol (
     contrato_id UUID NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -212,7 +212,7 @@ def login(body: LoginIn):
                     nombre="María Fernández (RR.HH.)" if is_rrhh else "Andrea Castillo (ADC)",
                     role="rrhh" if is_rrhh else "adc",
                     company_id=company.id,
-                    contrato_id=contrato.id if (contrato and is_rrhh) else None,
+                    contrato_id=None,
                     status="approved",
                     activo=True,
                 )

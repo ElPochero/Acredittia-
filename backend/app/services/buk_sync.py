@@ -46,13 +46,18 @@ def sincronizar_buk_periodo(
     registrando el evento en trazabilidad (CA 13).
     """
     # 1. Comprobar credenciales de Buk en integraciones o variables de entorno
-    buk_int = db.execute(
-        select(Integracion).where(
-            Integracion.company_id == contrato.company_id,
-            Integracion.tipo == "buk",
-            Integracion.estado == "activa"
-        )
-    ).scalars().first()
+    buk_int = None
+    try:
+        from sqlalchemy import cast, Text
+        buk_int = db.execute(
+            select(Integracion).where(
+                Integracion.company_id == contrato.company_id,
+                cast(Integracion.tipo, Text) == "buk",
+                Integracion.estado == "activa"
+            )
+        ).scalars().first()
+    except Exception as e:
+        logger.warning(f"Error comprobando integracion Buk: {e}")
 
     tiene_credenciales = bool(buk_int) or bool(os.getenv("BUK_API_KEY")) or simular_exito
 
@@ -130,7 +135,7 @@ def sincronizar_buk_periodo(
             doc.fecha_carga = ahora
             doc.cargado_por = user.id
             doc.updated_at = ahora
-            v_num = (doc.version or 1)
+            v_num = 1
 
             # Versionado
             v = PeriodoDocumentoVersion(
@@ -163,8 +168,10 @@ def sincronizar_buk_periodo(
         "ok": True,
         "modo": "buk_api",
         "mensaje": f"Sincronización con Buk exitosa: {len(sujetos)} trabajadores y {docs_importados} documentos importados.",
+        "fecha_sincronizacion": ahora.isoformat(),
         "trabajadores_sincronizados": len(sujetos),
         "documentos_sincronizados": docs_importados,
+        "documentos_importados": docs_importados,
         "logs": [
             "Conexión con Buk API establecida con éxito (canal seguro).",
             f"Nómina de contrato validada: {len(sujetos)} trabajadores sincronizados.",
@@ -173,3 +180,4 @@ def sincronizar_buk_periodo(
             "Cumplimiento y KPIs actualizados en tiempo real."
         ]
     }
+
