@@ -152,9 +152,15 @@ def _out(db: Session, s: Sujeto, con_docs: bool = False,
         "stats": stats_sujeto(docs),
     }
     if con_docs:
-        from .documentos import doc_out
-        d["documentos"] = [doc_out(x) for x in docs if not x.es_emsipor]
-        d["documentos_emsipor"] = [doc_out(x) for x in docs if x.es_emsipor]
+        from .documentos import doc_out, resolver_mapa_plataformas, resolver_plataforma_doc
+        mapa = resolver_mapa_plataformas(db, s.company_id, s.contrato_id)
+
+        def _doc(x: Documento) -> dict:
+            p_nom, p_id = resolver_plataforma_doc(x, mapa)
+            return doc_out(x, plataforma=p_nom, plataforma_id=p_id)
+
+        d["documentos"] = [_doc(x) for x in docs if not x.es_emsipor]
+        d["documentos_emsipor"] = [_doc(x) for x in docs if x.es_emsipor]
         lim = db.scalar(select(LicenciaInterna).where(
             LicenciaInterna.company_id == s.company_id,
             LicenciaInterna.sujeto_id == s.id))
@@ -173,7 +179,13 @@ def checklist_out(db: Session, s: Sujeto) -> dict:
     `GET /personal/{id}/documentos`, que es lo que consulta la pantalla del
     expediente cuando refresca solo la lista tras subir un archivo.
     """
-    from .documentos import doc_out
+    from .documentos import doc_out, resolver_mapa_plataformas, resolver_plataforma_doc
+    mapa = resolver_mapa_plataformas(db, s.company_id, s.contrato_id)
+
+    def _doc(x: Documento) -> dict:
+        p_nom, p_id = resolver_plataforma_doc(x, mapa)
+        return doc_out(x, plataforma=p_nom, plataforma_id=p_id)
+
     docs = docs_de_sujeto(db, s)
     core = [d for d in docs if not d.es_emsipor]
     emsipor = [d for d in docs if d.es_emsipor]
@@ -182,8 +194,8 @@ def checklist_out(db: Session, s: Sujeto) -> dict:
                    "rut": s.rut, "patente": s.patente, "estado": s.estado,
                    "cargo": s.cargo,
                    "contrato_id": str(s.contrato_id)},
-        "items": [doc_out(d) for d in core],
-        "documentos_emsipor": [doc_out(d) for d in emsipor],
+        "items": [_doc(d) for d in core],
+        "documentos_emsipor": [_doc(d) for d in emsipor],
         "total": len(core),
         "stats": stats_sujeto(docs),
     }

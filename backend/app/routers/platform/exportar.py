@@ -341,6 +341,22 @@ def _stream(buf: tempfile.SpooledTemporaryFile):
 
 
 # ------------------------------------------------------------------ endpoints
+@router.get("/plataformas")
+def plataformas_exportar(contrato_id: uuid.UUID | None = Query(None),
+                         db: Session = Depends(get_db),
+                         cid: uuid.UUID = Depends(get_company_id),
+                         user: User = Depends(get_current_user)):
+    """Plataformas disponibles para exportar: efectivas del contrato o lista por defecto."""
+    if contrato_id:
+        c = _contrato(db, cid, contrato_id, user)
+        if c:
+            from .plataformas import plataformas_efectivas
+            efectivas = plataformas_efectivas(db, cid, c)
+            if efectivas:
+                return {"items": [e["nombre"] for e in efectivas if e.get("nombre")]}
+    return {"items": list(PLATAFORMAS)}
+
+
 @router.get("/arbol")
 def arbol(contrato_id: uuid.UUID | None = Query(None),
           plataforma: str = Query("SIGA"),

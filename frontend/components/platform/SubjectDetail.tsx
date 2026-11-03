@@ -78,7 +78,7 @@ function FilaDoc({
               )}
               {doc.plataforma && (
                 <span className="text-[0.55rem] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded italic uppercase tracking-wider">
-                  {doc.plataforma === 'siga' ? (
+                  {doc.plataforma.toUpperCase() === 'SIGA' ? (
                     <span className="flex items-center gap-0.5"><span className="text-blue-400">((•))</span> SIGA</span>
                   ) : doc.plataforma}
                 </span>
@@ -124,7 +124,7 @@ function FilaDoc({
               )}
               
               <div className="h-[26px] border border-slate-200 rounded-md text-[0.6rem] font-medium flex items-center overflow-hidden ml-auto">
-                <span className="bg-slate-100 px-2 h-full flex items-center text-slate-500 border-r border-slate-200 uppercase tracking-wide text-[0.55rem] font-bold">SIGA:</span>
+                <span className="bg-slate-100 px-2 h-full flex items-center text-slate-500 border-r border-slate-200 uppercase tracking-wide text-[0.55rem] font-bold">{doc.plataforma || "Plataforma"}:</span>
                 <select className="bg-white h-full px-2 outline-none text-slate-600 cursor-pointer hover:bg-slate-50 appearance-none pr-6 relative bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM5NDkzYjgiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSI2IDkgMTIgMTUgMTggOSI+PC9wb2x5bGluZT48L3N2Zz4=')] bg-[length:12px] bg-no-repeat bg-[right_6px_center]">
                   <option>Sin subir</option>
                   <option>Subido</option>

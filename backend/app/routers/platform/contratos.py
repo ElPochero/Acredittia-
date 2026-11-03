@@ -789,9 +789,10 @@ def docs_empresa(contrato_id: uuid.UUID, p: Page = Depends(paginacion),
                  cid: uuid.UUID = Depends(get_company_id),
                  user: User = Depends(get_current_user)):
     """Checklist de ámbito empresa del contrato (los que cuelgan del contrato)."""
-    from .documentos import doc_out
+    from .documentos import doc_out, resolver_mapa_plataformas, resolver_plataforma_doc
 
     c = _get_contrato(db, cid, contrato_id, user)
+    mapa = resolver_mapa_plataformas(db, cid, c.id)
     q = select(Documento).where(Documento.company_id == cid,
                                 Documento.contrato_id == c.id)
     if p.search:
@@ -799,7 +800,12 @@ def docs_empresa(contrato_id: uuid.UUID, p: Page = Depends(paginacion),
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
     filas = list(db.scalars(q.order_by(Documento.titulo)
                             .offset(p.offset).limit(p.page_size)))
-    return sobre([doc_out(d) for d in filas], total, p)
+
+    def _doc(d: Documento) -> dict:
+        p_nom, p_id = resolver_plataforma_doc(d, mapa)
+        return doc_out(d, plataforma=p_nom, plataforma_id=p_id)
+
+    return sobre([_doc(d) for d in filas], total, p)
 
 
 @router.get("/{contrato_id}/personal")

@@ -78,13 +78,109 @@ class ConfirmarArchivoIn(BaseModel):
 # ============================================================================
 # Serializadores
 # ============================================================================
-def doc_out(d: Documento, archivos: int | None = None) -> dict:
+def resolver_mapa_plataformas(db: Session, cid: uuid.UUID, contrato_id: uuid.UUID | None) -> dict:
+    """Resuelve el mapa de plataformas y requisitos del contrato para doc_out.
+    Permite asociar a cada documento su plataforma asignada real y plataforma_id.
+    """
+    if not contrato_id:
+        return {}
+
+    from ...models import Contrato, ContratoPlataforma, ContratoRequisito, FaenaPlataforma
+
+    id_a_nombre: dict[str, str] = {}
+    slug_a_id: dict[str, str] = {}
+
+    plats = list(db.scalars(
+        select(ContratoPlataforma).where(
+            ContratoPlataforma.company_id == cid,
+            ContratoPlataforma.contrato_id == contrato_id,
+        )
+    ))
+    for p in plats:
+        id_a_nombre[str(p.id)] = p.nombre
+        slug_a_id[p.nombre.strip().lower()] = str(p.id)
+
+    contrato = db.get(Contrato, contrato_id)
+    if contrato and contrato.faena_id:
+        faena_plats = list(db.scalars(
+            select(FaenaPlataforma).where(FaenaPlataforma.faena_id == contrato.faena_id)
+        ))
+        for fp in faena_plats:
+            if str(fp.id) not in id_a_nombre:
+                id_a_nombre[str(fp.id)] = fp.nombre
+            slug_a_id.setdefault(fp.nombre.strip().lower(), str(fp.id))
+
+    reqs = list(db.scalars(
+        select(ContratoRequisito).where(
+            ContratoRequisito.company_id == cid,
+            ContratoRequisito.contrato_id == contrato_id,
+            ContratoRequisito.activo.is_(True),
+        )
+    ))
+
+    por_template: dict[str, tuple[str, str | None]] = {}
+    por_titulo: dict[str, tuple[str, str | None]] = {}
+
+    for r in reqs:
+        if r.vinculo_tipo == "plataforma" and r.vinculo_ref:
+            ref_str = str(r.vinculo_ref)
+            nom = id_a_nombre.get(ref_str)
+            if not nom:
+                cp = db.get(ContratoPlataforma, r.vinculo_ref)
+                if cp:
+                    nom = cp.nombre
+                    id_a_nombre[ref_str] = nom
+            if nom:
+                if r.requisito_template_id:
+                    por_template[str(r.requisito_template_id)] = (nom, ref_str)
+                por_titulo[r.titulo.strip().lower()] = (nom, ref_str)
+
+    return {
+        "id_a_nombre": id_a_nombre,
+        "slug_a_id": slug_a_id,
+        "por_template": por_template,
+        "por_titulo": por_titulo,
+    }
+
+
+def resolver_plataforma_doc(d: Documento, mapa: dict | None) -> tuple[str | None, str | None]:
+    """Devuelve (plataforma_nombre, plataforma_id) para un documento."""
+    if not mapa:
+        plat = d.template.plataforma if d.template else None
+        return plat, None
+
+    if d.template_id and str(d.template_id) in mapa.get("por_template", {}):
+        return mapa["por_template"][str(d.template_id)]
+
+    tit = (d.titulo or "").strip().lower()
+    if tit in mapa.get("por_titulo", {}):
+        return mapa["por_titulo"][tit]
+
+    if d.template and d.template.plataforma:
+        nom = d.template.plataforma
+        ref = mapa.get("slug_a_id", {}).get(nom.strip().lower())
+        return nom, ref
+
+    return None, None
+
+
+def doc_out(
+    d: Documento,
+    archivos: int | None = None,
+    plataforma: str | None = None,
+    plataforma_id: str | None = None,
+) -> dict:
     """Documento con su checklist. Lo importan `sujetos.py` y `contratos.py`.
 
     Con `archivos` se informa solo el conteo y no la lista: en los listados
     transversales cargar los archivos de cada fila sería un N+1 por documento.
     """
     dias = (d.vence - date.today()).days if d.vence else None
+    if plataforma is None:
+        plataforma = getattr(d, "_plataforma", None)
+    if plataforma_id is None:
+        plataforma_id = getattr(d, "_plataforma_id", None)
+    plat = plataforma if plataforma is not None else (d.template.plataforma if d.template else None)
     salida = {
         "id": str(d.id), "titulo": d.titulo, "obligatorio": d.obligatorio,
         "estado": d.estado, "estado_calc": d.estado_calc,
@@ -92,7 +188,8 @@ def doc_out(d: Documento, archivos: int | None = None) -> dict:
         "dias_para_vencer": dias, "es_emsipor": d.es_emsipor,
         "template_id": str(d.template_id) if d.template_id else None,
         "ejemplo_clave": d.template.ejemplo_clave if d.template else None,
-        "plataforma": d.template.plataforma if d.template else None,
+        "plataforma": plat,
+        "plataforma_id": plataforma_id,
     }
     if archivos is None:
         salida["archivos"] = [{

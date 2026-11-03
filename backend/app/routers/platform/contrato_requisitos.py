@@ -96,12 +96,25 @@ def _iso(v: datetime | None) -> str | None:
     return v.isoformat() if v else None
 
 
-def _out(r: ContratoRequisito) -> dict:
+def _out(r: ContratoRequisito, mapa_plataformas: dict[str, str] | None = None,
+         db: Session | None = None) -> dict:
     """Serializador de un requisito real del contrato (editable)."""
+    plat_nom: str | None = None
+    ref_str = str(r.vinculo_ref) if r.vinculo_ref else None
+    if r.vinculo_tipo == "plataforma" and ref_str:
+        if mapa_plataformas and ref_str in mapa_plataformas:
+            plat_nom = mapa_plataformas[ref_str]
+        elif db:
+            from ...models import ContratoPlataforma
+            cp = db.get(ContratoPlataforma, r.vinculo_ref)
+            if cp:
+                plat_nom = cp.nombre
     return {
         "id": str(r.id),
         "vinculo_tipo": r.vinculo_tipo,
-        "vinculo_ref": str(r.vinculo_ref) if r.vinculo_ref else None,
+        "vinculo_ref": ref_str,
+        "plataforma": plat_nom,
+        "plataforma_id": ref_str if r.vinculo_tipo == "plataforma" else None,
         "ambito": r.ambito, "titulo": r.titulo, "obligatorio": r.obligatorio,
         "cargo_id": str(r.cargo_id) if r.cargo_id else None,
         "origen": r.origen,
@@ -115,11 +128,17 @@ def _out(r: ContratoRequisito) -> dict:
 
 
 def _out_base(t: RequisitoTemplate, ambito: str, vinculo_tipo: str,
-              vinculo_ref: str | None, cargo_id: uuid.UUID | None = None) -> dict:
+              vinculo_ref: str | None, cargo_id: uuid.UUID | None = None,
+              mapa_plataformas: dict[str, str] | None = None) -> dict:
     """Requisito de origen `base`: proyección de una plantilla, sin fila propia."""
+    plat_nom = t.plataforma
+    if vinculo_ref and mapa_plataformas and vinculo_ref in mapa_plataformas:
+        plat_nom = mapa_plataformas[vinculo_ref]
     return {
         "id": None,                     # no existe en contrato_requisitos
         "vinculo_tipo": vinculo_tipo, "vinculo_ref": vinculo_ref,
+        "plataforma": plat_nom,
+        "plataforma_id": vinculo_ref if vinculo_tipo == "plataforma" else None,
         "ambito": ambito, "titulo": t.titulo, "obligatorio": t.obligatorio,
         "cargo_id": str(cargo_id) if cargo_id else None,
         "origen": "base", "template_id": str(t.id),
@@ -143,7 +162,8 @@ def _refs_por_plataforma(efectivas: list[dict]) -> dict[str, str]:
 
 def _proyectar_base(db: Session, contrato: Contrato, efectivas: list[dict], *,
                     ambito: str | None = None,
-                    cargo_id: uuid.UUID | None = None) -> list[dict]:
+                    cargo_id: uuid.UUID | None = None,
+                    mapa_plataformas: dict[str, str] | None = None) -> list[dict]:
     """Requisitos base del contrato, proyectados desde `requisito_templates`.
 
     El vínculo se deduce de `requisito_templates.plataforma`: si el texto de la
@@ -166,7 +186,8 @@ def _proyectar_base(db: Session, contrato: Contrato, efectivas: list[dict], *,
             ref = por_slug.get(slug_plataforma(t.plataforma)) if t.plataforma else None
             salida.append(_out_base(
                 t, a, "plataforma" if ref else "otro", ref,
-                cargo_id if a == "personal" else None))
+                cargo_id if a == "personal" else None,
+                mapa_plataformas=mapa_plataformas))
     return salida
 
 
@@ -383,16 +404,22 @@ def listar_requisitos(contrato_id: uuid.UUID,
         raise err(400, "AMBITO_INVALIDO",
                   f"Ámbito debe ser uno de: {', '.join(AMBITOS)}")
     efectivas = plataformas_efectivas(db, cid, c)
+    mapa_plat: dict[str, str] = {}
+    for e in efectivas:
+        if e.get("id"):
+            mapa_plat[str(e["id"])] = e["nombre"]
+        if e.get("faena_plataforma_id"):
+            mapa_plat[str(e["faena_plataforma_id"])] = e["nombre"]
 
     items: list[dict] = []
     if origen != "base":
         for r in _reales(db, cid, c.id):
             if origen and r.origen != origen:
                 continue
-            items.append(_out(r))
+            items.append(_out(r, mapa_plat, db=db))
     if origen in (None, "base"):
         items += _proyectar_base(db, c, efectivas, ambito=ambito,
-                                 cargo_id=cargo_id)
+                                 cargo_id=cargo_id, mapa_plataformas=mapa_plat)
 
     ref_txt = str(vinculo_ref) if vinculo_ref else None
     if vinculo_tipo:
@@ -498,10 +525,10 @@ def crear_requisitos(contrato_id: uuid.UUID,
 
     if es_bulk:
         return {"creados": len(creados), "omitidos": omitidos,
-                "items": [_out(r) for r in creados],
+                "items": [_out(r, db=db) for r in creados],
                 "documentos_creados": docs,
                 "heredadas_materializadas": materializadas}
-    salida = _out(creados[0])
+    salida = _out(creados[0], db=db)
     salida["documentos_creados"] = docs
     salida["heredadas_materializadas"] = materializadas
     return salida
@@ -581,7 +608,7 @@ def editar_requisito(contrato_id: uuid.UUID, rid: uuid.UUID,
                   f"({', '.join(sorted(data))})", user_id=user.id,
                   entidad_tipo="contrato_requisito", entidad_id=r.id)
     db.commit()
-    return _out(r)
+    return _out(r, db=db)
 
 
 @router.delete("/requisitos/{rid}")

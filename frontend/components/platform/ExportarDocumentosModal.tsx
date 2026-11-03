@@ -45,10 +45,27 @@ interface ExportarDocumentosModalProps {
 export function ExportarDocumentosModal({
   abierto, onCerrar, contrato, plataformas,
 }: ExportarDocumentosModalProps) {
+  const [plataformasContrato, setPlataformasContrato] = useState<PlataformaContrato[]>(plataformas ?? []);
+
+  useEffect(() => {
+    if (plataformas && plataformas.length > 0) {
+      setPlataformasContrato(plataformas);
+    } else if (contrato?.id) {
+      Api.plataformas.listar(contrato.id)
+        .then((res) => {
+          if (res?.items && res.items.length > 0) {
+            setPlataformasContrato(res.items);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [contrato?.id, plataformas]);
+
   const opciones = useMemo(() => {
-    const nombres = (plataformas ?? []).map((p) => p.nombre).filter(Boolean);
+    const fuente = plataformas?.length ? plataformas : plataformasContrato;
+    const nombres = fuente.map((p) => p.nombre).filter(Boolean);
     return nombres.length ? nombres : PLATAFORMAS_POR_DEFECTO;
-  }, [plataformas]);
+  }, [plataformas, plataformasContrato]);
 
   const [plataforma, setPlataforma] = useState(opciones[0]);
   const [marcadas, setMarcadas] = useState<Record<SeccionExport, boolean>>({
@@ -132,7 +149,7 @@ export function ExportarDocumentosModal({
     return salida;
   }, [preview]);
 
-  const plataformaElegida = plataformas?.find((p) => p.nombre === plataforma);
+  const plataformaElegida = (plataformas?.length ? plataformas : plataformasContrato)?.find((p) => p.nombre === plataforma);
   const pid = plataformaElegida
     ? plataformaElegida.id || plataformaElegida.faena_plataforma_id || null
     : null;

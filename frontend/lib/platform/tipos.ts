@@ -179,6 +179,7 @@ export type Documento = {
   template_id: string | null;
   ejemplo_clave: string | null;
   plataforma: string | null;
+  plataforma_id?: string | null;
   archivos_count: number;
   /** Solo en el detalle y en los checklist; en los listados llega el conteo. */
   archivos?: Archivo[];
@@ -355,6 +356,7 @@ export type PlantillaRequisito = {
   obligatorio: boolean;
   vigencia_meses: number | null;
   plataforma: string | null;
+  plataforma_id?: string | null;
   ejemplo_clave: string | null;
   archivo_ejemplo?: string | null;
   faena_id: string | null;
@@ -696,6 +698,7 @@ export type RequisitosCargo = {
     obligatorio: boolean;
     vigencia_meses: number | null;
     plataforma: string | null;
+  plataforma_id?: string | null;
     ejemplo_clave: string | null;
   }[];
   emsipor: RequisitosCargo["personal"];
@@ -759,6 +762,7 @@ export type Alerta = {
   titulo: string;
   descripcion: string | null;
   plataforma: string | null;
+  plataforma_id?: string | null;
   documento_id: string | null;
   sujeto_id: string | null;
   contrato_id: string | null;
@@ -835,6 +839,7 @@ export type ActividadFeed = {
 
 export type ActividadFila = ActividadFeed & {
   plataforma: string | null;
+  plataforma_id?: string | null;
   usuario: { id?: string; nombre: string | null; email?: string; rol?: Rol };
 };
 
@@ -1219,6 +1224,7 @@ export type RequisitoFila = {
   tipo: TipoRequisito | null;
   obligatorio: boolean;
   plataforma: string | null;
+  plataforma_id?: string | null;
   ejemplo_clave: string | null;
   archivo_ejemplo?: string | null;
   vigencia_meses: number | null;
