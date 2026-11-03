@@ -116,6 +116,25 @@ def _emitir_alerta_vencimiento(db: Session, doc: Documento,
         html=html_body,
         texto=texto,
     )
+    if contrato and getattr(contrato, "alertas_config", None):
+        cfg = contrato.alertas_config or {}
+        areas = cfg.get("areas", [])
+        if areas:
+            from ...routers.platform.contratos import resolver_area_para_doc
+            a_id = resolver_area_para_doc(cfg, doc.titulo, "Empresa" if doc.contrato_id else "Personal")
+            area_obj = next((a for a in areas if a.get("id") == a_id), None)
+            if area_obj and area_obj.get("encargados"):
+                for e in area_obj["encargados"]:
+                    if e.get("email"):
+                        despachar_alerta_email(
+                            db, doc.company_id, evento, f"[{area_obj['nombre']}] {asunto}", desc,
+                            contrato_id=doc.contrato_id,
+                            sujeto_email=e["email"],
+                            severidad="critica" if doc.estado_calc == "venc" else "advertencia",
+                            contrato_nombre=contrato_nombre,
+                            html=html_body,
+                            texto=texto,
+                        )
 
 
 def _emitir_alerta_faltantes(db: Session, c: Contrato, n: int) -> None:

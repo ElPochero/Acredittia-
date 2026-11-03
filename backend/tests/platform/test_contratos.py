@@ -1130,3 +1130,58 @@ def test_requisitos_en_plataforma_heredada_materializa_y_crea(app_cliente, empre
     res = r_add.json()
     assert res["titulo"] == "Requisito Plataforma Heredada"
     assert res["heredadas_materializadas"] > 0
+
+
+# ============================================================================
+# Alertas IA por área y segmentación (Día 4 - Req 5 y Req 6)
+# ============================================================================
+def test_alertas_ia_nuevos_endpoints_config_y_areas(app_cliente, empresa_a, contrato_a):
+    cid = contrato_a["id"]
+    # 1. GET inicial: default 30 días anticipación, 5 días faltantes, 6 áreas base
+    r = app_cliente.get(f"{API}/contratos/{cid}/alertas-ia", headers=empresa_a["headers"])
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["anticipacion_dias"] == 30
+    assert data["faltantes_dias"] == 5
+    assert len(data["areas"]) == 6
+    assert any(a["id"] == "seg" and a["nombre"] == "Seguridad" for a in data["areas"])
+    assert len(data["grupos"]) >= 5
+    assert len(data["requisitos"]) > 0
+
+    # 2. PUT: Modificar anticipación a 45d, faltantes a 7d, agregar nueva área y asignaciones
+    nueva_area = {
+        "id": "medio_ambiente",
+        "nombre": "Medio Ambiente",
+        "color": "#059669",
+        "bg": "#d1fae5",
+        "encargados": [{"nombre": "Claudio Bravo", "email": "claudio.bravo@empresa.cl"}]
+    }
+    payload = {
+        "anticipacion_dias": 45,
+        "faltantes_dias": 7,
+        "mail": True,
+        "wa": False,
+        "cc_acreditaciones": True,
+        "areas": data["areas"] + [nueva_area],
+        "asignaciones": {"Cédula de Identidad": "rrhh", "Programa de Trabajo SSO": "medio_ambiente"}
+    }
+    r = app_cliente.put(f"{API}/contratos/{cid}/alertas-ia", headers=empresa_a["headers"], json=payload)
+    assert r.status_code == 200, r.text
+    actualizado = r.json()
+    assert actualizado["anticipacion_dias"] == 45
+    assert actualizado["faltantes_dias"] == 7
+    assert len(actualizado["areas"]) == 7
+    assert any(a["id"] == "medio_ambiente" for a in actualizado["areas"])
+    assert actualizado["asignaciones"]["Cédula de Identidad"] == "rrhh"
+
+    # Verificar sincronización con alerta_anticipacion_dias en contrato
+    r_c = app_cliente.get(f"{API}/contratos/{cid}", headers=empresa_a["headers"])
+    assert r_c.json()["alerta_anticipacion_dias"] == 45
+
+    # 3. POST /alertas-ia/enviar: disparo de alertas segmentadas por área
+    r_envio = app_cliente.post(f"{API}/contratos/{cid}/alertas-ia/enviar", headers=empresa_a["headers"])
+    assert r_envio.status_code == 200, r_envio.text
+    envio_res = r_envio.json()
+    assert envio_res["ok"] is True
+    assert "envios_por_area" in envio_res
+    assert len(envio_res["envios_por_area"]) >= 6
