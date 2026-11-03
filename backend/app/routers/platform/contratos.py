@@ -212,6 +212,55 @@ class ContratoPatch(BaseModel):
 
 
 
+AREAS_BASE_DEFAULT = [
+    {"id": "seg", "nombre": "Seguridad", "color": "#b91c1c", "bg": "#fee2e2", "encargados": [{"nombre": "Carolina Rojas", "email": "carolina.rojas@demospa.cl"}, {"nombre": "Luis Pizarro", "email": "luis.pizarro@demospa.cl"}]},
+    {"id": "cap", "nombre": "Capacitaciones", "color": "#7c3aed", "bg": "#ede9fe", "encargados": [{"nombre": "Felipe Araya", "email": "felipe.araya@demospa.cl"}]},
+    {"id": "rrhh", "nombre": "Recursos Humanos", "color": "#0369a1", "bg": "#e0f2fe", "encargados": [{"nombre": "Paula Fuentes", "email": "rrhh@acredittia.cl"}]},
+    {"id": "flota", "nombre": "Mantención y Flota", "color": "#b45309", "bg": "#fef3c7", "encargados": [{"nombre": "Marcelo Díaz", "email": "marcelo.diaz@demospa.cl"}]},
+    {"id": "prev", "nombre": "Prevención de Riesgos", "color": "#15803d", "bg": "#dcfce7", "encargados": [{"nombre": "Andrea Castillo", "email": "andrea.castillo@demospa.cl"}]},
+    {"id": "acr", "nombre": "Acreditaciones", "color": "#1d4ed8", "bg": "#dbeafe", "encargados": [{"nombre": "José Soto", "email": "jose.soto@demospa.cl"}]}
+]
+
+GRUPOS_REQUISITOS = [
+    {"id": "exam", "nombre": "Exámenes de Salud y Ocupacionales", "area_default": "seg", "rx": re.compile(r"examen|salud|altura|psicosens|alcohol y drogas|audiometr|espirometr", re.I)},
+    {"id": "curso", "nombre": "Cursos y Capacitaciones", "area_default": "cap", "rx": re.compile(r"curso|capacitaci|inducci|manejo defensivo|\birl\b|\bodi\b|charla|licencia interna", re.I)},
+    {"id": "lab", "nombre": "Documentación Laboral y RRHH", "area_default": "rrhh", "rx": re.compile(r"contrato de trabajo|anexo|finiquito|reglamento|estudios|residencia|c[eé]dula|liquidaci|previred|f30", re.I)},
+    {"id": "veh", "nombre": "Vehículos y Equipos", "area_default": "flota", "rx": re.compile(r"circulaci|soap|revisi[oó]n t[eé]cnica|gps|multiflota|l[aá]minas|inspecci[oó]n|mantenci|operatividad|antivuelco|padr[oó]n|tac[oó]grafo", re.I)},
+    {"id": "sso", "nombre": "Documentos de Empresa / Arranque", "area_default": "prev", "rx": re.compile(r".*")}
+]
+
+def resolver_grupo_doc(titulo: str, origen: str) -> str:
+    if origen == "Empresa":
+        return "sso"
+    norm = normalizar_req(titulo)
+    for g in GRUPOS_REQUISITOS[:-1]:
+        if g["rx"].search(titulo) or g["rx"].search(norm):
+            return g["id"]
+    return "sso"
+
+def resolver_area_para_doc(cfg: dict, titulo: str, origen: str) -> str:
+    asig = cfg.get("asignaciones", {})
+    if titulo in asig:
+        return asig[titulo]
+    norm = normalizar_req(titulo)
+    if norm in asig:
+        return asig[norm]
+    g_id = resolver_grupo_doc(titulo, origen)
+    if g_id in asig:
+        return asig[g_id]
+    grupo = next((g for g in GRUPOS_REQUISITOS if g["id"] == g_id), None)
+    return grupo["area_default"] if grupo else "acr"
+
+
+class AlertasIaPayloadIn(BaseModel):
+    anticipacion_dias: int = Field(30, ge=1, le=180)
+    faltantes_dias: int = Field(5, ge=1, le=60)
+    mail: bool = True
+    wa: bool = False
+    cc_acreditaciones: bool = True
+    areas: list[dict] = []
+    asignaciones: dict[str, str] = {}
+
 class AlertasIaConfigIn(BaseModel):
 
     """Configuración editable de recordatorios. Validación cerrada por diseño."""
@@ -1410,6 +1459,286 @@ def editar_alertas_ia_config(contrato_id: uuid.UUID, body: AlertasIaConfigIn,
 
 
 
+
+
+
+
+@router.get("/{contrato_id}/alertas-ia")
+def get_alertas_ia(contrato_id: uuid.UUID,
+                   db: Session = Depends(get_db),
+                   cid: uuid.UUID = Depends(get_company_id),
+                   user: User = Depends(get_current_user)):
+    """Req 5 & 6: Configuración de Alertas IA por área, reglas de anticipación/faltantes y asignaciones."""
+    c = _get_contrato(db, cid, contrato_id, user)
+    cfg = c.alertas_config or {}
+
+    anticipacion = cfg.get("anticipacion_dias", c.alerta_anticipacion_dias or 30)
+    faltantes = cfg.get("faltantes_dias", 5)
+    mail = cfg.get("mail", True)
+    wa = cfg.get("wa", False)
+    cc = cfg.get("cc_acreditaciones", True)
+    areas = cfg.get("areas") or [dict(a) for a in AREAS_BASE_DEFAULT]
+    asignaciones = cfg.get("asignaciones", {})
+
+    docs_empresa = list(db.scalars(
+        select(Documento).where(Documento.contrato_id == c.id)
+    ).all())
+    
+    sujetos = list(db.scalars(
+        select(Sujeto).where(Sujeto.company_id == cid, Sujeto.contrato_id == c.id, Sujeto.estado != "baja")
+    ).all())
+    sujetos_ids = [s.id for s in sujetos]
+    sujetos_map = {s.id: s for s in sujetos}
+
+    docs_sujetos = list(db.scalars(
+        select(Documento).where(Documento.sujeto_id.in_(sujetos_ids))
+    ).all()) if sujetos_ids else []
+
+    todos_docs = docs_empresa + docs_sujetos
+
+    vistos_req = set()
+    requisitos = []
+    for d in todos_docs:
+        if d.titulo in vistos_req:
+            continue
+        vistos_req.add(d.titulo)
+        origen = "Empresa" if d.contrato_id else ("Personal" if sujetos_map.get(d.sujeto_id) and sujetos_map[d.sujeto_id].tipo == "trabajador" else "Equipos")
+        g_id = resolver_grupo_doc(d.titulo, origen)
+        a_id = resolver_area_para_doc(cfg, d.titulo, origen)
+        requisitos.append({
+            "titulo": d.titulo,
+            "origen": origen,
+            "grupo_id": g_id,
+            "area_id": a_id
+        })
+
+    if not requisitos:
+        plantilla_reqs = [
+            ("Cédula de Identidad", "Personal", "lab"),
+            ("Contrato de Trabajo", "Personal", "lab"),
+            ("Certificado de Salud y Examen de Altura", "Personal", "exam"),
+            ("Inducción Hombre Nuevo", "Personal", "curso"),
+            ("Manejo Defensivo", "Personal", "curso"),
+            ("Revisión Técnica", "Equipos", "veh"),
+            ("SOAP", "Equipos", "veh"),
+            ("Permiso de Circulación", "Equipos", "veh"),
+            ("Programa de Trabajo SSO", "Empresa", "sso"),
+            ("Matriz de Riesgo", "Empresa", "sso"),
+        ]
+        for t, orig, gid in plantilla_reqs:
+            a_id = resolver_area_para_doc(cfg, t, orig)
+            requisitos.append({"titulo": t, "origen": orig, "grupo_id": gid, "area_id": a_id})
+
+    hoy = date.today()
+    proximos = []
+    for d in todos_docs:
+        origen = "Empresa" if d.contrato_id else ("Personal" if sujetos_map.get(d.sujeto_id) and sujetos_map[d.sujeto_id].tipo == "trabajador" else "Equipos")
+        who = "Empresa" if d.contrato_id else (sujetos_map[d.sujeto_id].nombre if d.sujeto_id in sujetos_map else "Sujeto")
+        a_id = resolver_area_para_doc(cfg, d.titulo, origen)
+        area_obj = next((a for a in areas if a["id"] == a_id), None)
+        area_nombre = area_obj["nombre"] if area_obj else "Acreditaciones"
+
+        if d.estado_calc == "falta":
+            proximos.append({
+                "tipo": "falta",
+                "titulo": d.titulo,
+                "destinatario": who,
+                "area_id": a_id,
+                "area_nombre": area_nombre,
+                "fecha_aviso": hoy.isoformat(),
+                "detalle": f"Documento faltante · recordatorio cada {faltantes} días"
+            })
+        elif d.vence:
+            dias = (d.vence - hoy).days
+            if dias < 0:
+                proximos.append({
+                    "tipo": "venc",
+                    "titulo": d.titulo,
+                    "destinatario": who,
+                    "area_id": a_id,
+                    "area_nombre": area_nombre,
+                    "fecha_aviso": hoy.isoformat(),
+                    "detalle": f"Vencido hace {-dias} días · aviso diario"
+                })
+            elif dias <= anticipacion:
+                proximos.append({
+                    "tipo": "porv",
+                    "titulo": d.titulo,
+                    "destinatario": who,
+                    "area_id": a_id,
+                    "area_nombre": area_nombre,
+                    "fecha_aviso": hoy.isoformat(),
+                    "detalle": f"Vence en {dias} días ({d.vence.isoformat()})"
+                })
+            elif dias <= anticipacion + 45:
+                fecha_prog = d.vence - timedelta(days=anticipacion)
+                proximos.append({
+                    "tipo": "prog",
+                    "titulo": d.titulo,
+                    "destinatario": who,
+                    "area_id": a_id,
+                    "area_nombre": area_nombre,
+                    "fecha_aviso": fecha_prog.isoformat(),
+                    "detalle": f"Vence el {d.vence.isoformat()} · aviso {anticipacion} días antes"
+                })
+
+    grupos_resp = [{"id": g["id"], "nombre": g["nombre"], "area_default": g["area_default"]} for g in GRUPOS_REQUISITOS]
+
+    return {
+        "contrato_id": str(c.id),
+        "anticipacion_dias": anticipacion,
+        "faltantes_dias": faltantes,
+        "mail": mail,
+        "wa": wa,
+        "cc_acreditaciones": cc,
+        "areas": areas,
+        "asignaciones": asignaciones,
+        "grupos": grupos_resp,
+        "requisitos": requisitos,
+        "proximos_envios": proximos[:50]
+    }
+
+
+@router.put("/{contrato_id}/alertas-ia")
+def put_alertas_ia(contrato_id: uuid.UUID,
+                   body: AlertasIaPayloadIn,
+                   db: Session = Depends(get_db),
+                   cid: uuid.UUID = Depends(get_company_id),
+                   user: User = Depends(get_current_user)):
+    """Req 5 & 6: Actualiza reglas de anticipación, faltantes, áreas y asignaciones."""
+    if user.role == "visor":
+        raise err(403, "ROL_INSUFICIENTE", "El visor no puede modificar la configuración de alertas")
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    c.alerta_anticipacion_dias = body.anticipacion_dias
+    c.alertas_config = {
+        "anticipacion_dias": body.anticipacion_dias,
+        "faltantes_dias": body.faltantes_dias,
+        "mail": body.mail,
+        "wa": body.wa,
+        "cc_acreditaciones": body.cc_acreditaciones,
+        "areas": body.areas,
+        "asignaciones": body.asignaciones,
+    }
+    c.updated_at = datetime.now(timezone.utc)
+    actividad.log(db, cid, "actualizacion", "contratos",
+                  f"Alertas IA de '{c.nombre}' actualizadas: anticipación {body.anticipacion_dias}d, "
+                  f"faltantes {body.faltantes_dias}d, {len(body.areas)} áreas",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+    return get_alertas_ia(contrato_id, db, cid, user)
+
+
+@router.post("/{contrato_id}/alertas-ia/enviar")
+def enviar_alertas_ia_segmentadas(contrato_id: uuid.UUID,
+                                  db: Session = Depends(get_db),
+                                  cid: uuid.UUID = Depends(get_company_id),
+                                  user: User = Depends(get_current_user)):
+    """Req 6: Despacha alertas segmentadas por área responsable."""
+    from ...services.platform.email import despachar_alerta_email
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    cfg = c.alertas_config or {}
+    areas = cfg.get("areas") or [dict(a) for a in AREAS_BASE_DEFAULT]
+    anticipacion = cfg.get("anticipacion_dias", c.alerta_anticipacion_dias or 30)
+
+    docs_empresa = list(db.scalars(
+        select(Documento).where(Documento.contrato_id == c.id)
+    ).all())
+    
+    sujetos = list(db.scalars(
+        select(Sujeto).where(Sujeto.company_id == cid, Sujeto.contrato_id == c.id, Sujeto.estado != "baja")
+    ).all())
+    sujetos_ids = [s.id for s in sujetos]
+    sujetos_map = {s.id: s for s in sujetos}
+
+    docs_sujetos = list(db.scalars(
+        select(Documento).where(Documento.sujeto_id.in_(sujetos_ids))
+    ).all()) if sujetos_ids else []
+
+    todos_docs = docs_empresa + docs_sujetos
+    hoy = date.today()
+
+    docs_por_area: dict[str, list[dict]] = {a["id"]: [] for a in areas}
+    if "acr" not in docs_por_area:
+        docs_por_area["acr"] = []
+
+    total_alertas = 0
+    for d in todos_docs:
+        tiene_alerta = False
+        estado_alerta = ""
+        dias = (d.vence - hoy).days if d.vence else None
+
+        if d.estado_calc == "venc":
+            tiene_alerta = True
+            estado_alerta = f"Vencido el {d.vence.isoformat()}"
+        elif d.estado_calc == "porvenc" or (dias is not None and dias <= anticipacion):
+            tiene_alerta = True
+            estado_alerta = f"Vence en {dias} días ({d.vence.isoformat()})"
+        elif d.estado_calc == "falta":
+            tiene_alerta = True
+            estado_alerta = "Documento faltante"
+
+        if tiene_alerta:
+            total_alertas += 1
+            origen = "Empresa" if d.contrato_id else ("Personal" if sujetos_map.get(d.sujeto_id) and sujetos_map[d.sujeto_id].tipo == "trabajador" else "Equipos")
+            who = "Empresa" if d.contrato_id else (sujetos_map[d.sujeto_id].nombre if d.sujeto_id in sujetos_map else "Sujeto")
+            a_id = resolver_area_para_doc(cfg, d.titulo, origen)
+            if a_id not in docs_por_area:
+                docs_por_area[a_id] = []
+            docs_por_area[a_id].append({
+                "documento_id": str(d.id),
+                "titulo": d.titulo,
+                "origen": origen,
+                "sujeto": who,
+                "estado": d.estado_calc,
+                "vence": d.vence.isoformat() if d.vence else None,
+                "detalle": estado_alerta
+            })
+
+    envios = []
+    for a in areas:
+        a_id = a["id"]
+        docs_area = docs_por_area.get(a_id, [])
+        encargados = a.get("encargados", [])
+        correos = [e["email"] for e in encargados if e.get("email")]
+
+        if docs_area and correos:
+            asunto = f"[{c.nombre}] Alertas de {a['nombre']} ({len(docs_area)} documentos)"
+            cuerpo_txt = f"Contrato: {c.nombre}\nÁrea: {a['nombre']}\n\nDocumentos que requieren atención:\n"
+            for item in docs_area:
+                cuerpo_txt += f"- {item['titulo']} ({item['sujeto']}): {item['detalle']}\n"
+
+            for email in correos:
+                despachar_alerta_email(
+                    db, cid, "alerta_por_area", asunto, cuerpo_txt,
+                    contrato_id=c.id,
+                    sujeto_email=email,
+                    severidad="advertencia",
+                    contrato_nombre=c.nombre,
+                    texto=cuerpo_txt,
+                )
+
+        envios.append({
+            "area_id": a_id,
+            "area_nombre": a["nombre"],
+            "encargados": correos,
+            "documentos_count": len(docs_area),
+            "documentos": docs_area
+        })
+
+    actividad.log(db, cid, "alerta_ia", "contratos",
+                  f"Alertas segmentadas por área enviadas para contrato '{c.nombre}' ({total_alertas} alertas)",
+                  user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+    db.commit()
+
+    return {
+        "ok": True,
+        "contrato_id": str(c.id),
+        "total_alertas": total_alertas,
+        "envios_por_area": envios
+    }
 
 
 @router.delete("/{contrato_id}")

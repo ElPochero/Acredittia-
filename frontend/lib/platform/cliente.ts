@@ -20,7 +20,8 @@
  */
 import { api, descargarBlob, patch, type Query } from "./api";
 import type {
-  AcreditacionesEstado, ActividadFila, AdminStats, AgentesContrato, Alerta, AlertaPatch,
+  AcreditacionesEstado, ActividadFila, AdminStats, AgentesContrato, Alerta, AlertaPatch,
+  AlertasIaDetalle, AlertasIaPayload,
   Ambito, ArchivoConfirmado, CategoriaEvento, ChecklistSujeto, Conjunto,
   Contrato, ContratoCreado, ContratoIn, ContratoPatch, Credencial,
   CumplimientoContrato, Documento, DocumentoFila, DownloadUrl, Ejemplo, Empresa,
@@ -322,6 +323,16 @@ export const contratos = {
     patch<Contrato>(`/contratos/${id}`, cambios),
 
   /** Configuración de alertas IA del contrato (v15). */
+  alertasIa: (id: string) =>
+    api<AlertasIaDetalle>(`/contratos/${id}/alertas-ia`),
+
+  guardarAlertasIaDetalle: (id: string, body: AlertasIaPayload) =>
+    api<AlertasIaDetalle>(`/contratos/${id}/alertas-ia`, { method: "PUT", body }),
+
+  enviarAlertasIaSegmentadas: (id: string) =>
+    api<{ ok: boolean; contrato_id: string; total_alertas: number; envios_por_area: any[] }>(
+      `/contratos/${id}/alertas-ia/enviar`, { method: "POST", body: {} }),
+
   alertasIaConfig: (id: string) =>
     api<{
       alerta_anticipacion_dias: number;

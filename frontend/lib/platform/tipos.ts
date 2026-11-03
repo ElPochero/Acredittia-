@@ -1372,3 +1372,67 @@ export interface EmailPreview {
   html: string;
   text: string;
 }
+
+// ============================================================================
+// Alertas IA por área y reglas (Req 5 y Req 6)
+// ============================================================================
+export type EncargadoArea = {
+  nombre: string;
+  email: string;
+};
+
+export type AreaResponsable = {
+  id: string;
+  nombre: string;
+  color?: string;
+  c?: string;
+  bg?: string;
+  encargados: EncargadoArea[];
+};
+
+export type GrupoRequisito = {
+  id: string;
+  nombre: string;
+  area_default: string;
+};
+
+export type RequisitoConfigArea = {
+  titulo: string;
+  origen: "Personal" | "Equipos" | "Empresa" | "Plantilla";
+  grupo_id: string;
+  area_id: string;
+};
+
+export type ProximoEnvio = {
+  tipo: "falta" | "venc" | "porv" | "prog";
+  titulo: string;
+  destinatario: string;
+  area_id: string;
+  area_nombre: string;
+  fecha_aviso: string;
+  detalle: string;
+};
+
+export type AlertasIaDetalle = {
+  contrato_id: string;
+  anticipacion_dias: number;
+  faltantes_dias: number;
+  mail: boolean;
+  wa: boolean;
+  cc_acreditaciones: boolean;
+  areas: AreaResponsable[];
+  asignaciones: Record<string, string>;
+  grupos: GrupoRequisito[];
+  requisitos: RequisitoConfigArea[];
+  proximos_envios: ProximoEnvio[];
+};
+
+export type AlertasIaPayload = {
+  anticipacion_dias: number;
+  faltantes_dias: number;
+  mail: boolean;
+  wa: boolean;
+  cc_acreditaciones: boolean;
+  areas: AreaResponsable[];
+  asignaciones: Record<string, string>;
+};

@@ -21,6 +21,7 @@ import { ContratoLayout } from "@/components/platform/contratos/ContratoLayout";
 import { TabResumen } from "@/components/platform/contratos/TabResumen";
 import { TabChatContrato } from "@/components/platform/contratos/TabChatContrato";
 import { TabAgentesContrato } from "@/components/platform/contratos/TabAgentesContrato";
+import TabAlertasIAContrato from "@/components/platform/contratos/TabAlertasIAContrato";
 
 import { Tab, TABS, slugTab, tabDesdeSlug } from "@/components/platform/contratos/ContratoTabs";
 
@@ -339,124 +340,54 @@ export default function ContratoDetalle() {
         <TabAgentesContrato contrato={c} />
       ))}
 
-      {panel("Alertas IA", (
-        <section className="space-y-2">
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="m-0 text-[0.95rem] font-bold text-[#1E293B]">Configuración de alertas IA</h3>
-                <p className="m-0 mt-0.5 text-[0.78rem] text-slate-500">
-                  Con cuánta anticipación se avisa un vencimiento y cada cuánto se repite el recordatorio.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {cfgSinGuardar && (
-                  <span role="status" className="text-[0.72rem] font-semibold text-amber-700">
-                    Cambios sin guardar
-                  </span>
-                )}
-                <button
-                  onClick={guardarCfgAlertas}
-                  disabled={guardandoCfg || !cfgSinGuardar || cfgInvalida}
-                  className="h-8 px-3 rounded-lg bg-[#1E40AF] text-[0.78rem] font-bold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
-                >
-                  {guardandoCfg ? "Guardando…" : "Guardar configuración"}
-                </button>
-              </div>
+      {panel("Alertas IA", c ? (
+        <TabAlertasIAContrato
+          contrato={c}
+          onContratoActualizado={(nuevo) => setC(nuevo)}
+          onVerCorreos={() => setShowCorreosAlertas(true)}
+          alertasActivasNode={
+            <div className="space-y-2">
+              {Api.items(alertas).length === 0 && (
+                <p className="text-sm text-slate-500">Sin alertas para este contrato.</p>
+              )}
+              {Api.items(alertas).map((a) => (
+                <div key={a.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm flex-wrap">
+                  <Chip estado={a.severidad} texto={SEVERIDAD_LABEL[a.severidad]} />
+                  <div className="text-sm flex-1 min-w-[200px]"><b>{a.titulo}</b><div className="text-slate-500">{a.descripcion}</div></div>
+                  <Chip estado={a.estado} />
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    {a.documento_id && (
+                      <button onClick={() => cambiarTab("Documentos")} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Ver el documento en el tab Documentos">
+                        📄 Documento
+                      </button>
+                    )}
+                    {a.sujeto_id && (
+                      <button onClick={() => verSujeto(a.sujeto_id!)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Abrir la ficha del trabajador o equipo">
+                        👤 Sujeto
+                      </button>
+                    )}
+                    <button
+                      onClick={() => recordar(a)}
+                      disabled={recordando === a.id}
+                      className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                      title="Enviar recordatorio por correo a los responsables"
+                    >
+                      {recordando === a.id ? "Enviando..." : "⏰ Recordar"}
+                    </button>
+                    {!a.leida && (
+                      <button onClick={() => marcarLeida(a)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50" title="Marcar como leída">
+                        ✓ Leída
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {alertas && <Paginador page={alertas.page} totalPaginas={alertas.total_pages} total={alertas.total} etiqueta="alertas" onPagina={setPageAlertas} />}
+              <CorreosContratoModal abierto={showCorreosAlertas} onCerrar={() => setShowCorreosAlertas(false)} contrato={c} />
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
-                Días de anticipación
-                <input
-                  type="number" min={1} max={180}
-                  aria-label="Días de anticipación"
-                  aria-invalid={cfgInvalida}
-                  value={cfgA.anticipacion}
-                  onChange={(e) => setCfgAlertas({ ...cfgA, anticipacion: Number(e.target.value) })}
-                  className="h-8 rounded-lg border border-slate-300 px-2 text-sm font-normal text-slate-700"
-                />
-                {cfgInvalida && (
-                  <span role="alert" className="text-[0.7rem] font-medium text-red-600">
-                    Debe estar entre 1 y 180 días.
-                  </span>
-                )}
-              </label>
-              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
-                Frecuencia del recordatorio
-                <select
-                  className="view-select"
-                  aria-label="Frecuencia del recordatorio"
-                  value={cfgA.frecuencia}
-                  onChange={(e) => setCfgAlertas({ ...cfgA, frecuencia: Number(e.target.value) })}
-                >
-                  <option value={1}>Diaria</option>
-                  <option value={3}>Cada 3 días</option>
-                  <option value={5}>Cada 5 días</option>
-                  <option value={7}>Semanal</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-[0.78rem] font-bold text-slate-600">
-                Frecuencia de faltantes
-                <select
-                  className="view-select"
-                  aria-label="Frecuencia de faltantes"
-                  value={cfgA.faltantes}
-                  onChange={(e) => setCfgAlertas({ ...cfgA, faltantes: Number(e.target.value) })}
-                >
-                  <option value={1}>Diaria</option>
-                  <option value={3}>Cada 3 días</option>
-                  <option value={5}>Cada 5 días</option>
-                  <option value={7}>Semanal</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <p className="m-0 text-[0.78rem] text-slate-500">Alertas activas del contrato con acciones directas.</p>
-            <button
-              onClick={() => setShowCorreosAlertas(true)}
-              className="h-8 px-3 rounded-lg border border-slate-300 bg-white text-[0.78rem] font-bold text-slate-600 hover:bg-slate-50"
-            >
-              ✉ Ver correos de notificación
-            </button>
-          </div>
-          {Api.items(alertas).length === 0 && <p className="text-sm text-slate-500">Sin alertas para este contrato.</p>}
-          {Api.items(alertas).map((a) => (
-            <div key={a.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm flex-wrap">
-              <Chip estado={a.severidad} texto={SEVERIDAD_LABEL[a.severidad]} />
-              <div className="text-sm flex-1 min-w-[200px]"><b>{a.titulo}</b><div className="text-slate-500">{a.descripcion}</div></div>
-              <Chip estado={a.estado} />
-              <div className="flex items-center gap-1.5 ml-auto">
-                {a.documento_id && (
-                  <button onClick={() => cambiarTab("Documentos")} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Ver el documento en el tab Documentos">
-                    📄 Documento
-                  </button>
-                )}
-                {a.sujeto_id && (
-                  <button onClick={() => verSujeto(a.sujeto_id!)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-blue-700 hover:bg-blue-50" title="Abrir la ficha del trabajador o equipo">
-                    👤 Sujeto
-                  </button>
-                )}
-                <button
-                  onClick={() => recordar(a)}
-                  disabled={recordando === a.id}
-                  className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                  title="Enviar recordatorio por correo a los responsables"
-                >
-                  {recordando === a.id ? "Enviando..." : "⏰ Recordar"}
-                </button>
-                {!a.leida && (
-                  <button onClick={() => marcarLeida(a)} className="h-7 px-2.5 rounded-lg border border-slate-200 text-[0.72rem] font-bold text-slate-600 hover:bg-slate-50" title="Marcar como leída">
-                    ✓ Leída
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          {alertas && <Paginador page={alertas.page} totalPaginas={alertas.total_pages} total={alertas.total} etiqueta="alertas" onPagina={setPageAlertas} />}
-          <CorreosContratoModal abierto={showCorreosAlertas} onCerrar={() => setShowCorreosAlertas(false)} contrato={c} />
-        </section>
-      ))}
+          }
+        />
+      ) : null)}
       {panel("Requisitos", (
         <TabRequisitosContrato contrato={c} plataformas={plataformas} onCambio={cargar} />
       ))}
