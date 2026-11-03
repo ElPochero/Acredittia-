@@ -1792,3 +1792,33 @@ def obtener_mis_pendientes_rrhh(
         "periodos_proximos": periodos_proximos,
         "total_pendientes": len(observados_rechazados) + len(pendientes_carga)
     }
+
+
+
+# ============================================================================
+# Sincronización Buk con Fallback Manual Resiliente (Día 5, CA 13, Sección 8)
+# ============================================================================
+
+@router.post("/contratos/{contrato_id}/periodos/{periodo_id}/sincronizar-buk")
+def sincronizar_buk_endpoint(
+    contrato_id: uuid.UUID,
+    periodo_id: uuid.UUID,
+    simular_exito: bool = Query(False),
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Sincroniza nómina y documentos del período desde Buk con fallback manual resiliente (CA 13, Sección 8).
+    El rol 'rrhh' sí puede sincronizar con Buk para actualizar su nómina mensual y documentos.
+    """
+    c = _get_contrato(db, cid, contrato_id)
+    p = _get_periodo(db, cid, periodo_id)
+    if p.contrato_id != contrato_id:
+        raise err(400, "PERIODO_INVALIDO", "El período no corresponde al contrato")
+    if p.estado == "cerrado":
+        raise err(400, "PERIODO_CERRADO", "El período está cerrado y no admite sincronizaciones")
+
+    from ..services.buk_sync import sincronizar_buk_periodo
+    res = sincronizar_buk_periodo(db, c, p, user, simular_exito=simular_exito)
+    return res

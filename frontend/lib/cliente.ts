@@ -1003,6 +1003,22 @@ export const certificacion = {
   obtenerMisPendientes: async (): Promise<MisPendientesRrhhRespuesta> => {
     return await api<MisPendientesRrhhRespuesta>("/certificacion-laboral/mis-pendientes");
   },
+
+  sincronizarBuk: async (contratoId: string, periodoId: string, simularExito?: boolean) => {
+    return await api<{
+      ok: boolean;
+      modo: "buk_api" | "manual_fallback";
+      mensaje: string;
+      trabajadores_sincronizados: number;
+      documentos_sincronizados: number;
+      logs: string[];
+    }>(
+      `/contratos/${contratoId}/periodos/${periodoId}/sincronizar-buk${
+        simularExito ? "?simular_exito=true" : ""
+      }`,
+      { method: "POST" }
+    );
+  },
 };
 
 

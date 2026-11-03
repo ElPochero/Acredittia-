@@ -70,6 +70,36 @@ export default function ContratoCertificacionDetallePage() {
   const [cargandoAccionObs, setCargandoAccionObs] = useState(false);
   const [errorObs, setErrorObs] = useState<string | null>(null);
 
+  // Estados para Buk Sync (Día 5, CA 13)
+  const [sincronizandoBuk, setSincronizandoBuk] = useState(false);
+  const [modalBukAbierto, setModalBukAbierto] = useState(false);
+  const [resultadoBuk, setResultadoBuk] = useState<{
+    ok: boolean;
+    modo: "buk_api" | "manual_fallback";
+    mensaje: string;
+    trabajadores_sincronizados: number;
+    documentos_sincronizados: number;
+    logs: string[];
+  } | null>(null);
+
+  const handleSincronizarBuk = async (simularExito: boolean = false) => {
+    if (!periodoActivo) return;
+    setSincronizandoBuk(true);
+    try {
+      const res = await Api.certificacion.sincronizarBuk(contratoId, periodoActivo.id, simularExito);
+      setResultadoBuk(res);
+      setModalBukAbierto(true);
+      await recargarDetallesPeriodo();
+      if (tabActiva === "trazabilidad") {
+        cargarTrazabilidad();
+      }
+    } catch (err: any) {
+      alert(err?.message || "Error al sincronizar con Buk");
+    } finally {
+      setSincronizandoBuk(false);
+    }
+  };
+
   // 1. Cargar Contrato y sus Períodos Mensuales generados (CA 2)
   const cargarContratoYPeriodos = useCallback(async () => {
     if (!contratoId) return;
@@ -714,18 +744,63 @@ export default function ContratoCertificacionDetallePage() {
 
           {/* Pestaña: Documentos requeridos */}
           {tabActiva === "documentos" && (
-            matrizData ? (
-              <MatrizDocumental
-                data={matrizData}
-                onSelectCelda={abrirModalParaCelda}
-                onSubirDirecto={handleSubirDirecto}
-                onCargaMasiva={() => alert("Carga masiva ZIP activada")}
-              />
-            ) : (
-              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">
-                No hay matriz documental disponible para este período.
+            <div className="space-y-4">
+              {/* Panel de Sincronización Buk (.dpanel.hr-cl / #clhr-log, plataforma.html L13974–L14003) */}
+              <div className="dpanel hr-cl rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-blue-50/50 p-5 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl">🔗</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-900">
+                          Sincronización Automática con Buk (Nómina & Documentos)
+                        </h4>
+                        <span className="rounded-md bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                          Conector Resiliente
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Importa liquidaciones, libros y contratos directamente desde Buk hacia este período.
+                        Si la API no responde, el sistema conmuta a <strong>fallback manual</strong> sin bloqueos (CA 13).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      disabled={sincronizandoBuk || periodoCerrado}
+                      onClick={() => handleSincronizarBuk(false)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50"
+                    >
+                      <span>{sincronizandoBuk ? "⏳ Sincronizando..." : "🔄 Sincronizar con Buk"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={sincronizandoBuk || periodoCerrado}
+                      onClick={() => handleSincronizarBuk(true)}
+                      className="inline-flex items-center gap-1 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition"
+                      title="Simular respuesta exitosa de Buk para validación"
+                    >
+                      <span>🧪 Probar Sync</span>
+                    </button>
+                  </div>
+                </div>
               </div>
-            )
+
+              {matrizData ? (
+                <MatrizDocumental
+                  data={matrizData}
+                  onSelectCelda={abrirModalParaCelda}
+                  onSubirDirecto={handleSubirDirecto}
+                  onCargaMasiva={() => alert("Carga masiva ZIP activada")}
+                />
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-slate-500">
+                  No hay matriz documental disponible para este período.
+                </div>
+              )}
+            </div>
           )}
 
           {/* Pestaña: Nómina e historial (CA 6) */}
