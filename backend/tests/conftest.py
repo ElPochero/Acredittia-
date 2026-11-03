@@ -82,6 +82,7 @@ SCRIPTS = [
     "12_vinculo_faena.sql",
     "13_rol_visor.sql",
     "14_unidad_negocio.sql",
+    "19_certificacion_laboral_v2.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), "acredittia_pruebas")
@@ -577,3 +578,17 @@ def crear_contract_admin(
         "contrato_id": contrato_id,
         "headers": {"Authorization": f"Bearer {token}"},
     }
+
+@pytest.fixture
+def client(app_cliente):
+    return app_cliente
+
+
+@pytest.fixture
+def user_token(empresa_a, contrato_a):
+    return empresa_a["token"]
+
+
+@pytest.fixture
+def session(sesion_db):
+    return sesion_db

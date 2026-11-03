@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import Page, aplicar_orden, err, get_company_id, paginacion, get_current_user
-from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User, ContratoRequisitoLaboral, PeriodoDocumentoVersion
+from ..models import Contrato, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, User, ContratoRequisitoLaboral, PeriodoDocumentoVersion, Sujeto
 
 logger = logging.getLogger("acredittia.periodos_laborales")
 
@@ -846,7 +846,10 @@ def subir_documento_directo(
 ):
     """
     Asocia el archivo subido al requisito, transiciona obligatoriamente a 'en_revision'
-    (CA 7: subir nunca aprueba automáticamente) y registra en trazabilidad y versiones.
+    (CA 7: subir nunca aprueba automáticamente) y aplica regla de versionado (Sección 4.4, CA 9):
+    - Si está 'en_revision' y abierto_por_adc == False: reemplaza archivo de la versión actual.
+    - Si ya fue revisado ('observado'/'rechazado' o abierto_por_adc == True): incrementa version + 1
+      conservando intactas las versiones anteriores y sus observaciones.
     """
     p = _get_periodo(db, cid, periodo_id)
     if p.estado == "cerrado":
@@ -855,6 +858,37 @@ def subir_documento_directo(
     doc = db.get(PeriodoDocumento, doc_id)
     if not doc or doc.periodo_id != periodo_id:
         raise err(404, "NO_ENCONTRADO", "Documento no encontrado en este período")
+
+    # Regla de Versionado (Sección 4.4, CA 9)
+    ver_actual = db.execute(
+        select(PeriodoDocumentoVersion)
+        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+        .order_by(PeriodoDocumentoVersion.version.desc())
+    ).scalars().first()
+
+    if ver_actual and doc.estado == "en_revision" and not ver_actual.abierto_por_adc:
+        # Reemplazar archivo de la versión actual si aún no ha sido abierto ni revisado por ADC
+        ver_actual.archivo_url = carga.archivo_url
+        ver_actual.archivo_nombre = carga.archivo_nombre or f"{doc.nombre or 'documento'}_v{ver_actual.version}.pdf"
+        ver_actual.subido_por = user.id
+        ver_actual.estado = "en_revision"
+        nueva_version = ver_actual.version
+        msg_audit = f"Archivo de la versión {nueva_version} reemplazado antes de revisión ADC."
+    else:
+        # Ya fue revisado/abierto por ADC o es nueva entrega: incrementa version + 1
+        ult_version = ver_actual.version if ver_actual else 0
+        nueva_version = ult_version + 1
+        ver = PeriodoDocumentoVersion(
+            periodo_documento_id=doc.id,
+            version=nueva_version,
+            archivo_url=carga.archivo_url,
+            archivo_nombre=carga.archivo_nombre or f"{doc.nombre or 'documento'}_v{nueva_version}.pdf",
+            subido_por=user.id,
+            estado="en_revision",
+            abierto_por_adc=False
+        )
+        db.add(ver)
+        msg_audit = f"Entrega versión {nueva_version} subida para revisión ADC."
         
     doc.archivo_url = carga.archivo_url
     doc.estado = "en_revision"
@@ -862,33 +896,30 @@ def subir_documento_directo(
     doc.cargado_por = user.id
     doc.updated_at = datetime.utcnow()
     
-    ult_version = db.scalar(
-        select(func.max(PeriodoDocumentoVersion.version))
-        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
-    ) or 0
-    nueva_version = ult_version + 1
-    
-    ver = PeriodoDocumentoVersion(
-        periodo_documento_id=doc.id,
-        version=nueva_version,
-        archivo_url=carga.archivo_url,
-        archivo_nombre=carga.archivo_nombre or f"{doc.nombre or 'documento'}_v{nueva_version}.pdf",
-        subido_por=user.id,
-        estado="en_revision",
-        abierto_por_adc=False
-    )
-    db.add(ver)
-    
     audit = AuditoriaDocumento(
         periodo_documento_id=doc.id,
         auditor_id=user.id,
         accion="cargar",
-        observacion=f"Entrega versión {nueva_version} subida para revisión ADC.",
+        observacion=msg_audit,
         version=nueva_version
     )
     db.add(audit)
     
     calcular_kpis_periodo(db, p)
+    
+    try:
+        from ..services.vencimientos import notificar_evento_certificacion_laboral
+        notificar_evento_certificacion_laboral(
+            db=db,
+            contrato_id=p.contrato_id,
+            periodo_nombre=p.nombre,
+            doc_nombre=doc.nombre or "Documento",
+            accion="cargar",
+            detalle=msg_audit
+        )
+    except Exception as exc:
+        logger.warning("Error notificando subida de documento: %s", exc)
+
     db.commit()
     db.refresh(doc)
     
@@ -925,34 +956,44 @@ def subir_documento(
         db.flush()
         
     if carga.archivo_url:
+        ver_actual = db.execute(
+            select(PeriodoDocumentoVersion)
+            .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+            .order_by(PeriodoDocumentoVersion.version.desc())
+        ).scalars().first()
+
+        if ver_actual and doc.estado == "en_revision" and not ver_actual.abierto_por_adc:
+            ver_actual.archivo_url = carga.archivo_url
+            ver_actual.subido_por = user.id
+            ver_actual.estado = "en_revision"
+            nueva_version = ver_actual.version
+            msg_audit = f"Archivo de la versión {nueva_version} reemplazado antes de revisión ADC."
+        else:
+            ult_version = ver_actual.version if ver_actual else 0
+            nueva_version = ult_version + 1
+            ver = PeriodoDocumentoVersion(
+                periodo_documento_id=doc.id,
+                version=nueva_version,
+                archivo_url=carga.archivo_url,
+                archivo_nombre=f"doc_{doc.id}_v{nueva_version}.pdf",
+                subido_por=user.id,
+                estado="en_revision",
+                abierto_por_adc=False
+            )
+            db.add(ver)
+            msg_audit = f"Carga de archivo versión {nueva_version} subida para revisión ADC."
+
         doc.archivo_url = carga.archivo_url
         doc.estado = "en_revision"
         doc.fecha_carga = datetime.utcnow()
         doc.cargado_por = user.id
         doc.updated_at = datetime.utcnow()
         
-        ult_version = db.scalar(
-            select(func.max(PeriodoDocumentoVersion.version))
-            .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
-        ) or 0
-        nueva_version = ult_version + 1
-        
-        ver = PeriodoDocumentoVersion(
-            periodo_documento_id=doc.id,
-            version=nueva_version,
-            archivo_url=carga.archivo_url,
-            archivo_nombre=f"doc_{doc.id}_v{nueva_version}.pdf",
-            subido_por=user.id,
-            estado="en_revision",
-            abierto_por_adc=False
-        )
-        db.add(ver)
-        
         audit = AuditoriaDocumento(
             periodo_documento_id=doc.id,
             auditor_id=user.id,
             accion="cargar",
-            observacion=f"Carga de archivo versión {nueva_version}",
+            observacion=msg_audit,
             version=nueva_version
         )
         db.add(audit)
@@ -971,7 +1012,7 @@ def listar_documentos(
     cid: uuid.UUID = Depends(get_company_id),
     db: Session = Depends(get_db)
 ):
-    """Lista la matriz documental del perÃ­odo."""
+    """Lista la matriz documental del período."""
     _get_periodo(db, cid, periodo_id)
     q = select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == periodo_id)
     if sujeto_id:
@@ -982,12 +1023,171 @@ def listar_documentos(
 
 
 # ============================================================================
-# AuditorÃ­a
+# Auditoría y Revisión ADC (Día 4, CA 11, Sección 4)
 # ============================================================================
+
+class RevisarDocumentoIn(BaseModel):
+    accion: str  # 'aprobar' | 'observar' | 'rechazar' | 'no_aplica'
+    comentario: str | None = None
+    observacion: str | None = None
 
 class AuditoriaIn(BaseModel):
     accion: str
     observacion: str | None = None
+
+
+@router.post("/periodos/{periodo_id}/documentos/{doc_id}/revisar")
+def revisar_documento_adc(
+    periodo_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    carga: RevisarDocumentoIn,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Endpoint principal de revisión ADC (CA 11, Sección 4.2).
+    - Valida que el usuario sea 'adc' o 'admin' (rechaza con 403 si es 'rrhh').
+    - Si la acción es 'observar' o 'rechazar', exige comentario obligatorio (422 si falta).
+    - Actualiza el estado a 'aprobado', 'observado', 'rechazado' o 'no_aplica'.
+    - Marca 'abierto_por_adc = True' en la versión actual y registra en trazabilidad.
+    - Dispara notificación en plataforma y correo vía vencimientos.py / email.py.
+    """
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "Los usuarios con rol RR.HH. no pueden auditar ni revisar documentos")
+
+    p = _get_periodo(db, cid, periodo_id)
+    if p.estado == "cerrado":
+        raise err(400, "PERIODO_CERRADO", "El período está cerrado y no admite modificaciones")
+
+    doc = db.get(PeriodoDocumento, doc_id)
+    if not doc or doc.periodo_id != periodo_id:
+        raise err(404, "NO_ENCONTRADO", "Documento no encontrado en este período")
+
+    accion = carga.accion.lower()
+    if accion not in ("aprobar", "observar", "rechazar", "no_aplica"):
+        raise err(400, "ACCION_INVALIDA", f"Acción '{carga.accion}' no válida. Opciones: aprobar, observar, rechazar, no_aplica")
+
+    comentario = (carga.comentario or carga.observacion or "").strip()
+    if accion in ("observar", "rechazar") and not comentario:
+        raise err(422, "COMENTARIO_OBLIGATORIO", f"El comentario es obligatorio para {accion} el documento")
+
+    nuevo_estado = "aprobado" if accion == "aprobar" else ("observado" if accion == "observar" else ("rechazado" if accion == "rechazar" else "no_aplica"))
+
+    doc.estado = nuevo_estado
+    doc.observaciones = comentario or doc.observaciones
+    doc.updated_at = datetime.utcnow()
+
+    ver = db.execute(
+        select(PeriodoDocumentoVersion)
+        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+        .order_by(PeriodoDocumentoVersion.version.desc())
+    ).scalars().first()
+
+    version_actual = ver.version if ver else 1
+    if ver:
+        ver.estado = nuevo_estado
+        if comentario:
+            ver.observacion = comentario
+        ver.revisado_por = user.id
+        ver.abierto_por_adc = True
+
+    audit = AuditoriaDocumento(
+        periodo_documento_id=doc.id,
+        auditor_id=user.id,
+        accion=accion,
+        observacion=comentario or f"Documento dictaminado como '{nuevo_estado}' por auditor ADC",
+        version=version_actual
+    )
+    db.add(audit)
+
+    calcular_kpis_periodo(db, p)
+
+    try:
+        from ..services.vencimientos import notificar_evento_certificacion_laboral
+        notificar_evento_certificacion_laboral(
+            db=db,
+            contrato_id=p.contrato_id,
+            periodo_nombre=p.nombre,
+            doc_nombre=doc.nombre or "Documento",
+            accion=accion,
+            detalle=comentario
+        )
+    except Exception as exc:
+        logger.warning("Error notificando dictamen ADC: %s", exc)
+
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+@router.post("/periodos/{periodo_id}/documentos/{doc_id}/marcar-visto")
+def marcar_documento_visto_adc(
+    periodo_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Marca que el ADC abrió y revisó el archivo de la versión actual (CA 9, Sección 4.4)."""
+    _get_periodo(db, cid, periodo_id)
+    doc = db.get(PeriodoDocumento, doc_id)
+    if not doc or doc.periodo_id != periodo_id:
+        raise err(404, "NO_ENCONTRADO", "Documento no encontrado")
+
+    ver = db.execute(
+        select(PeriodoDocumentoVersion)
+        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+        .order_by(PeriodoDocumentoVersion.version.desc())
+    ).scalars().first()
+
+    if ver:
+        ver.abierto_por_adc = True
+        db.commit()
+
+    return {"ok": True, "abierto_por_adc": True}
+
+
+@router.get("/periodos/{periodo_id}/documentos/{doc_id}/versiones")
+def listar_versiones_documento(
+    periodo_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+):
+    """Retorna el historial completo de versiones de una entrega (Sección 4.4)."""
+    _get_periodo(db, cid, periodo_id)
+    doc = db.get(PeriodoDocumento, doc_id)
+    if not doc or doc.periodo_id != periodo_id:
+        raise err(404, "NO_ENCONTRADO", "Documento no encontrado")
+
+    vers = db.execute(
+        select(PeriodoDocumentoVersion)
+        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+        .order_by(PeriodoDocumentoVersion.version.desc())
+    ).scalars().all()
+
+    items = []
+    for v in vers:
+        u_sub = db.get(User, v.subido_por) if v.subido_por else None
+        u_rev = db.get(User, v.revisado_por) if v.revisado_por else None
+        items.append({
+            "id": str(v.id),
+            "periodo_documento_id": str(v.periodo_documento_id),
+            "version": v.version,
+            "archivo_url": v.archivo_url,
+            "archivo_nombre": v.archivo_nombre,
+            "subido_por": str(v.subido_por) if v.subido_por else None,
+            "subido_por_nombre": u_sub.nombre if u_sub else "Encargado RR.HH.",
+            "estado": v.estado,
+            "observacion": v.observacion,
+            "revisado_por": str(v.revisado_por) if v.revisado_por else None,
+            "revisado_por_nombre": u_rev.nombre if u_rev else "Auditor ADC",
+            "abierto_por_adc": v.abierto_por_adc,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+        })
+    return items
+
 
 @router.post("/periodos/documentos/{doc_id}/auditar")
 def auditar_documento(
@@ -997,35 +1197,49 @@ def auditar_documento(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """Aprueba, observa o rechaza un documento subido."""
+    """Compatibilidad: Aprueba, observa o rechaza un documento subido."""
     doc = db.get(PeriodoDocumento, doc_id)
     if not doc:
         raise err(404, "NO_ENCONTRADO", "Documento no existe")
     
-    _get_periodo(db, cid, doc.periodo_id)
+    p = _get_periodo(db, cid, doc.periodo_id)
+    if p.estado == "cerrado":
+        raise err(400, "PERIODO_CERRADO", "El período está cerrado y no admite modificaciones")
 
-    if doc.estado not in ["cargado", "en_revision", "observado"]:
-        raise err(400, "ESTADO_INVALIDO", f"No se puede auditar un documento en estado: {doc.estado}")
+    accion = carga.accion.lower()
+    comentario = (carga.observacion or "").strip()
+    if accion in ("observar", "rechazar") and not comentario:
+        raise err(422, "COMENTARIO_OBLIGATORIO", f"El comentario es obligatorio para {accion} el documento")
 
-    nuevo_estado = "pendiente"
-    if carga.accion == "aprobar":
-        nuevo_estado = "aprobado"
-    elif carga.accion == "observar":
-        nuevo_estado = "observado"
-    elif carga.accion == "rechazar":
-        nuevo_estado = "rechazado"
+    nuevo_estado = "aprobado" if accion == "aprobar" else ("observado" if accion == "observar" else ("rechazado" if accion == "rechazar" else "no_aplica"))
 
     doc.estado = nuevo_estado
+    doc.observaciones = comentario or doc.observaciones
     doc.updated_at = datetime.utcnow()
+
+    ver = db.execute(
+        select(PeriodoDocumentoVersion)
+        .where(PeriodoDocumentoVersion.periodo_documento_id == doc.id)
+        .order_by(PeriodoDocumentoVersion.version.desc())
+    ).scalars().first()
+
+    version_actual = ver.version if ver else 1
+    if ver:
+        ver.estado = nuevo_estado
+        if comentario:
+            ver.observacion = comentario
+        ver.revisado_por = user.id
+        ver.abierto_por_adc = True
 
     auditoria = AuditoriaDocumento(
         periodo_documento_id=doc.id,
         auditor_id=user.id,
-        accion=carga.accion,
-        observacion=carga.observacion,
-        version=1
+        accion=accion,
+        observacion=comentario or f"Documento dictaminado como '{nuevo_estado}'",
+        version=version_actual
     )
     db.add(auditoria)
+    calcular_kpis_periodo(db, p)
     db.commit()
     db.refresh(doc)
     return doc
@@ -1081,7 +1295,7 @@ def listar_trazabilidad_periodo(
             AuditoriaDocumento,
             PeriodoDocumento.nombre.label("doc_nombre"),
             User.nombre.label("usuario_nombre"),
-            User.rol.label("usuario_rol")
+            User.role.label("usuario_rol")
         )
         .join(PeriodoDocumento, AuditoriaDocumento.periodo_documento_id == PeriodoDocumento.id)
         .outerjoin(User, AuditoriaDocumento.auditor_id == User.id)
@@ -1365,4 +1579,199 @@ def obtener_nomina_periodo(
         "estado_periodo": p.estado,
         "inmutable": p.estado == "cerrado",
         "datos": snapshot
+    }
+
+
+# ============================================================================
+# Cierre de Período y Bandeja Mis Pendientes RR.HH. (Día 4, CA 12, Sección 3.4 & 10)
+# ============================================================================
+
+@router.post("/periodos/{periodo_id}/cerrar")
+def cerrar_periodo_laboral(
+    periodo_id: uuid.UUID,
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Cierre formal del período mensual (CA 12, Sección 10).
+    - Verifica 100% de cumplimiento (sin requisitos pendientes, en revisión, observados ni rechazados).
+    - Valida que el rol no sea 'rrhh' (403 Forbidden).
+    - Una vez cerrado, bloquea cualquier subida o edición posterior de forma inmutable.
+    """
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "Los usuarios con rol RR.HH. no tienen permisos para cerrar períodos")
+
+    p = _get_periodo(db, cid, periodo_id)
+    if p.estado == "cerrado":
+        raise err(400, "PERIODO_CERRADO", "El período ya está cerrado")
+
+    kpis = calcular_kpis_periodo(db, p)
+    
+    if (kpis["porcentaje_cumplimiento"] < 100.0 or 
+        kpis["pendientes"] > 0 or 
+        kpis["en_revision"] > 0 or 
+        kpis["observados"] > 0 or 
+        kpis["rechazados"] > 0):
+        raise err(
+            400, 
+            "CUMPLIMIENTO_INCOMPLETO", 
+            f"No se puede cerrar el período: el cumplimiento actual es {kpis['porcentaje_cumplimiento']}% (requiere 100% sin pendientes, observaciones ni entregas en revisión)"
+        )
+
+    p.estado = "cerrado"
+    p.cerrado_por = user.id
+    p.updated_at = datetime.utcnow()
+
+    # Guardar foto inmutable de nómina si no está congelada
+    if not p.nomina_snapshot or (isinstance(p.nomina_snapshot, list) and len(p.nomina_snapshot) == 0):
+        sujetos = db.execute(
+            select(Sujeto).where(Sujeto.contrato_id == p.contrato_id, Sujeto.tipo == "trabajador")
+        ).scalars().all()
+        p.nomina_snapshot = {
+            "resumen": {"total_vigentes": len(sujetos), "total_nomina": len(sujetos), "total_incorporaciones": 0, "total_bajas": 0},
+            "vigentes": [{"id": str(s.id), "nombre": s.nombre, "rut": s.rut, "cargo": s.cargo} for s in sujetos],
+            "incorporaciones": [],
+            "bajas": []
+        }
+
+    # Notificar cierre
+    try:
+        from ..services.vencimientos import notificar_evento_certificacion_laboral
+        notificar_evento_certificacion_laboral(
+            db=db,
+            contrato_id=p.contrato_id,
+            periodo_nombre=p.nombre,
+            doc_nombre="Cierre Período",
+            accion="cierre",
+            detalle=f"Período cerrado exitosamente al 100% por {user.nombre}."
+        )
+    except Exception as exc:
+        logger.warning("Error notificando cierre: %s", exc)
+
+    db.commit()
+    db.refresh(p)
+
+    return {
+        "id": str(p.id),
+        "nombre": p.nombre,
+        "estado": p.estado,
+        "porcentaje_cumplimiento": float(p.porcentaje_cumplimiento or 100.0),
+        "cerrado_por": str(p.cerrado_por),
+        "mensaje": "Período cerrado formalmente de forma inmutable"
+    }
+
+
+@router.get("/certificacion-laboral/mis-pendientes")
+def obtener_mis_pendientes_rrhh(
+    cid: uuid.UUID = Depends(get_company_id),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Vista consolidada de tareas pendientes para el Encargado de RR.HH. (Sección 3.4):
+    1. Documentos observados o rechazados que requieren corrección inmediata con su comentario.
+    2. Requisitos pendientes de carga ordenados por fecha límite más próxima.
+    3. Períodos abiertos con días restantes para el cierre.
+    """
+    contratos = db.execute(
+        select(Contrato).where(Contrato.company_id == cid)
+    ).scalars().all()
+
+    observados_rechazados = []
+    pendientes_carga = []
+    periodos_proximos = []
+    today = date.today()
+
+    for c in contratos:
+        # Períodos abiertos o en auditoría de este contrato
+        periodos = db.execute(
+            select(PeriodoLaboral)
+            .where(PeriodoLaboral.contrato_id == c.id, PeriodoLaboral.estado.in_(["abierto", "en_revision", "en_auditoria"]))
+            .order_by(PeriodoLaboral.fecha_inicio.desc())
+        ).scalars().all()
+
+        for p in periodos:
+            dias_restantes = (p.fecha_limite - today).days if p.fecha_limite else None
+            
+            docs = db.execute(
+                select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == p.id)
+            ).scalars().all()
+
+            for d in docs:
+                sujeto = db.get(Sujeto, d.sujeto_id) if d.sujeto_id else None
+
+                # 1. Observados o rechazados
+                if d.estado in ("observado", "rechazado"):
+                    ult_ver = db.execute(
+                        select(PeriodoDocumentoVersion)
+                        .where(PeriodoDocumentoVersion.periodo_documento_id == d.id)
+                        .order_by(PeriodoDocumentoVersion.version.desc())
+                    ).scalars().first()
+
+                    obs = (ult_ver.observacion if ult_ver and ult_ver.observacion else d.observaciones) or "Requiere corrección de antecedentes según dictamen ADC."
+                    ver_num = ult_ver.version if ult_ver else 1
+
+                    observados_rechazados.append({
+                        "id": str(d.id),
+                        "doc_id": str(d.id),
+                        "nombre": d.nombre or "Documento",
+                        "ambito": d.ambito or "contrato",
+                        "contrato_id": str(c.id),
+                        "contrato_nombre": c.nombre,
+                        "contrato_codigo": c.codigo,
+                        "periodo_id": str(p.id),
+                        "periodo_nombre": p.nombre,
+                        "estado": d.estado,
+                        "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
+                        "dias_restantes": dias_restantes,
+                        "ultima_observacion": obs,
+                        "version": ver_num,
+                        "archivo_url": d.archivo_url,
+                        "sujeto_nombre": sujeto.nombre if sujeto else None,
+                        "sujeto_rut": sujeto.rut if sujeto else None
+                    })
+                # 2. Pendientes de carga
+                elif d.estado in ("pendiente", "cargado"):
+                    pendientes_carga.append({
+                        "id": str(d.id),
+                        "doc_id": str(d.id),
+                        "nombre": d.nombre or "Documento",
+                        "ambito": d.ambito or "contrato",
+                        "contrato_id": str(c.id),
+                        "contrato_nombre": c.nombre,
+                        "contrato_codigo": c.codigo,
+                        "periodo_id": str(p.id),
+                        "periodo_nombre": p.nombre,
+                        "estado": d.estado,
+                        "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
+                        "dias_restantes": dias_restantes,
+                        "version": 1,
+                        "archivo_url": d.archivo_url,
+                        "sujeto_nombre": sujeto.nombre if sujeto else None,
+                        "sujeto_rut": sujeto.rut if sujeto else None
+                    })
+
+            p_pend = sum(1 for d in docs if d.estado in ("pendiente", "cargado", "observado", "rechazado"))
+            p_rev = sum(1 for d in docs if d.estado == "en_revision")
+            periodos_proximos.append({
+                "periodo_id": str(p.id),
+                "periodo_nombre": p.nombre,
+                "contrato_id": str(c.id),
+                "contrato_nombre": c.nombre,
+                "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
+                "dias_restantes": dias_restantes,
+                "porcentaje_cumplimiento": float(p.porcentaje_cumplimiento or 0.0),
+                "pendientes_count": p_pend,
+                "por_revisar_count": p_rev
+            })
+
+    pendientes_carga.sort(key=lambda x: x["fecha_limite"] or "9999-12-31")
+    periodos_proximos.sort(key=lambda x: x["fecha_limite"] or "9999-12-31")
+
+    return {
+        "observados_rechazados": observados_rechazados,
+        "pendientes_carga": pendientes_carga,
+        "periodos_proximos": periodos_proximos,
+        "total_pendientes": len(observados_rechazados) + len(pendientes_carga)
     }

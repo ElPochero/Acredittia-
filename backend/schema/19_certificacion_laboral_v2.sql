@@ -28,6 +28,40 @@ DO $$ BEGIN
     ) THEN
         ALTER TYPE periodo_doc_estado ADD VALUE 'no_aplica';
     END IF;
+    -- auditoria_accion: cargar
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'auditoria_accion' AND e.enumlabel = 'cargar'
+    ) THEN
+        ALTER TYPE auditoria_accion ADD VALUE 'cargar';
+    END IF;
+
+    -- auditoria_accion: no_aplica
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'auditoria_accion' AND e.enumlabel = 'no_aplica'
+    ) THEN
+        ALTER TYPE auditoria_accion ADD VALUE 'no_aplica';
+    END IF;
+    -- user_role: adc
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'user_role' AND e.enumlabel = 'adc'
+    ) THEN
+        ALTER TYPE user_role ADD VALUE 'adc';
+    END IF;
+
+    -- user_role: rrhh
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'user_role' AND e.enumlabel = 'rrhh'
+    ) THEN
+        ALTER TYPE user_role ADD VALUE 'rrhh';
+    END IF;
 END $$;
 
 -- 1. Extender periodos_laborales
@@ -43,10 +77,45 @@ DO $$ BEGIN
     ) THEN
         ALTER TABLE periodos_laborales ADD CONSTRAINT uq_periodos_laborales_contrato_mes UNIQUE (contrato_id, mes_anio);
     END IF;
+    -- auditoria_accion: cargar
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'auditoria_accion' AND e.enumlabel = 'cargar'
+    ) THEN
+        ALTER TYPE auditoria_accion ADD VALUE 'cargar';
+    END IF;
+
+    -- auditoria_accion: no_aplica
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'auditoria_accion' AND e.enumlabel = 'no_aplica'
+    ) THEN
+        ALTER TYPE auditoria_accion ADD VALUE 'no_aplica';
+    END IF;
+    -- user_role: adc
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'user_role' AND e.enumlabel = 'adc'
+    ) THEN
+        ALTER TYPE user_role ADD VALUE 'adc';
+    END IF;
+
+    -- user_role: rrhh
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        WHERE t.typname = 'user_role' AND e.enumlabel = 'rrhh'
+    ) THEN
+        ALTER TYPE user_role ADD VALUE 'rrhh';
+    END IF;
 END $$;
 
 -- 2. Permitir sujeto_id NULL para documentos consolidados de contrato
 ALTER TABLE periodo_documentos ALTER COLUMN sujeto_id DROP NOT NULL;
+ALTER TABLE periodo_documentos ALTER COLUMN requisito_template_id DROP NOT NULL;
 
 ALTER TABLE periodo_documentos
     ADD COLUMN IF NOT EXISTS contrato_requisito_id UUID,

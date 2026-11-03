@@ -20,7 +20,7 @@ from pgvector.sqlalchemy import VECTOR
 
 
 _ENUM_VALUES = {
-    "user_role": ("admin", "company", "contract_admin", "visor"),
+    "user_role": ("admin", "company", "contract_admin", "visor", "adc", "rrhh"),
     "account_status": ("pending", "approved", "rejected"),
     "subject_type": ("trabajador", "equipo"),
     "subject_status": ("ok", "falta", "venc", "proc", "baja"),
