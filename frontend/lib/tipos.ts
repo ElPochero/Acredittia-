@@ -39,7 +39,7 @@ export type ParamsPagina = {
 // ============================================================================
 // Vocabularios cerrados
 // ============================================================================
-export type Rol = "admin" | "company" | "contract_admin" | "visor";
+export type Rol = "admin" | "company" | "contract_admin" | "visor" | "adc" | "rrhh";
 export type EstadoEmpresa = "pending" | "approved" | "rejected";
 export type EstadoDoc = "ok" | "falta";
 export type EstadoCalc = "ok" | "porvenc" | "venc" | "falta";

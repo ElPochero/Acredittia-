@@ -33,7 +33,7 @@ import type {
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
-  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento, PeriodoDocumentoVersionItem, MisPendientesRrhhRespuesta,
+  Rol, Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento, PeriodoDocumentoVersionItem, MisPendientesRrhhRespuesta,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
   CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
   SeccionExport,
@@ -157,7 +157,7 @@ export const empresa = {
     api<Pagina<UsuarioEmpresa>>("/company/usuarios", { query: q(params) }),
 
   invitar: (body: {
-    nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
+    nombre: string; email: string; role?: "company" | "contract_admin" | "visor" | "adc" | "rrhh";
     contrato_id?: string | null; unidad_negocio?: string | null;
   }) => api<UsuarioEmpresa & { activacion?: Record<string, unknown> }>(
     "/company/usuarios", { body }),
@@ -852,6 +852,20 @@ export const suscripcion = {
 // §16 — Certificación Laboral (Dev 4)
 // ============================================================================
 export const certificacion = {
+  compartir: async (
+    contratoId: string,
+    body: { nombre: string; email: string; role?: Rol; unidad_negocio?: string | null }
+  ) => {
+    return await api<{
+      ok: boolean;
+      contrato_id: string;
+      user_id: string;
+      email: string;
+      role: string;
+      _dev_clave?: string;
+    }>(`/contratos/${contratoId}/compartir`, { method: "POST", body });
+  },
+
   listarPeriodosContrato: async (
     contratoId: string,
     params?: ParamsPagina & { estado?: string; orden?: string }

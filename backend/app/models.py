@@ -1127,6 +1127,21 @@ class PeriodoDocumentoVersion(Base):
     )
 
 
+class ContratoUsuarioRol(Base):
+    __tablename__ = "contrato_usuarios_rol"
+
+    contrato_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contratos.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    rol_contrato: Mapped[str] = mapped_column(Text, primary_key=True, default="rrhh")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+
+
 class ChatHistorial(Base):
     """
     Historial de chat para IA con persistencia de 3 meses.

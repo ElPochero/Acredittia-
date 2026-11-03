@@ -35,6 +35,10 @@ export default function Sidebar({
   const [noLeidas, setNoLeidas] = useState(0);
   const user = typeof window !== "undefined" ? Api.currentUser() : null;
   const esAdmin = user?.role === "admin";
+  const esRrhh = user?.role === "rrhh";
+  const visibleItems = esRrhh
+    ? ITEMS.filter((it) => it.href === "/certificacion-laboral")
+    : ITEMS;
   const impersonando =
     typeof window !== "undefined"
       ? sessionStorage.getItem("impersonar_nombre")
@@ -146,7 +150,7 @@ export default function Sidebar({
           </div>
           <div className="su-info">
             <b id="su-name">{name}</b>
-            <small id="su-role">{esAdmin ? "Administrador" : "Usuario"}</small>
+            <small id="su-role">{esAdmin ? "Administrador" : esRrhh ? "Encargado RR.HH." : user?.role === "adc" ? "Auditor ADC" : "Usuario"}</small>
           </div>
         </div>
 
@@ -198,7 +202,7 @@ export default function Sidebar({
             </Link>
           )}
           {(!esAdmin || impersonando) &&
-            ITEMS.map((i) => (
+            visibleItems.map((i) => (
               <Link
                 key={i.href}
                 href={i.href}

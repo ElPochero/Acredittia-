@@ -479,6 +479,8 @@ export default function ContratoCertificacionDetallePage() {
     );
   }
 
+  const userActual = typeof window !== "undefined" ? Api.currentUser() : null;
+  const esRrhh = userActual?.role === "rrhh";
   const periodoCerrado = periodoActivo?.estado === "cerrado";
 
   return (
@@ -517,15 +519,17 @@ export default function ContratoCertificacionDetallePage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setCompartirModalAbierto(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:border-blue-500 hover:text-blue-700 hover:bg-blue-50/30 transition"
-            >
-              <span>👥 Compartir / Asignar RR.HH.</span>
-            </button>
-          </div>
+          {!esRrhh && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCompartirModalAbierto(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:border-blue-500 hover:text-blue-700 hover:bg-blue-50/30 transition"
+              >
+                <span>👥 Compartir / Asignar RR.HH.</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Metadatos y Roles en la Cabecera */}
@@ -580,7 +584,7 @@ export default function ContratoCertificacionDetallePage() {
                 <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-100 px-3.5 py-1 text-xs font-bold text-slate-700 shadow-sm">
                   🔒 Período Cerrado e Inmutable
                 </span>
-              ) : (
+              ) : !esRrhh ? (
                 <button
                   type="button"
                   onClick={handleCerrarPeriodo}
@@ -604,7 +608,7 @@ export default function ContratoCertificacionDetallePage() {
                     </span>
                   )}
                 </button>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -916,40 +920,44 @@ export default function ContratoCertificacionDetallePage() {
                               <td className="px-4 py-3 text-right">
                                 <div className="inline-flex items-center gap-1.5">
                                   {!periodoCerrado ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAccionRapidaAuditoria(doc, "aprobar")}
-                                        className="cl-b ok !py-1 !px-2 !text-[11px]"
-                                        title="Aprobar requisito"
-                                      >
-                                        ✓ Aprobar
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => abrirModalObservacionRapida(doc, "observar")}
-                                        className="cl-b ob !py-1 !px-2 !text-[11px]"
-                                        title="Observar entrega (comentario obligatorio)"
-                                      >
-                                        📝 Observar
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => abrirModalObservacionRapida(doc, "rechazar")}
-                                        className="cl-b re !py-1 !px-2 !text-[11px]"
-                                        title="Rechazar entrega (comentario obligatorio)"
-                                      >
-                                        ⛔ Rechazar
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAccionRapidaAuditoria(doc, "no_aplica")}
-                                        className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
-                                        title="Marcar No aplica"
-                                      >
-                                        No aplica
-                                      </button>
-                                    </>
+                                    !esRrhh ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAccionRapidaAuditoria(doc, "aprobar")}
+                                          className="cl-b ok !py-1 !px-2 !text-[11px]"
+                                          title="Aprobar requisito"
+                                        >
+                                          ✓ Aprobar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => abrirModalObservacionRapida(doc, "observar")}
+                                          className="cl-b ob !py-1 !px-2 !text-[11px]"
+                                          title="Observar entrega (comentario obligatorio)"
+                                        >
+                                          📝 Observar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => abrirModalObservacionRapida(doc, "rechazar")}
+                                          className="cl-b re !py-1 !px-2 !text-[11px]"
+                                          title="Rechazar entrega (comentario obligatorio)"
+                                        >
+                                          ⛔ Rechazar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAccionRapidaAuditoria(doc, "no_aplica")}
+                                          className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+                                          title="Marcar No aplica"
+                                        >
+                                          No aplica
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-[11px] text-slate-400 italic">Solo lectura (RR.HH.)</span>
+                                    )
                                   ) : (
                                     <span className="text-[11px] text-slate-400 italic">Cerrado</span>
                                   )}

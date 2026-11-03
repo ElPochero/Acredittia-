@@ -215,6 +215,16 @@ def obtener_contrato_certificacion(
     Asegura los períodos mensuales según vigencia automáticamente.
     """
     c = _get_contrato(db, cid, contrato_id)
+    if getattr(user, "role", None) == "rrhh":
+        from ..models import ContratoUsuarioRol
+        asignado = (user.contrato_id == contrato_id) or bool(db.execute(
+            select(ContratoUsuarioRol).where(
+                ContratoUsuarioRol.contrato_id == contrato_id,
+                ContratoUsuarioRol.user_id == user.id
+            )
+        ).scalars().first())
+        if not asignado:
+            raise err(403, "FORBIDDEN", "No tiene acceso a este contrato")
     asegurar_periodos_contrato(db, c)
     
     faena_nombre = c.faena.nombre if c.faena else "Sin faena asignada"
@@ -641,8 +651,11 @@ def actualizar_periodo(
 def eliminar_periodo(
     periodo_id: uuid.UUID,
     cid: uuid.UUID = Depends(get_company_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
 ):
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "Los usuarios con rol RR.HH. no pueden eliminar períodos")
     """Elimina un perÃ­odo laboral."""
     p = _get_periodo(db, cid, periodo_id)
     
@@ -670,8 +683,11 @@ def agregar_documento_requerido(
     periodo_id: uuid.UUID,
     carga: DocumentoRequeridoIn | list[DocumentoRequeridoIn],
     cid: uuid.UUID = Depends(get_company_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
 ):
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "El rol RR.HH. no tiene permisos para configurar requisitos")
     """Define quÃ© documento es requerido para este perÃ­odo."""
     _get_periodo(db, cid, periodo_id)
     cargas = carga if isinstance(carga, list) else [carga]

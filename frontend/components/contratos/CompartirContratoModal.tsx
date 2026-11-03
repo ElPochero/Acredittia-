@@ -39,6 +39,11 @@ const ROLES = {
     desc: "Acceso total a contratos y configuración.",
     fondo: "bg-slate-200 text-slate-700",
   },
+  rrhh: {
+    nombre: "RR.HH. — solo Control Laboral",
+    desc: "Carga documentos mensuales y consulta la nómina sin acceso a otros módulos.",
+    fondo: "bg-indigo-100 text-indigo-800",
+  },
 } as const;
 
 type Rol = keyof typeof ROLES;
@@ -296,6 +301,7 @@ export function CompartirContratoModal({
                 <option value="contract_admin">Editor</option>
                 <option value="visor">Visor — solo lectura</option>
                 <option value="company">Administrador — toda la empresa</option>
+                <option value="rrhh">RR.HH. — solo Control Laboral</option>
               </select>
             </div>
             <div>
