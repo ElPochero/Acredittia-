@@ -10,5 +10,6 @@ ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_frecuencia_dias   INTEGER 
 ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alerta_faltantes_dias    INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE contratos ADD COLUMN IF NOT EXISTS alertas_config           JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE documentos ADD COLUMN IF NOT EXISTS reutilizado_de          JSONB;
+ALTER TABLE documentos ADD COLUMN IF NOT EXISTS estado_plataforma      TEXT NOT NULL DEFAULT 'sin_subir';
 
 INSERT INTO app_schema_migrations (version) VALUES (16) ON CONFLICT DO NOTHING;

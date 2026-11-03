@@ -126,6 +126,8 @@ class DocPatch(BaseModel):
 
     vence: date | None = None
 
+    estado_plataforma: str | None = None  # sin_subir | subido
+
 
 
 
@@ -383,6 +385,8 @@ def doc_out(
         "plataforma_id": plataforma_id,
 
         "reutilizado_de": d.reutilizado_de,
+
+        "estado_plataforma": getattr(d, "estado_plataforma", None) or "sin_subir",
 
     }
 
@@ -706,6 +710,116 @@ def detalle(doc_id: uuid.UUID, db: Session = Depends(get_db),
 
 
 
+class BulkEstadoPlataformaIn(BaseModel):
+
+    documento_ids: list[uuid.UUID]
+
+    estado_plataforma: str  # subido | sin_subir
+
+    plataforma: str | None = None
+
+    usuario_plataforma: str | None = None
+
+
+
+
+
+@router.patch("/bulk-estado-plataforma")
+
+def bulk_estado_plataforma(
+
+    body: BulkEstadoPlataformaIn,
+
+    db: Session = Depends(get_db),
+
+    cid: uuid.UUID = Depends(get_company_id),
+
+    user: User = Depends(get_current_user),
+
+):
+
+    """Actualiza en bloque el estado_plataforma de los documentos seleccionados."""
+
+    if body.estado_plataforma not in ("subido", "sin_subir"):
+
+        raise err(400, "ESTADO_PLATAFORMA_INVALIDO", "estado_plataforma debe ser 'subido' o 'sin_subir'")
+
+
+
+    if not body.documento_ids:
+
+        return {"actualizados": 0, "documento_ids": []}
+
+
+
+    docs = list(db.scalars(
+
+        select(Documento).where(
+
+            Documento.id.in_(body.documento_ids),
+
+            Documento.company_id == cid,
+
+        )
+
+    ))
+
+
+
+    if len(docs) != len(set(body.documento_ids)):
+
+        raise err(404, "DOCUMENTO_NO_ENCONTRADO", "Uno o más documentos no existen o no pertenecen a la empresa")
+
+
+
+    for d in docs:
+
+        d.estado_plataforma = body.estado_plataforma
+
+        d.updated_at = datetime.now(timezone.utc)
+
+
+
+    db.commit()
+
+
+
+    actividad.log(
+
+        db,
+
+        cid,
+
+        "actualizacion",
+
+        "plataformas",
+
+        f"{len(docs)} documento(s) marcados '{body.estado_plataforma}' para plataforma '{body.plataforma or 'General'}'"
+
+        + (f" con usuario '{body.usuario_plataforma}'" if body.usuario_plataforma else ""),
+
+        user_id=user.id,
+
+        entidad_tipo="documento",
+
+        entidad_id=docs[0].id if docs else None,
+
+    )
+
+
+
+    return {
+
+        "actualizados": len(docs),
+
+        "documento_ids": [str(d.id) for d in docs],
+
+    }
+
+
+
+
+
 @router.patch("/{doc_id}")
 
 def editar(doc_id: uuid.UUID, body: DocPatch, db: Session = Depends(get_db),
@@ -749,6 +863,14 @@ def editar(doc_id: uuid.UUID, body: DocPatch, db: Session = Depends(get_db),
     if "vence" in data and data["vence"] is not None:
 
         d.vence = data["vence"]
+
+    if "estado_plataforma" in data and data["estado_plataforma"] is not None:
+
+        if data["estado_plataforma"] not in ("sin_subir", "subido"):
+
+            raise err(400, "ESTADO_PLATAFORMA_INVALIDO", "estado_plataforma debe ser 'sin_subir' o 'subido'")
+
+        d.estado_plataforma = data["estado_plataforma"]
 
 
 

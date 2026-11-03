@@ -468,7 +468,9 @@ class Documento(Base):
         pg_enum("doc_estado_calc"), default="falta"
     )
     es_emsipor: Mapped[bool] = mapped_column(Boolean, default=False)
-    reutilizado_de: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    reutilizado_de: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+
+    estado_plataforma: Mapped[str] = mapped_column(Text, default="sin_subir", server_default="sin_subir")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
