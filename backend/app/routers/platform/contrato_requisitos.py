@@ -247,20 +247,20 @@ def _instanciar_retroactivo(db: Session, cid: uuid.UUID, contrato: Contrato,
     """
     creados = 0
     for r in requisitos:
-        if r.ambito == "empresa":
+        if r.ambito == "empresa" or r.vinculo_tipo == "faena":
             titulos = {t.strip().lower() for t in db.scalars(
                 select(Documento.titulo).where(
                     Documento.company_id == cid,
                     Documento.contrato_id == contrato.id))}
-            if r.titulo.strip().lower() in titulos:
+            if r.titulo.strip().lower() not in titulos:
+                db.add(Documento(
+                    company_id=cid, template_id=r.requisito_template_id,
+                    contrato_id=contrato.id, titulo=r.titulo,
+                    obligatorio=r.obligatorio, estado="falta", estado_calc="falta",
+                    es_emsipor=False))
+                creados += 1
+            if r.ambito == "empresa":
                 continue
-            db.add(Documento(
-                company_id=cid, template_id=r.requisito_template_id,
-                contrato_id=contrato.id, titulo=r.titulo,
-                obligatorio=r.obligatorio, estado="falta", estado_calc="falta",
-                es_emsipor=False))
-            creados += 1
-            continue
 
         for s in _sujetos_del_ambito(db, cid, contrato.id, r.ambito, r.cargo_id):
             titulos = {t.strip().lower() for t in db.scalars(

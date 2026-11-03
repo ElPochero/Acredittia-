@@ -56,11 +56,13 @@ export function TabDocumentosFaena({
   const [nuevoTitulo, setNuevoTitulo] = useState("");
   const [nuevoAmbito, setNuevoAmbito] = useState("empresa");
   const [guardando, setGuardando] = useState(false);
+  const [nuevoArchivo, setNuevoArchivo] = useState<File | null>(null);
 
-  const faenaNombre = contrato.faena?.nombre || "la faena";
-  const mandanteNombre = contrato.faena?.mandante || faenaNombre;
+  const faenaNombre = contrato?.faena?.nombre || "Faena";
+  const mandanteNombre = contrato?.faena?.mandante || faenaNombre;
 
   const cargar = useCallback(async () => {
+    if (!contrato?.id) return;
     setCargando(true);
     setError("");
     try {
@@ -70,14 +72,16 @@ export function TabDocumentosFaena({
         Api.contratos.equipos(contrato.id, { page_size: 100 }),
       ]);
       const porTitulo = new Map<string, Documento>();
-      for (const d of docRes.items || []) porTitulo.set(d.titulo.trim().toLowerCase(), d);
+      for (const d of docRes.items || []) {
+        if (d?.titulo) porTitulo.set(d.titulo.trim().toLowerCase(), d);
+      }
       setReqs(((reqRes.items || []) as any[]).map((r) => ({
         id: r.id,
-        titulo: r.titulo,
-        ambito: r.ambito,
-        obligatorio: r.obligatorio,
+        titulo: r.titulo || "Documento",
+        ambito: r.ambito || "empresa",
+        obligatorio: Boolean(r.obligatorio),
         editable: r.editable ?? r.origen !== "base",
-        doc: porTitulo.get((r.titulo || "").trim().toLowerCase()),
+        doc: r.titulo ? porTitulo.get(r.titulo.trim().toLowerCase()) : undefined,
       })));
       setEquipos(eqRes.items || []);
     } catch (e) {
@@ -85,7 +89,7 @@ export function TabDocumentosFaena({
     } finally {
       setCargando(false);
     }
-  }, [contrato.id]);
+  }, [contrato?.id]);
 
   useEffect(() => {
     cargar();
@@ -133,25 +137,59 @@ export function TabDocumentosFaena({
 
   const handleAgregar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevoTitulo.trim()) {
+    const tituloTrim = nuevoTitulo.trim();
+    if (!tituloTrim) {
       toast.error("Ingresa el título del documento o regla");
       return;
     }
+    const archivoSubir = nuevoArchivo;
     setGuardando(true);
     try {
       await Api.contratos.crearRequisitos(
         contrato.id,
-        { vinculo_tipo: "faena", ambito: nuevoAmbito, titulo: nuevoTitulo.trim(), obligatorio: true, origen: "custom" },
+        { vinculo_tipo: "faena", ambito: nuevoAmbito, titulo: tituloTrim, obligatorio: true, origen: "custom" },
         { aplicar_retroactivo: true },
       );
+      if (archivoSubir) {
+        const docRes = await Api.contratos.documentos(contrato.id, { page_size: 100 });
+        const docCreado = (docRes.items || []).find(
+          (d) => d.titulo.trim().toLowerCase() === tituloTrim.toLowerCase(),
+        );
+        if (docCreado) {
+          onSubir(docCreado.id, archivoSubir);
+        }
+      }
       setNuevoTitulo("");
+      setNuevoArchivo(null);
       setModalSubir(false);
       await cargar();
-      toast.success("Documento de faena registrado");
+      toast.success(
+        archivoSubir
+          ? "Documento de faena creado y subiendo archivo..."
+          : "Documento de faena registrado",
+      );
     } catch (e) {
       toast.error(Api.mensajeError(e));
     } finally {
       setGuardando(false);
+    }
+  };
+
+  const handleDescargarDirecta = async (doc: Documento) => {
+    try {
+      let archivoId = doc.archivos?.[0]?.id;
+      if (!archivoId) {
+        const fullDoc = await Api.documentos.detalle(doc.id);
+        archivoId = fullDoc.archivos?.[0]?.id;
+      }
+      if (!archivoId) {
+        toast.error("El documento no tiene un archivo disponible para descargar");
+        return;
+      }
+      const res = await Api.documentos.urlDescarga(doc.id, archivoId);
+      window.open(res.download_url, "_blank");
+    } catch (e) {
+      toast.error(Api.mensajeError(e));
     }
   };
 
@@ -310,8 +348,9 @@ export function TabDocumentosFaena({
               ) : (
                 reqs.map((r) => {
                   const est = r.doc?.estado_calc || "falta";
-                  const isSubiendo = subiendo?.docId === r.doc?.id;
-                  const isAnalizando = analizandoId === r.doc?.id;
+                  const isSubiendo = Boolean(subiendo?.docId && r.doc?.id && subiendo.docId === r.doc.id);
+                  const isAnalizando = Boolean(analizandoId && r.doc?.id && analizandoId === r.doc.id);
+                  const tieneArchivo = Boolean((r.doc?.archivos_count ?? 0) > 0 || (r.doc?.archivos?.length ?? 0) > 0);
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/60 transition-colors group">
                       <td className="py-4 px-5 align-middle">
@@ -342,6 +381,16 @@ export function TabDocumentosFaena({
                       </td>
                       <td className="py-4 px-5 align-middle text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {tieneArchivo && r.doc && (
+                            <button
+                              type="button"
+                              onClick={() => handleDescargarDirecta(r.doc!)}
+                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-[0.72rem] font-semibold rounded-[6px] transition-colors flex items-center gap-1 shadow-2xs"
+                              title="Descargar archivo"
+                            >
+                              <span>⬇</span> Descargar
+                            </button>
+                          )}
                           {r.doc && (
                             <label className="px-3 py-1 bg-blue-50/80 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[0.72rem] font-semibold rounded-[6px] transition-colors cursor-pointer">
                               Subir
@@ -527,7 +576,10 @@ export function TabDocumentosFaena({
         abierto={modalSubir}
         titulo={`Nuevo documento de faena — ${faenaNombre}`}
         onCerrar={() => {
-          if (!guardando) setModalSubir(false);
+          if (!guardando) {
+            setModalSubir(false);
+            setNuevoArchivo(null);
+          }
         }}
         ancho="max-w-xl"
       >
@@ -561,9 +613,23 @@ export function TabDocumentosFaena({
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+              Archivo (opcional)
+            </label>
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              onChange={(e) => setNuevoArchivo(e.target.files?.[0] || null)}
+              className="w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded-lg p-1.5 bg-white cursor-pointer"
+            />
+            <p className="text-[0.72rem] text-slate-500 mt-1">
+              Adjunta el documento directamente para procesarlo con IA en un solo paso.
+            </p>
+          </div>
+
           <p className="text-[0.75rem] text-slate-500 m-0">
-            Se crea el requisito y su documento en estado pendiente; después usa
-            «Subir» en la fila para cargar el archivo, que se revisa con IA.
+            Se crea el requisito de faena y su documento. Si adjuntas un archivo, se subirá de inmediato para análisis con IA.
           </p>
 
           <div className="flex justify-end gap-2 pt-2">
