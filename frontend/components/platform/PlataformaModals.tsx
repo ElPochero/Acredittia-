@@ -101,6 +101,18 @@ export function GestionarUsuariosModal({
   const [password, setPassword] = useState("");
   const [creando, setCreando] = useState(false);
 
+  // Estados para visualización y copia de contraseñas
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, string>>({});
+  const [cargandoPassword, setCargandoPassword] = useState<Record<string, boolean>>({});
+  const [copiado, setCopiado] = useState<Record<string, boolean>>({});
+  const [mostrarNuevoPassword, setMostrarNuevoPassword] = useState(false);
+
+  // Estados para rotación de contraseña
+  const [rotandoId, setRotandoId] = useState<string | null>(null);
+  const [rotarPassword, setRotarPassword] = useState("");
+  const [mostrarRotarPassword, setMostrarRotarPassword] = useState(false);
+  const [guardandoRotacion, setGuardandoRotacion] = useState(false);
+
   // Plataforma heredada sin materializar: viene sin `id` propio; el backend
   // acepta el id de la faena y materializa la lista al crear la cuenta.
   const pid = plataforma ? plataforma.id || plataforma.faena_plataforma_id || null : null;
@@ -119,6 +131,66 @@ export function GestionarUsuariosModal({
       .catch(e => alert(Api.mensajeError(e)))
       .finally(() => setLoading(false));
   }, [plataforma, contratoId, pid, pidValido]);
+
+  const copiarTexto = async (texto: string, key: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(texto);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = texto;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiado(prev => ({ ...prev, [key]: true }));
+      setTimeout(() => {
+        setCopiado(prev => ({ ...prev, [key]: false }));
+      }, 2000);
+    } catch (err) {
+      console.error("Error al copiar al portapapeles:", err);
+    }
+  };
+
+  const handleTogglePassword = async (uid: string) => {
+    if (visiblePasswords[uid]) {
+      setVisiblePasswords(prev => {
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+      return;
+    }
+    if (!plataforma || !pid) return;
+    setCargandoPassword(prev => ({ ...prev, [uid]: true }));
+    try {
+      const res = await Api.credenciales.revelarPassword(contratoId, pid, uid);
+      setVisiblePasswords(prev => ({ ...prev, [uid]: res.password }));
+    } catch (e) {
+      alert(Api.mensajeError(e));
+    } finally {
+      setCargandoPassword(prev => ({ ...prev, [uid]: false }));
+    }
+  };
+
+  const handleCopiarPassword = async (uid: string) => {
+    if (visiblePasswords[uid]) {
+      await copiarTexto(visiblePasswords[uid], `pw_${uid}`);
+      return;
+    }
+    if (!plataforma || !pid) return;
+    setCargandoPassword(prev => ({ ...prev, [uid]: true }));
+    try {
+      const res = await Api.credenciales.revelarPassword(contratoId, pid, uid);
+      setVisiblePasswords(prev => ({ ...prev, [uid]: res.password }));
+      await copiarTexto(res.password, `pw_${uid}`);
+    } catch (e) {
+      alert(Api.mensajeError(e));
+    } finally {
+      setCargandoPassword(prev => ({ ...prev, [uid]: false }));
+    }
+  };
 
   const handleAgregar = async () => {
     if (!plataforma) return;
@@ -139,6 +211,26 @@ export function GestionarUsuariosModal({
     }
   };
 
+  const handleRotar = async (uid: string) => {
+    if (!plataforma || !pid) return;
+    if (rotarPassword.length < PASSWORD_MIN) {
+      return alert(`La nueva contraseña debe tener al menos ${PASSWORD_MIN} caracteres`);
+    }
+    setGuardandoRotacion(true);
+    try {
+      await Api.credenciales.rotar(contratoId, pid, uid, rotarPassword);
+      setVisiblePasswords(prev => ({ ...prev, [uid]: rotarPassword }));
+      setRotandoId(null);
+      setRotarPassword("");
+      const res = await Api.credenciales.listar(contratoId, pid);
+      setUsuarios(res.items || []);
+    } catch (e) {
+      alert(Api.mensajeError(e));
+    } finally {
+      setGuardandoRotacion(false);
+    }
+  };
+
   const handleEliminar = async (uid: string) => {
     if (!plataforma || !pid || !confirm("¿Eliminar esta cuenta?")) return;
     try {
@@ -152,33 +244,120 @@ export function GestionarUsuariosModal({
   if (!plataforma) return null;
 
   return (
-    <Modal abierto={!!plataforma} titulo={`${plataforma.nombre} — Usuarios`} onCerrar={onCerrar} ancho="max-w-[520px]">
+    <Modal abierto={!!plataforma} titulo={`${plataforma.nombre} — Usuarios y claves`} onCerrar={onCerrar} ancho="max-w-[560px]">
       <div className="text-[0.8rem] text-slate-500 mb-4 leading-relaxed">
-        Credenciales de acceso a {plataforma.nombre}.
+        Credenciales de acceso a {plataforma.nombre}. Las contraseñas están almacenadas cifradas en el vault.
       </div>
       
       {loading ? (
         <div className="py-8 flex justify-center"><Spinner /></div>
       ) : (
-        <div className="mb-5 max-h-[300px] overflow-y-auto pr-2">
+        <div className="mb-5 max-h-[300px] overflow-y-auto pr-2 divide-y divide-slate-100">
           {usuarios.length === 0 ? (
             <div className="text-[0.78rem] text-slate-500 py-2">Sin usuarios registrados aún.</div>
           ) : (
             usuarios.map(u => (
-              <div key={u.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-                <div>
-                  <div className="text-[0.83rem] font-bold text-slate-800">{u.nombre || '—'}</div>
-                  <div className="text-[0.74rem] text-slate-500 mt-0.5">
-                    👤 {u.usuario} &nbsp;·&nbsp; 🔑 <span className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-700">********</span>
+              <div key={u.id} className="py-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0 mr-2">
+                    <div className="text-[0.83rem] font-bold text-slate-800">{u.nombre || '—'}</div>
+                    <div className="text-[0.74rem] text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1">
+                        👤 <span className="font-semibold text-slate-700">{u.usuario}</span>
+                        <button 
+                          type="button"
+                          className="text-slate-400 hover:text-slate-700 transition-colors ml-0.5"
+                          onClick={() => copiarTexto(u.usuario, `user_${u.id}`)}
+                          title="Copiar usuario"
+                        >
+                          {copiado[`user_${u.id}`] ? <span className="text-[0.7rem] text-emerald-600 font-bold">✓</span> : "⧉"}
+                        </button>
+                      </span>
+                      <span className="text-slate-300">·</span>
+                      <span className="inline-flex items-center gap-1">
+                        🔑 <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 text-xs">
+                          {cargandoPassword[u.id] ? "..." : (visiblePasswords[u.id] || "••••••••")}
+                        </span>
+                        <button 
+                          type="button"
+                          className="text-slate-400 hover:text-slate-700 text-xs p-0.5 transition-colors"
+                          onClick={() => handleTogglePassword(u.id)}
+                          disabled={cargandoPassword[u.id]}
+                          title={visiblePasswords[u.id] ? "Ocultar contraseña" : "Ver contraseña"}
+                        >
+                          {visiblePasswords[u.id] ? "🙈" : "👁"}
+                        </button>
+                        <button 
+                          type="button"
+                          className="text-slate-400 hover:text-slate-700 text-xs p-0.5 transition-colors"
+                          onClick={() => handleCopiarPassword(u.id)}
+                          disabled={cargandoPassword[u.id]}
+                          title="Copiar contraseña"
+                        >
+                          {copiado[`pw_${u.id}`] ? <span className="text-[0.7rem] text-emerald-600 font-bold">✓ Copiado</span> : "⧉"}
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="px-1.5 py-1 text-[0.7rem] font-semibold text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                      onClick={() => {
+                        setRotandoId(rotandoId === u.id ? null : u.id);
+                        setRotarPassword("");
+                      }}
+                      title="Rotar contraseña"
+                    >
+                      Rotar
+                    </button>
+                    <button 
+                      className="w-6 h-6 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                      onClick={() => handleEliminar(u.id)}
+                      title="Eliminar"
+                    >
+                      ✕
+                    </button>
                   </div>
                 </div>
-                <button 
-                  className="w-6 h-6 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                  onClick={() => handleEliminar(u.id)}
-                  title="Eliminar"
-                >
-                  ✕
-                </button>
+
+                {rotandoId === u.id && (
+                  <div className="mt-2 p-2.5 bg-blue-50/70 border border-blue-200 rounded-lg flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        value={rotarPassword}
+                        onChange={(e) => setRotarPassword(e.target.value)}
+                        placeholder="Nueva contraseña"
+                        type={mostrarRotarPassword ? "text" : "password"}
+                        minLength={PASSWORD_MIN}
+                        className="w-full h-[30px] pl-2.5 pr-7 border border-slate-300 rounded text-[0.78rem] font-mono focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs p-0.5"
+                        onClick={() => setMostrarRotarPassword(prev => !prev)}
+                        title={mostrarRotarPassword ? "Ocultar" : "Mostrar"}
+                      >
+                        {mostrarRotarPassword ? "🙈" : "👁"}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={guardandoRotacion}
+                      onClick={() => handleRotar(u.id)}
+                      className="px-2.5 py-1 text-[0.75rem] font-bold text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors disabled:opacity-50"
+                    >
+                      {guardandoRotacion ? "..." : "Guardar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRotandoId(null); setRotarPassword(""); }}
+                      className="px-2 py-1 text-[0.75rem] font-semibold text-slate-600 hover:bg-slate-200 rounded transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                )}
               </div>
             ))
           )}
@@ -213,14 +392,24 @@ export function GestionarUsuariosModal({
           </div>
           <div className="flex-1">
             <label className="block text-[0.7rem] font-bold text-slate-600 mb-1 uppercase">Contraseña *</label>
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              type="password"
-              minLength={PASSWORD_MIN}
-              className="w-full h-[34px] px-3 border border-slate-300 rounded text-[0.8rem] focus:outline-none focus:border-blue-500"
-            />
+            <div className="relative">
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                type={mostrarNuevoPassword ? "text" : "password"}
+                minLength={PASSWORD_MIN}
+                className="w-full h-[34px] pl-3 pr-8 border border-slate-300 rounded text-[0.8rem] focus:outline-none focus:border-blue-500 font-mono"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs p-1"
+                onClick={() => setMostrarNuevoPassword(prev => !prev)}
+                title={mostrarNuevoPassword ? "Ocultar" : "Mostrar"}
+              >
+                {mostrarNuevoPassword ? "🙈" : "👁"}
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex justify-end gap-2">

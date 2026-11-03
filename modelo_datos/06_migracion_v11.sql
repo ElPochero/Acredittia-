@@ -535,6 +535,43 @@ CREATE OR REPLACE VIEW v_plataforma_credenciales
 
 GRANT SELECT ON v_plataforma_credenciales TO acredittia_app, acredittia_worker;
 
+-- 10.3.1 Función SECURITY DEFINER para lectura controlada del JWE.
+--        Permite a la API obtener el JWE de una credencial específica
+--        validando estrictamente que pertenezca a la empresa del contexto (tenant).
+CREATE OR REPLACE FUNCTION fn_obtener_credencial_jwe(p_credencial_id uuid)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_jwe text;
+    v_company_id uuid;
+BEGIN
+    v_company_id := COALESCE(
+        nullif(current_setting('app.company_id', true), ''),
+        nullif(current_setting('app.current_company_id', true), '')
+    )::uuid;
+    IF v_company_id IS NULL AND NOT COALESCE(current_setting('app.is_admin', true), 'false')::boolean THEN
+        RAISE EXCEPTION 'Tenant no establecido' USING ERRCODE = '28000';
+    END IF;
+
+    IF v_company_id IS NOT NULL THEN
+        SELECT credencial_jwe INTO v_jwe
+        FROM plataforma_credenciales
+        WHERE id = p_credencial_id AND company_id = v_company_id;
+    ELSE
+        SELECT credencial_jwe INTO v_jwe
+        FROM plataforma_credenciales
+        WHERE id = p_credencial_id;
+    END IF;
+
+    RETURN v_jwe;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION fn_obtener_credencial_jwe(uuid) TO acredittia_app;
+
 CREATE TABLE IF NOT EXISTS app_schema_migrations (
     version integer PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()

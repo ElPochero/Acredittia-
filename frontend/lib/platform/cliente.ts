@@ -463,6 +463,10 @@ export const plataformas = {
   marcarSubida: (contratoId: string, pid: string) =>
     api<{ ok: boolean; plataforma: string; subida_at: string }>(
       `/contratos/${contratoId}/plataformas/${pid}/subida`, { body: {} }),
+
+  revelarPassword: (contratoId: string, pid: string, uid: string) =>
+    api<{ password: string }>(
+      `/contratos/${contratoId}/plataformas/${pid}/usuarios/${uid}/password`),
 };
 
 /** Cuentas de acceso a una plataforma. El secreto nunca vuelve del backend. */
@@ -474,6 +478,10 @@ export const credenciales = {
   crear: (contratoId: string, pid: string,
           body: { nombre: string; usuario: string; password: string }) =>
     api<Credencial>(`/contratos/${contratoId}/plataformas/${pid}/usuarios`, { body }),
+
+  revelarPassword: (contratoId: string, pid: string, uid: string) =>
+    api<{ password: string }>(
+      `/contratos/${contratoId}/plataformas/${pid}/usuarios/${uid}/password`),
 
   editar: (contratoId: string, pid: string, uid: string, cambios: {
     nombre?: string; usuario?: string; password?: string; estado?: "revocada";

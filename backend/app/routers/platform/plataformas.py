@@ -34,7 +34,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -46,7 +46,8 @@ from ...models import (Actividad, CompanyFaenaPlataforma, Contrato,
                       PlataformaCredencialVersion, SyncLog, User)
 from ...services.platform import actividad
 from ...services.platform.checklist import normalizar
-from ...services.platform.crypto import CredencialError, cifrar_credencial
+from ...services.platform.crypto import (CredencialError, cifrar_credencial,
+                                         descifrar_credencial)
 from ...services.platform.jobs import enqueue
 
 logger = logging.getLogger("acredittia.plataformas")
@@ -968,3 +969,38 @@ def usos_usuario(contrato_id: uuid.UUID, pid: uuid.UUID, uid: uuid.UUID,
             "created_at": _iso(a.created_at),
         } for a in usos],
     }
+
+
+@router.get("/plataformas/{pid}/usuarios/{uid}/password")
+@router.get("/plataformas/{pid}/credenciales/{uid}/password")
+def revelar_password(contrato_id: uuid.UUID, pid: uuid.UUID, uid: uuid.UUID,
+                     db: Session = Depends(get_db),
+                     cid: uuid.UUID = Depends(get_company_id),
+                     user: User = Depends(get_current_user)):
+    """Obtiene la contraseña en claro desencriptando el JWE vía SECURITY DEFINER.
+
+    La API no puede hacer SELECT directo de `credencial_jwe` (columna revocada);
+    accede al secreto a través de `fn_obtener_credencial_jwe`, que garantiza
+    el aislamiento estricto por tenant.
+    """
+    c = contrato_de_empresa(db, cid, contrato_id, user)
+    plat, _ = resolver_plataforma(db, cid, c, pid)
+    cred = _get_credencial(db, cid, plat, uid)
+
+    jwe = db.execute(
+        text("SELECT fn_obtener_credencial_jwe(:uid)"),
+        {"uid": cred.id}
+    ).scalar()
+    if not jwe:
+        raise err(404, "CREDENCIAL_NO_ENCONTRADA", "No se encontró el secreto de la credencial")
+
+    try:
+        payload = descifrar_credencial(
+            jwe, esperado_sub=cred.id, esperado_cid=cid, esperado_ctr=c.id
+        )
+    except Exception as e:
+        logger.error("Error al descifrar credencial %s: %s", cred.id, e)
+        raise err(500, "ERROR_DESCIFRADO", "No se pudo descifrar la credencial")
+
+    return {"password": payload.get("pwd", "")}
+
