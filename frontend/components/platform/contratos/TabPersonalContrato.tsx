@@ -6,6 +6,7 @@ import { Contrato, PlataformaContrato, Sujeto, TrabajadorIn } from "@/lib/platfo
 import { Paginador, Modal } from "@/components/shared/ui";
 import { toast } from "sonner";
 import { normalizarRut, validarRut } from "@/lib/platform/rut";
+import SubjectDetail from "@/components/platform/SubjectDetail";
 
 interface TabPersonalContratoProps {
   contrato: Contrato;
@@ -14,6 +15,7 @@ interface TabPersonalContratoProps {
 
 export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContratoProps) {
   const [personal, setPersonal] = useState<Api.Pagina<Sujeto> | null>(null);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState<'lista' | 'cuadricula' | 'hoja'>('lista');
@@ -233,6 +235,22 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
   const segs = [['#3f8f5b', ok], ['#d68a2e', pv], ['#c0392b', vc]];
   let off = 0;
 
+  if (selectedWorkerId) {
+    return (
+      <div className="w-full">
+        <SubjectDetail
+          tipo="personal"
+          id={selectedWorkerId}
+          contratoIdContext={contrato.id}
+          onBack={() => {
+            setSelectedWorkerId(null);
+            cargar();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start">
       <div className="flex-1 min-w-0 w-full">
@@ -342,7 +360,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                       <tr key={s.id} className={`border-b border-slate-200 text-[0.7rem] ${i % 2 ? 'bg-slate-50/50' : 'bg-white'} hover:bg-amber-50/60 transition-colors`}>
                         <td className="p-1.5 border-r border-slate-200 text-center text-slate-400">{i + 1}</td>
                         <td className="p-1.5 pl-2 border-r border-slate-200">
-                          <Link href={`/personal/${s.id}`} className="font-bold text-blue-700 hover:underline">{s.nombre}</Link>
+                          <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="font-bold text-blue-700 hover:underline text-left cursor-pointer">{s.nombre}</button>
                         </td>
                         <td className="p-1.5 border-r border-slate-200 text-slate-600 whitespace-nowrap">{s.rut}</td>
                         <td className="p-1.5 border-r border-slate-200 text-slate-700 whitespace-nowrap">{s.cargo}</td>
@@ -351,7 +369,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                         <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{estLbl}</td>
                         <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{acredLblDe(pctNum)} ({pctNum}%)</td>
                         <td className="p-1.5 whitespace-nowrap">
-                          <Link href={`/personal/${s.id}`} className="text-blue-600 font-bold hover:underline">Ver ficha</Link>
+                          <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver ficha</button>
                         </td>
                       </tr>
                     );
@@ -396,9 +414,9 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                               <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(s.nombre)}&background=random`} alt={s.nombre} className="w-full h-full object-cover" />
                             </div>
                             <div className="flex flex-col">
-                              <Link href={`/personal/${s.id}`} className="text-[0.75rem] font-bold text-blue-700 hover:text-blue-800 leading-tight bg-[#EEF2FF] px-2.5 py-1.5 rounded-lg inline-block break-words">
+                              <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-[0.75rem] font-bold text-blue-700 hover:text-blue-800 leading-tight bg-[#EEF2FF] px-2.5 py-1.5 rounded-lg inline-block break-words text-left cursor-pointer">
                                 {s.nombre}
-                              </Link>
+                              </button>
                               <div className="text-[0.65rem] text-slate-400 mt-1.5 font-medium px-1">{s.rut}</div>
                             </div>
                           </div>
@@ -445,9 +463,9 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                           </span>
                         </td>
                         <td className="p-4 align-top pt-4 pr-5">
-                          <Link href={`/personal/${s.id}`} className="text-[0.7rem] text-blue-600 font-bold hover:bg-[#E0E7FF] bg-[#EEF2FF] w-full text-center py-1.5 rounded-lg leading-tight transition-colors block">
+                          <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-[0.7rem] text-blue-600 font-bold hover:bg-[#E0E7FF] bg-[#EEF2FF] w-full text-center py-1.5 rounded-lg leading-tight transition-colors block cursor-pointer">
                             Ver perfil
-                          </Link>
+                          </button>
                         </td>
                       </tr>
                     );
@@ -471,9 +489,9 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                     <div className="flex items-start gap-3 mb-3">
                       <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(s.nombre)}&background=random`} alt={s.nombre} className="w-10 h-10 rounded-full object-cover" />
                       <div className="flex-1 min-w-0">
-                        <Link href={`/personal/${s.id}`} className="text-[0.85rem] font-bold text-blue-700 hover:underline block truncate">
+                        <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-[0.85rem] font-bold text-blue-700 hover:underline block truncate text-left cursor-pointer">
                           {s.nombre}
-                        </Link>
+                        </button>
                         <div className="text-[0.7rem] text-slate-500">{s.rut}</div>
                       </div>
                     </div>
@@ -485,7 +503,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
                         <span className="text-[0.7rem] text-slate-500 font-medium">Acreditación:</span>
                         <span className="text-[0.75rem] font-bold text-emerald-600">{acredLblDe(pct)} ({pct}%)</span>
                       </div>
-                      <Link href={`/personal/${s.id}`} className="text-[0.75rem] text-blue-600 font-bold hover:underline">Ver</Link>
+                      <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-[0.75rem] text-blue-600 font-bold hover:underline cursor-pointer">Ver</button>
                     </div>
                   </div>
                 );

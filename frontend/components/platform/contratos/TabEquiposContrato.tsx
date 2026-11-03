@@ -5,6 +5,7 @@ import * as Api from "@/lib/platform/cliente";
 import { Contrato, PlataformaContrato, Sujeto, EquipoIn } from "@/lib/platform/tipos";
 import { Paginador, Modal } from "@/components/shared/ui";
 import { toast } from "sonner";
+import SubjectDetail from "@/components/platform/SubjectDetail";
 
 interface TabEquiposContratoProps {
   contrato: Contrato;
@@ -13,6 +14,7 @@ interface TabEquiposContratoProps {
 
 export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContratoProps) {
   const [equipos, setEquipos] = useState<Api.Pagina<Sujeto> | null>(null);
+  const [selectedEquipoId, setSelectedEquipoId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
   const [showAddEquipo, setShowAddEquipo] = useState(false);
@@ -146,6 +148,22 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
   const segs = [['#3f8f5b', ok], ['#d68a2e', pv], ['#c0392b', vc]];
   let off = 0;
 
+  if (selectedEquipoId) {
+    return (
+      <div className="w-full">
+        <SubjectDetail
+          tipo="equipos"
+          id={selectedEquipoId}
+          contratoIdContext={contrato.id}
+          onBack={() => {
+            setSelectedEquipoId(null);
+            cargar();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col xl:flex-row gap-5 items-start">
       <div className="flex-1 min-w-0 w-full">
@@ -220,11 +238,11 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
                   return (
                     <tr key={s.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
                       <td className="p-3 text-[0.78rem] font-semibold text-cyan-700">
-                        <Link href={`/equipos/${s.id}`} className="hover:underline">{s.patente || `EQ-${String(i+1).padStart(3,'0')}`}</Link>
+                        <button type="button" onClick={() => setSelectedEquipoId(s.id)} className="hover:underline text-left cursor-pointer">{s.patente || `EQ-${String(i+1).padStart(3,'0')}`}</button>
                       </td>
                       <td className="p-3 text-[0.8rem] text-slate-500">{s.tipo_equipo || 'Equipo'}</td>
                       <td className="p-3 text-[0.8rem]">{s.marca || '—'} {s.modelo || ''}</td>
-                      <td className="p-3 text-[0.8rem]">{contrato.faena.nombre}</td>
+                      <td className="p-3 text-[0.8rem]">{contrato.faena?.nombre || "Faena"}</td>
                       <td className="p-3 text-[0.75rem]">
                         {plataformas.map((p) => (
                           <span key={p.id ?? p.faena_plataforma_id ?? p.nombre} className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded mr-1">{p.nombre}</span>
@@ -248,7 +266,7 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
                       </td>
                       <td className="p-3 text-[0.72rem] text-slate-500">—</td>
                       <td className="p-3 text-[0.8rem] text-right">
-                        <Link href={`/equipos/${s.id}`} className="text-blue-600 font-semibold hover:underline">Ver detalle</Link>
+                        <button type="button" onClick={() => setSelectedEquipoId(s.id)} className="text-blue-600 font-semibold hover:underline cursor-pointer">Ver detalle</button>
                       </td>
                     </tr>
                   );

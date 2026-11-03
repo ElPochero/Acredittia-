@@ -163,9 +163,13 @@ function FilaDoc({
 export default function SubjectDetail({
   tipo,
   id,
+  contratoIdContext,
+  onBack,
 }: {
   tipo: "personal" | "equipos";
   id: string;
+  contratoIdContext?: string;
+  onBack?: () => void;
 }) {
   const [data, setData] = useState<SujetoDetalle | null>(null);
   const [subiendo, setSubiendo] = useState<Subiendo | null>(null);
@@ -301,6 +305,15 @@ export default function SubjectDetail({
 
   return (
     <div className="w-full mx-auto pb-10">
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-[#0F172A] font-semibold text-[0.82rem] rounded-[9px] mb-4 shadow-2xs transition-colors cursor-pointer"
+        >
+          <span>←</span> Volver a {tipo === "personal" ? "personal" : "equipos"} del contrato
+        </button>
+      )}
       <div className="flex flex-wrap items-center justify-between bg-white border border-slate-200 rounded-xl p-5 shadow-sm mb-5">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 bg-[#3B82F6] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-sm shrink-0">
