@@ -1,1700 +1,3624 @@
 """Contratos: alta, ficha, dotación, alertas, historial y matriz (§8).
 
+
+
 El contrato es la unidad de acreditación: la empresa se acredita ANTE UNA FAENA
+
 POR UN CONTRATO, y de él cuelgan las plataformas del mandante, los requisitos
+
 efectivos, el personal y los equipos. Por eso este módulo agrega vistas que
+
 técnicamente viven en otras tablas (`/personal`, `/equipos`, `/alertas`,
+
 `/historial`): son la misma información acotada al contrato, y se delegan en los
+
 helpers de sus módulos en vez de duplicar los filtros.
 
+
+
 La **matriz de cumplimiento** (§8.4) es la vista que justifica el diseño disperso
+
 del checklist: cada sujeto tiene solo los documentos que le aplican, así que la
+
 cuadrícula sujeto × requisito tiene huecos. Los huecos se omiten (no se emiten
+
 celdas nulas) y significan «este requisito no aplica a este sujeto», que no es lo
+
 mismo que «falta».
+
 """
+
 from __future__ import annotations
 
+
+
 import logging
+
 import re
+
 import uuid
+
+import unicodedata
+
 from datetime import date, datetime, timezone
 
+
+
 from fastapi import APIRouter, Depends, Query
+
 from pydantic import BaseModel, Field, field_validator
+
 from sqlalchemy import func, or_, select
+
 from sqlalchemy.exc import IntegrityError
+
 from sqlalchemy.orm import Session, joinedload
 
+
+
 from ...config import settings
+
 from ...database import get_db
+
 from ...deps import (Page, aplicar_orden, contrato_permitido, contrato_scope, err,
+
                     get_company_id, get_current_user, paginacion, sobre)
+
 from ...models import (
+
     Actividad, Alerta, Contrato, ContratoPlantillaOverride, ContratoRequisito, Documento, DocumentoArchivo, Faena, IaReview,
+
     Sujeto, User,
+
 )
+
 from ...services.platform import actividad
+
 from ...services.platform.checklist import instanciar_docs, normalizar, stats_sujeto
+
 from ...services.platform.storage import get_storage
+
+
 
 logger = logging.getLogger("acredittia.contratos")
 
+
+
 router = APIRouter(prefix="/contratos", tags=["contratos"])
+
+
 
 ESTADOS: tuple[str, ...] = ("vigente", "en_evaluacion", "terminado")
 
+
+
 # Unidad de negocio: eje transversal a la faena que agrupa los contratos de una
+
 # empresa (Transporte de Personal, Mantención, Obras Civiles…). Es un conjunto
+
 # cerrado y corto, así que vive en el código y no en una tabla.
+
 UNIDADES_NEGOCIO: tuple[str, ...] = (
+
     "Transporte de Personal",
+
     "Mantención",
+
     "Obras Civiles",
+
     "Servicios Generales",
+
     "Minería Subterránea",
+
     "Explosivos",
+
     "Servicios Industriales",
+
 )
 
+
+
 ORDEN_CONTRATOS = {"nombre", "codigo", "estado", "fecha_inicio", "fecha_termino",
+
                    "created_at", "updated_at"}
 
+
+
 # Configuración de alertas IA (v15): anticipación en días y cada cuántos días
+
 # se repite el recordatorio. Se valida aquí porque el cron confía en lo que hay
+
 # en la base. Las frecuencias son un conjunto cerrado para que la UI y el cron
+
 # no puedan divergir.
+
 ALERTAS_ANTICIPACION = (1, 180)
+
 ALERTAS_FRECUENCIAS: tuple[int, ...] = (1, 3, 5, 7)
 
 
+
+
+
 # ============================================================================
+
 # Entradas
+
 # ============================================================================
+
 class ContratoIn(BaseModel):
+
     nombre: str
+
     codigo: str | None = None
+
     faena_id: uuid.UUID
+
     fecha_inicio: date | None = None
+
     fecha_termino: date | None = None
+
     renovacion_automatica: bool = False
+
     # Unidad de negocio a la que pertenece el contrato (agrupa y da acceso).
+
     unidad_negocio: str | None = None
+
     # Mandante libre por contrato (H-19, Punto 15). Fallback a faenas.mandante.
+
     mandante: str | None = None
+
     # Trazabilidad del alta asistida por IA (§12.1): el job de extracción que
+
     # pre-llenó el formulario. No obliga a nada; solo deja el rastro.
+
     ia_review_id: uuid.UUID | None = None
+
     requisitos_custom: dict[str, list[str]] | None = None
+
     plantilla_contrato_id: uuid.UUID | None = None
 
 
+
+
+
 class ContratoPatch(BaseModel):
+
     nombre: str | None = None
+
     codigo: str | None = None
+
     fecha_inicio: date | None = None
+
     fecha_termino: date | None = None
+
     renovacion_automatica: bool | None = None
+
     estado: str | None = None
+
     unidad_negocio: str | None = None
+
     mandante: str | None = None
+
     # Configuración de alertas IA (v15). Ver `ALERTAS_ANTICIPACION`.
+
     alerta_anticipacion_dias: int | None = None
+
     alerta_frecuencia_dias: int | None = None
+
     alerta_faltantes_dias: int | None = None
 
 
+
+
+
 class AlertasIaConfigIn(BaseModel):
+
     """Configuración editable de recordatorios. Validación cerrada por diseño."""
+
     alerta_anticipacion_dias: int = Field(ge=ALERTAS_ANTICIPACION[0],
+
                                           le=ALERTAS_ANTICIPACION[1])
+
     alerta_frecuencia_dias: int
+
     alerta_faltantes_dias: int
 
+
+
     @field_validator("alerta_frecuencia_dias", "alerta_faltantes_dias")
+
     @classmethod
+
     def _frecuencia_permitida(cls, valor: int) -> int:
+
         if valor not in ALERTAS_FRECUENCIAS:
+
             permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+
             raise ValueError(f"Frecuencia debe ser una de: {permitidos} días")
+
         return valor
 
 
+
+
+
 class AnalizarIn(BaseModel):
+
     blob_path: str
+
     filename: str
 
 
+
+
+
 # ============================================================================
+
 # Helpers
+
 # ============================================================================
+
 def _get_contrato(db: Session, cid: uuid.UUID, contrato_id: uuid.UUID,
+
                   user: User | None = None) -> Contrato:
+
     """Contrato de la empresa, o 404. Acota al contract_admin a su contrato
+
     o a los de su unidad de negocio (encargado jerárquico)."""
+
     c = db.get(Contrato, contrato_id)
+
     if not c or c.company_id != cid:
+
         raise err(404, "NO_ENCONTRADO", "Contrato no existe")
+
     if user is not None and not contrato_permitido(user, c):
+
         raise err(404, "NO_ENCONTRADO", "Recurso inexistente")
+
     return c
 
 
+
+
+
 def _stats(db: Session, c: Contrato) -> dict:
+
     """Cumplimiento del contrato: media de los tres frentes que lo componen.
 
+
+
     Documentos de empresa, personal acreditado y equipos acreditados pesan igual,
+
     y los frentes vacíos no cuentan: un contrato sin equipos no debe quedar al
+
     66 % por no tener flota. Lo reutilizan `dashboard.py` y `reportes.py`.
+
     """
+
     def contar(tipo: str, estado: str | None = None) -> int:
+
         q = select(func.count()).select_from(Sujeto).where(
+
             Sujeto.company_id == c.company_id,
+
             Sujeto.contrato_id == c.id, Sujeto.tipo == tipo,
+
             Sujeto.estado != "baja")
+
         if estado:
+
             q = q.where(Sujeto.estado == estado)
+
         return db.scalar(q) or 0
 
+
+
     docs_emp = list(db.scalars(select(Documento).where(
+
         Documento.company_id == c.company_id, Documento.contrato_id == c.id)))
+
     oblig = [d for d in docs_emp if d.obligatorio]
+
     ok_emp = sum(1 for d in oblig if d.estado_calc == "ok")
+
     alertas = db.scalar(select(func.count()).select_from(Alerta).where(
+
         Alerta.company_id == c.company_id, Alerta.contrato_id == c.id,
+
         Alerta.resuelta_at.is_(None))) or 0
 
+
+
     p_tot, p_ok = contar("trabajador"), contar("trabajador", "ok")
+
     e_tot, e_ok = contar("equipo"), contar("equipo", "ok")
+
     partes = []
+
     if oblig:
+
         partes.append(ok_emp / len(oblig))
+
     if p_tot:
+
         partes.append(p_ok / p_tot)
+
     if e_tot:
+
         partes.append(e_ok / e_tot)
+
     pct = round(100 * sum(partes) / len(partes)) if partes else 0
+
     return {
+
         "cumplimiento_pct": pct,
+
         "personal": {"total": p_tot, "acreditados": p_ok},
+
         "equipos": {"total": e_tot, "acreditados": e_ok},
+
         "docs_empresa": {"total": len(docs_emp), "ok": ok_emp},
+
         "alertas_activas": alertas,
+
     }
+
+
+
 
 
 def _out(db: Session, c: Contrato, con_stats: bool = True) -> dict:
+
     f = c.faena
+
     m_efectivo = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante if f else None)
+
     d = {
+
         "id": str(c.id), "nombre": c.nombre, "codigo": c.codigo,
+
         "mandante": m_efectivo,
+
         "mandante_propio": c.mandante,
+
         "estado": c.estado,
+
         "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+
         "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
+
         "renovacion_automatica": c.renovacion_automatica,
+
         "unidad_negocio": c.unidad_negocio,
+
         "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+
         "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+
         "alerta_faltantes_dias": c.alerta_faltantes_dias,
+
         "origen_ia_review_id": (str(c.origen_ia_review_id)
+
                                 if c.origen_ia_review_id else None),
+
         "faena": {"id": str(f.id), "nombre": f.nombre, "mandante": f.mandante,
+
                   "grupo": f.grupo, "region": f.region, "color": f.color},
+
     }
+
     if con_stats:
+
         d["stats"] = _stats(db, c)
+
     return d
 
 
+
+
+
 # ============================================================================
+
 # §8.1 — CRUD
+
 # ============================================================================
+
 @router.get("/mandantes")
+
 def listar_mandantes(
+
     db: Session = Depends(get_db),
+
     cid: uuid.UUID = Depends(get_company_id),
+
     user: User = Depends(get_current_user),
+
 ):
+
     """Lista los mandantes existentes en contratos y faenas para autocompletado (§8.1, H-19)."""
+
     mandantes_faenas = db.scalars(
+
         select(Faena.mandante).where(
+
             Faena.mandante.isnot(None),
+
             Faena.mandante != ""
+
         ).distinct()
+
     ).all()
+
+
 
     mandantes_contratos = db.scalars(
+
         select(Contrato.mandante).where(
+
             Contrato.company_id == cid,
+
             Contrato.mandante.isnot(None),
+
             Contrato.mandante != ""
+
         ).distinct()
+
     ).all()
 
+
+
     todos = set()
+
     for m in list(mandantes_faenas) + list(mandantes_contratos):
+
         if m and m.strip():
+
             todos.add(m.strip())
+
+
 
     return {"items": sorted(list(todos), key=lambda x: x.lower())}
 
 
+
+
+
 @router.get("/agrupado")
+
 def contratos_agrupado(
+
     por: str = Query("mandante"),
+
     unidad_negocio: str | None = Query(None),
+
     db: Session = Depends(get_db),
+
     cid: uuid.UUID = Depends(get_company_id),
+
     user: User = Depends(get_current_user),
+
 ):
+
     """Contratos y dotación agrupados por mandante efectivo (§8.1, H-19, Punto 15)."""
+
     scope = contrato_scope(user)
 
+
+
     q_c = select(Contrato).options(joinedload(Contrato.faena)).where(Contrato.company_id == cid)
+
     if scope:
+
         q_c = q_c.where(Contrato.id == scope)
+
     if unidad_negocio:
+
         q_c = q_c.where(Contrato.unidad_negocio == unidad_negocio)
+
     contratos = list(db.scalars(q_c.order_by(Contrato.nombre)).unique().all())
+
     contrato_ids = [c.id for c in contratos]
 
+
+
     stats_personal: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
+
     stats_equipos: dict[uuid.UUID, dict] = {cid_c: {"total": 0, "acreditados": 0} for cid_c in contrato_ids}
 
+
+
     if contrato_ids:
+
         rows_sujetos = db.execute(
+
             select(
+
                 Sujeto.contrato_id,
+
                 Sujeto.tipo,
+
                 func.count().label("total"),
+
                 func.count().filter(Sujeto.estado == "ok").label("acreditados")
+
             ).where(
+
                 Sujeto.company_id == cid,
+
                 Sujeto.estado != "baja",
+
                 Sujeto.contrato_id.in_(contrato_ids)
+
             ).group_by(Sujeto.contrato_id, Sujeto.tipo)
+
         ).all()
 
+
+
         for cid_c, tipo, tot, ok in rows_sujetos:
+
             if tipo == "trabajador":
+
                 stats_personal[cid_c] = {"total": tot, "acreditados": ok}
+
             elif tipo == "equipo":
+
                 stats_equipos[cid_c] = {"total": tot, "acreditados": ok}
 
+
+
     grupos: dict[str, list] = {}
+
     faenas_por_mandante: dict[str, dict[uuid.UUID, dict]] = {}
 
+
+
     for c in contratos:
+
         f = c.faena
+
         mandante_norm = (c.mandante.strip() if c.mandante and c.mandante.strip() else None) or (f.mandante.strip() if f and f.mandante else None) or "Sin Mandante"
+
         clave = mandante_norm
 
+
+
         if clave not in grupos:
+
             grupos[clave] = []
+
             faenas_por_mandante[clave] = {}
 
+
+
         p = stats_personal.get(c.id, {"total": 0, "acreditados": 0})
+
         e = stats_equipos.get(c.id, {"total": 0, "acreditados": 0})
+
         partes = []
+
         if p["total"]: partes.append(p["acreditados"] / p["total"])
+
         if e["total"]: partes.append(e["acreditados"] / e["total"])
+
         cump_pct = round(100 * sum(partes) / len(partes)) if partes else 100
 
+
+
         if f and f.id not in faenas_por_mandante[clave]:
+
             faenas_por_mandante[clave][f.id] = {
+
                 "id": str(f.id),
+
                 "nombre": f.nombre,
+
                 "region": f.region,
+
                 "color": f.color,
+
             }
 
+
+
         grupos[clave].append({
+
             "id": str(c.id),
+
             "nombre": c.nombre,
+
             "codigo": c.codigo,
+
             "estado": c.estado,
+
             "mandante": mandante_norm,
+
             "unidad_negocio": c.unidad_negocio,
+
             "faena": {"id": str(f.id), "nombre": f.nombre, "color": f.color} if f else None,
+
             "cumplimiento_pct": cump_pct,
+
             "personal": p,
+
             "equipos": e,
+
         })
+
+
 
     salida = []
+
     for m_nombre, conts in grupos.items():
+
         p_tot = sum(item["personal"]["total"] for item in conts)
+
         p_ok = sum(item["personal"]["acreditados"] for item in conts)
+
         e_tot = sum(item["equipos"]["total"] for item in conts)
+
         e_ok = sum(item["equipos"]["acreditados"] for item in conts)
+
         cump_prom = round(sum(item["cumplimiento_pct"] for item in conts) / len(conts)) if conts else 100
 
+
+
         salida.append({
+
             "mandante": m_nombre,
+
             "contratos_total": len(conts),
+
             "cumplimiento_pct": cump_prom,
+
             "personal": {"total": p_tot, "acreditados": p_ok},
+
             "equipos": {"total": e_tot, "acreditados": e_ok},
+
             "faenas": list(faenas_por_mandante[m_nombre].values()),
+
             "contratos": conts,
+
         })
 
+
+
     salida.sort(key=lambda x: (-x["contratos_total"], x["mandante"].lower()))
+
     return salida
 
 
+
+
+
 @router.get("/unidades-negocio")
+
 def unidades_negocio(user: User = Depends(get_current_user)):
+
     """Catálogo de unidades de negocio. Va antes que `/{contrato_id}` porque
+
     FastAPI resuelve las rutas en orden de declaración."""
+
     return {"items": [{"nombre": u} for u in UNIDADES_NEGOCIO]}
 
 
+
+
+
 @router.get("/plantillas-disponibles")
+
 def plantillas_disponibles(db: Session = Depends(get_db),
+
                            cid: uuid.UUID = Depends(get_company_id),
+
                            user: User = Depends(get_current_user)):
+
     """Listado de contratos utilizables como planillas reutilizables (§8.3, H-41, Punto 17)."""
+
     q = select(Contrato).options(joinedload(Contrato.faena)).where(
+
         Contrato.company_id == cid
+
     ).order_by(Contrato.nombre)
+
     scope = contrato_scope(user)
+
     if scope:
+
         q = q.where(Contrato.id == scope)
+
     contratos = list(db.scalars(q).unique().all())
 
+
+
     salida = []
+
     for c in contratos:
+
         f = c.faena
+
         ovs = db.scalars(select(ContratoPlantillaOverride).where(
+
             ContratoPlantillaOverride.contrato_id == c.id)).all()
+
         overrides_info = {ov.ambito: len(ov.requisito_template_ids or []) for ov in ovs}
 
+
+
         reqs_custom = db.scalars(select(ContratoRequisito).where(
+
             ContratoRequisito.contrato_id == c.id,
+
             ContratoRequisito.activo.is_(True))).all()
+
         custom_por_ambito: dict[str, int] = {}
+
         for r in reqs_custom:
+
             custom_por_ambito[r.ambito] = custom_por_ambito.get(r.ambito, 0) + 1
 
+
+
         docs_empresa = db.scalar(select(func.count(Documento.id)).where(
+
             Documento.contrato_id == c.id, Documento.sujeto_id.is_(None))) or 0
+
+
 
         total_reqs = sum(overrides_info.values()) + len(reqs_custom) + (docs_empresa if not overrides_info.get("empresa") else 0)
 
+
+
         salida.append({
+
             "id": str(c.id),
+
             "nombre": c.nombre,
+
             "codigo": c.codigo,
+
             "estado": c.estado,
+
             "faena_id": str(c.faena_id),
+
             "faena_nombre": f.nombre if f else "Faena general",
+
             "mandante": c.mandante or (f.mandante if f else "Sin mandante"),
+
             "unidad_negocio": c.unidad_negocio,
+
             "overrides": overrides_info,
+
             "requisitos_custom_total": len(reqs_custom),
+
             "custom_por_ambito": custom_por_ambito,
+
             "total_requisitos": total_reqs,
+
             "created_at": c.created_at.isoformat() if c.created_at else None,
+
         })
+
     return {"items": salida, "total": len(salida)}
 
 
+
+
+
 @router.get("")
+
 def listar(faena_id: uuid.UUID | None = Query(None),
+
            estado: str | None = Query(None),
+
            unidad_negocio: str | None = Query(None),
+
            p: Page = Depends(paginacion),
+
            db: Session = Depends(get_db),
+
            cid: uuid.UUID = Depends(get_company_id),
+
            user: User = Depends(get_current_user)):
+
     """Contratos de la empresa. Un contract_admin ve únicamente el suyo o los
+
     de su unidad de negocio (encargado jerárquico)."""
+
     if estado and estado not in ESTADOS:
+
         raise err(400, "ESTADO_INVALIDO",
+
                   f"Estado debe ser uno de: {', '.join(ESTADOS)}")
+
     q = select(Contrato).where(Contrato.company_id == cid)
+
     scope = contrato_scope(user)
+
     unidad = user.unidad_negocio
+
     if scope and unidad:
+
         # Encargado jerárquico: su contrato + todos los de su unidad.
+
         q = q.where(or_(Contrato.id == scope,
+
                         Contrato.unidad_negocio == unidad))
+
     elif scope:
+
         q = q.where(Contrato.id == scope)
+
     elif unidad:
+
         q = q.where(Contrato.unidad_negocio == unidad)
+
     if faena_id:
+
         q = q.where(Contrato.faena_id == faena_id)
+
     if estado:
+
         q = q.where(Contrato.estado == estado)
+
     if unidad_negocio:
+
         q = q.where(Contrato.unidad_negocio == unidad_negocio)
+
     if p.search:
+
         like = f"%{p.search}%"
+
         q = q.where(or_(Contrato.nombre.ilike(like), Contrato.codigo.ilike(like)))
+
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+
     q = aplicar_orden(q, Contrato, p.sort, ORDEN_CONTRATOS, "-created_at")
+
     filas = list(db.scalars(q.offset(p.offset).limit(p.page_size)))
+
     return sobre([_out(db, c) for c in filas], total, p)
 
 
+
+
+
 def _valida_unidad(unidad: str | None) -> str | None:
+
     """Normaliza la unidad de negocio; 400 si no está en el catálogo."""
+
     if unidad is None:
+
         return None
+
     u = unidad.strip()
+
     if not u:
+
         return None
+
     if u not in UNIDADES_NEGOCIO:
+
         raise err(400, "UNIDAD_NEGOCIO_INVALIDA",
+
                   f"Unidad de negocio debe ser una de: {', '.join(UNIDADES_NEGOCIO)}")
+
     return u
 
 
+
+
+
 @router.post("", status_code=201)
+
 def crear(body: ContratoIn, db: Session = Depends(get_db),
+
           cid: uuid.UUID = Depends(get_company_id),
+
           user: User = Depends(get_current_user)):
+
     """Crea el contrato e instancia su checklist de ámbito empresa.
 
+
+
     Con `ia_review_id` se guarda en `origen_ia_review_id` el job de extracción
+
     que pre-llenó el formulario: la IA nunca crea el contrato, solo propone los
+
     campos, y este es el rastro de que el alta vino de ahí (§12.1).
+
     """
+
     faena = db.get(Faena, body.faena_id)
+
     if not faena:
+
         raise err(404, "NO_ENCONTRADO", "Faena no existe")
+
     if not faena.activa:
+
         raise err(400, "FAENA_INACTIVA", "La faena aún no está disponible")
+
     if body.codigo and db.scalar(select(Contrato.id).where(
+
             Contrato.company_id == cid, Contrato.codigo == body.codigo)):
+
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+
     unidad = _valida_unidad(body.unidad_negocio)
 
+
+
     origen = None
+
     if body.ia_review_id:
+
         review = db.get(IaReview, body.ia_review_id)
+
         if not review or review.company_id != cid:
+
             raise err(404, "NO_ENCONTRADO", "El job de IA no existe")
+
         origen = review.id
 
+
+
     m_val = body.mandante.strip() if body.mandante and body.mandante.strip() else None
+
     c = Contrato(company_id=cid, faena_id=body.faena_id, nombre=body.nombre.strip(),
+
                  codigo=body.codigo, fecha_inicio=body.fecha_inicio,
+
                  fecha_termino=body.fecha_termino,
+
                  renovacion_automatica=body.renovacion_automatica,
+
                  unidad_negocio=unidad,
+
                  mandante=m_val,
+
                  origen_ia_review_id=origen)
+
     db.add(c)
+
     try:
+
         db.flush()
+
     except IntegrityError:
+
         db.rollback()
+
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
 
+
+
     if body.plantilla_contrato_id:
+
         fuente = db.get(Contrato, body.plantilla_contrato_id)
+
         if not fuente or fuente.company_id != cid:
+
             raise err(404, "PLANTILLA_NO_ENCONTRADA", "El contrato plantilla no existe")
+
         ovs_fuente = db.scalars(select(ContratoPlantillaOverride).where(
+
             ContratoPlantillaOverride.contrato_id == fuente.id)).all()
+
         for ov in ovs_fuente:
+
             nuevo_ov = ContratoPlantillaOverride(
+
                 company_id=cid,
+
                 contrato_id=c.id,
+
                 ambito=ov.ambito,
+
                 requisito_template_ids=list(ov.requisito_template_ids or [])
+
             )
+
             db.add(nuevo_ov)
+
         reqs_fuente = db.scalars(select(ContratoRequisito).where(
+
             ContratoRequisito.contrato_id == fuente.id,
+
             ContratoRequisito.activo.is_(True))).all()
+
         for rf in reqs_fuente:
+
             cr = ContratoRequisito(
+
                 company_id=cid,
+
                 contrato_id=c.id,
+
                 ambito=rf.ambito,
+
                 titulo=rf.titulo,
+
                 obligatorio=rf.obligatorio,
+
                 cargo_id=rf.cargo_id,
+
                 origen="custom",
+
                 requisito_template_id=rf.requisito_template_id,
+
                 ejemplo_clave=rf.ejemplo_clave,
+
                 vigencia_meses=rf.vigencia_meses,
+
                 vinculo_tipo=rf.vinculo_tipo,
+
                 activo=True
+
             )
+
             db.add(cr)
+
         db.flush()
+
+
 
     if body.requisitos_custom:
 
+
+
         for ambito, reqs in body.requisitos_custom.items():
+
             if ambito not in ("empresa", "personal", "equipos", "licencia"):
+
                 continue
+
             db_ambito = "personal" if ambito in ("personal", "licencia") else ("equipo" if ambito == "equipos" else "empresa")
+
             for req in reqs:
+
                 if not req.strip():
+
                     continue
+
                 cr = ContratoRequisito(
+
                     company_id=cid,
+
                     contrato_id=c.id,
+
                     ambito=db_ambito,
+
                     titulo=req.strip(),
+
                     vinculo_tipo="otro",
+
                     obligatorio=True
+
                 )
+
                 db.add(cr)
+
         db.flush()
 
+
+
     n = instanciar_docs(db, cid, "empresa", contrato_id=c.id,
+
                         faena_id=faena.id, contrato_plantilla_id=c.id)
+
     actividad.log(db, cid, "creacion", "contrato",
+
                   f"Contrato '{c.nombre}' creado en {faena.nombre}"
+
                   + (" a partir de una extracción IA" if origen else ""),
+
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
+
     out = _out(db, c, con_stats=False)
+
     out["documentos_creados"] = n
+
     return out
+
+
+
 
 
 @router.get("/{contrato_id}")
+
 def detalle(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+
             cid: uuid.UUID = Depends(get_company_id),
+
             user: User = Depends(get_current_user)):
+
     return _out(db, _get_contrato(db, cid, contrato_id, user))
 
 
+
+
+
 @router.get("/{contrato_id}/plantilla-resumen")
+
 def plantilla_resumen(contrato_id: uuid.UUID,
+
                       db: Session = Depends(get_db),
+
                       cid: uuid.UUID = Depends(get_company_id),
+
                       user: User = Depends(get_current_user)):
+
     """Resumen completo de requisitos de una planilla para previsualización."""
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     ovs = db.scalars(select(ContratoPlantillaOverride).where(
+
         ContratoPlantillaOverride.contrato_id == c.id)).all()
+
     overrides_dict = {ov.ambito: list(ov.requisito_template_ids or []) for ov in ovs}
 
+
+
     reqs_custom = db.scalars(select(ContratoRequisito).where(
+
         ContratoRequisito.contrato_id == c.id,
+
         ContratoRequisito.activo.is_(True))).all()
 
+
+
     from ...services.platform.checklist import plantilla_efectiva
+
     ambitos_out = {}
+
     for amb in ("empresa", "personal", "equipo", "emsipor"):
+
         templates = plantilla_efectiva(db, amb, contrato_id=c.id, faena_id=c.faena_id)
+
         custom_amb = [r for r in reqs_custom if r.ambito == amb]
+
         items = []
+
         for t in templates:
+
             items.append({
+
                 "titulo": t.titulo,
+
                 "origen": "override" if amb in overrides_dict else "base",
+
                 "obligatorio": t.obligatorio,
+
                 "tipo": t.tipo,
+
                 "vigencia_meses": t.vigencia_meses,
+
             })
+
         for cr in custom_amb:
+
             items.append({
+
                 "titulo": cr.titulo,
+
                 "origen": "custom",
+
                 "obligatorio": cr.obligatorio,
+
                 "tipo": "documento",
+
                 "vigencia_meses": cr.vigencia_meses,
+
             })
+
         ambitos_out[amb] = items
 
+
+
     return {
+
         "contrato_id": str(c.id),
+
         "nombre": c.nombre,
+
         "codigo": c.codigo,
+
         "faena": c.faena.nombre if c.faena else None,
+
         "mandante": c.mandante,
+
         "requisitos_por_ambito": ambitos_out,
+
         "total": sum(len(v) for v in ambitos_out.values()),
+
     }
+
+
+
 
 
 @router.patch("/{contrato_id}")
+
 def editar(contrato_id: uuid.UUID, body: ContratoPatch,
+
            db: Session = Depends(get_db),
+
            cid: uuid.UUID = Depends(get_company_id),
+
            user: User = Depends(get_current_user)):
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     data = body.model_dump(exclude_unset=True)
+
     if not data:
+
         raise err(400, "SIN_CAMBIOS", "No se indicó ningún campo a modificar")
+
     if data.get("estado") and data["estado"] not in ESTADOS:
+
         raise err(400, "ESTADO_INVALIDO",
+
                   f"Estado debe ser uno de: {', '.join(ESTADOS)}")
+
     if data.get("codigo") and data["codigo"] != c.codigo and db.scalar(
+
             select(Contrato.id).where(Contrato.company_id == cid,
+
                                       Contrato.codigo == data["codigo"],
+
                                       Contrato.id != c.id)):
+
         raise err(409, "CODIGO_DUPLICADO", "Ya existe un contrato con ese código")
+
     if "unidad_negocio" in data:
+
         data["unidad_negocio"] = _valida_unidad(data["unidad_negocio"])
+
     if "mandante" in data:
+
         data["mandante"] = data["mandante"].strip() if data["mandante"] and data["mandante"].strip() else None
+
     if "alerta_anticipacion_dias" in data:
+
         minimo, maximo = ALERTAS_ANTICIPACION
+
         if (data["alerta_anticipacion_dias"] is None
+
                 or not minimo <= data["alerta_anticipacion_dias"] <= maximo):
+
             raise err(400, "ALERTAS_CONFIG_INVALIDA",
+
                       f"alerta_anticipacion_dias debe estar entre {minimo} y {maximo} días")
+
     for campo in ("alerta_frecuencia_dias", "alerta_faltantes_dias"):
+
         if campo in data and (data[campo] is None
+
                               or data[campo] not in ALERTAS_FRECUENCIAS):
+
             permitidos = ", ".join(str(v) for v in ALERTAS_FRECUENCIAS)
+
             raise err(400, "ALERTAS_CONFIG_INVALIDA",
+
                       f"{campo} debe ser uno de: {permitidos} días")
+
     for k, v in data.items():
+
         setattr(c, k, v)
+
     c.updated_at = datetime.now(timezone.utc)
+
     actividad.log(db, cid, "actualizacion", "contrato",
+
                   f"Contrato '{c.nombre}' actualizado", user_id=user.id,
+
                   entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
+
     return _out(db, c)
 
 
+
+
+
 @router.get("/{contrato_id}/alertas-ia/config")
+
 def alertas_ia_config(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+
                       cid: uuid.UUID = Depends(get_company_id),
+
                       user: User = Depends(get_current_user)):
+
     """Configuración vigente; si la fila es antigua, devuelve los defaults."""
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     return {
+
         "alerta_anticipacion_dias": c.alerta_anticipacion_dias or 30,
+
         "alerta_frecuencia_dias": c.alerta_frecuencia_dias or 1,
+
         "alerta_faltantes_dias": c.alerta_faltantes_dias or 3,
+
     }
+
+
+
 
 
 @router.put("/{contrato_id}/alertas-ia/config")
+
 def editar_alertas_ia_config(contrato_id: uuid.UUID, body: AlertasIaConfigIn,
+
                              db: Session = Depends(get_db),
+
                              cid: uuid.UUID = Depends(get_company_id),
+
                              user: User = Depends(get_current_user)):
+
     """Guarda la configuración del contrato. El visor solo consulta."""
+
     if user.role == "visor":
+
         raise err(403, "ROL_INSUFICIENTE",
+
                   "El visor no puede modificar la configuración de alertas")
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     c.alerta_anticipacion_dias = body.alerta_anticipacion_dias
+
     c.alerta_frecuencia_dias = body.alerta_frecuencia_dias
+
     c.alerta_faltantes_dias = body.alerta_faltantes_dias
+
     c.updated_at = datetime.now(timezone.utc)
+
     actividad.log(db, cid, "actualizacion", "contratos",
+
                   f"Alertas IA de '{c.nombre}': anticipación "
+
                   f"{body.alerta_anticipacion_dias} días, frecuencia "
+
                   f"{body.alerta_frecuencia_dias} días y faltantes "
+
                   f"{body.alerta_faltantes_dias} días",
+
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
+
     return {
+
         "alerta_anticipacion_dias": c.alerta_anticipacion_dias,
+
         "alerta_frecuencia_dias": c.alerta_frecuencia_dias,
+
         "alerta_faltantes_dias": c.alerta_faltantes_dias,
+
     }
 
 
+
+
+
 @router.delete("/{contrato_id}")
+
 def eliminar(contrato_id: uuid.UUID, confirm: bool = Query(False),
+
              db: Session = Depends(get_db),
+
              cid: uuid.UUID = Depends(get_company_id),
+
              user: User = Depends(get_current_user)):
+
     """Borra el contrato y todo lo que cuelga de él. Exige confirm con dotación."""
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     n_sujetos = db.scalar(select(func.count()).select_from(Sujeto).where(
+
         Sujeto.company_id == cid, Sujeto.contrato_id == c.id)) or 0
+
     if n_sujetos and not confirm:
+
         raise err(400, "REQUIERE_CONFIRMACION",
+
                   f"El contrato tiene {n_sujetos} sujetos asociados; "
+
                   "repita con confirm=true")
+
     # Los blobs se purgan antes de borrar las filas: después no habría forma de
+
     # saber qué rutas quedaron huérfanas en el storage.
+
     archivos = list(db.scalars(
+
         select(DocumentoArchivo)
+
         .join(Documento, Documento.id == DocumentoArchivo.documento_id)
+
         .where(DocumentoArchivo.company_id == cid,
+
                or_(Documento.contrato_id == c.id,
+
                    Documento.sujeto_id.in_(select(Sujeto.id).where(
+
                        Sujeto.company_id == cid, Sujeto.contrato_id == c.id))))))
+
     storage = get_storage()
+
     for a in archivos:
+
         storage.delete(a.blob_path)
+
     nombre = c.nombre
+
     db.delete(c)      # cascadas: sujetos, documentos, archivos, alertas, plataformas
+
     actividad.log(db, cid, "actualizacion", "contrato",
+
                   f"Contrato '{nombre}' eliminado", user_id=user.id)
+
     db.commit()
+
     return {"ok": True, "sujetos_eliminados": n_sujetos,
+
             "archivos_eliminados": len(archivos)}
 
 
+
+
+
 # ============================================================================
+
 # §8.2 — Vistas del contrato
+
 # ============================================================================
+
 @router.get("/{contrato_id}/resumen")
+
 def resumen_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+
                      cid: uuid.UUID = Depends(get_company_id),
+
                      user: User = Depends(get_current_user)):
+
     """Vista enriquecida de contrato como carpeta: incluye plataformas y requisitos por ámbito."""
+
     from ...models import ContratoPlataforma, ContratoRequisito
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     out = _out(db, c, con_stats=True)
 
+
+
     plataformas = list(db.scalars(
+
         select(ContratoPlataforma).where(
+
             ContratoPlataforma.company_id == cid,
+
             ContratoPlataforma.contrato_id == c.id
+
         ).order_by(ContratoPlataforma.orden)
+
     ))
+
     out["plataformas"] = [
+
         {
+
             "id": str(p.id),
+
             "nombre": p.nombre,
+
             "descripcion": p.descripcion,
+
             "url": p.url,
+
             "color": p.color,
+
             "estado": p.estado,
+
             "es_custom": p.es_custom
+
         } for p in plataformas
+
     ]
 
+
+
     reqs = list(db.execute(
+
         select(ContratoRequisito.ambito, func.count())
+
         .where(
+
             ContratoRequisito.company_id == cid,
+
             ContratoRequisito.contrato_id == c.id,
+
             ContratoRequisito.activo == True
+
         )
+
         .group_by(ContratoRequisito.ambito)
+
     ))
+
     out["requisitos_resumen"] = {r[0]: r[1] for r in reqs}
+
+
 
     return out
 
 
+
+
+
 @router.get("/{contrato_id}/reporte-estado")
+
 def reporte_estado_contrato(contrato_id: uuid.UUID,
+
                             db: Session = Depends(get_db),
+
                             cid: uuid.UUID = Depends(get_company_id),
+
                             user: User = Depends(get_current_user)):
+
     """Datos consolidados y vivos para el reporte ejecutivo de contrato (HTML, PDF y Excel)."""
+
     from ...models import Company, ContratoPlataforma, LicenciaInterna
+
     from .documentos import resolver_mapa_plataformas, resolver_plataforma_doc
+
     from .plataformas import plataformas_efectivas
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     comp = db.get(Company, cid)
+
     company_name = comp.nombre if comp else "Mi Empresa"
+
     mapa = resolver_mapa_plataformas(db, cid, c.id)
 
+
+
     hoy = date.today()
+
     dias_rest = (c.fecha_termino - hoy).days if c.fecha_termino else None
+
     vigencia_sin = c.fecha_termino is None
+
     vig_estado = "Vigente" if (dias_rest is None or dias_rest >= 0) else "Vencido"
 
+
+
     faena_nom = c.faena.nombre if c.faena else "—"
+
     mandante_nom = c.mandante or (c.faena.mandante if c.faena else "—") or "—"
 
+
+
     efectivas = plataformas_efectivas(db, cid, c)
+
     plat_str = ", ".join(e["nombre"] for e in efectivas if e.get("nombre")) or "—"
 
+
+
     # 1. Empresa docs
+
     emp_docs_db = list(db.scalars(
+
         select(Documento).where(Documento.company_id == cid,
+
                                 Documento.contrato_id == c.id)
+
         .order_by(Documento.titulo)
+
     ))
+
     emp_docs = []
+
     emp_ok = 0
+
     for d in emp_docs_db:
+
         p_nom, _ = resolver_plataforma_doc(d, mapa)
+
         if d.estado_calc in ("ok", "porvenc"):
+
             emp_ok += 1
+
         emp_docs.append({
+
             "titulo": d.titulo,
+
             "obligatorio": d.obligatorio,
+
             "plataforma": p_nom,
+
             "estado": d.estado_calc,
+
             "vence": d.vence.isoformat() if d.vence else None,
+
             "dias_para_vencer": (d.vence - hoy).days if d.vence else None,
+
         })
 
+
+
     # 2. Personal y Equipos
+
     sujetos = list(db.scalars(
+
         select(Sujeto).where(
+
             Sujeto.company_id == cid,
+
             Sujeto.contrato_id == c.id,
+
             Sujeto.estado != "baja",
+
         ).order_by(Sujeto.nombre)
+
     ))
+
+
 
     s_ids = [s.id for s in sujetos]
+
     docs_por_sujeto: dict[uuid.UUID, list[Documento]] = {}
+
     if s_ids:
+
         for d in db.scalars(
+
             select(Documento).where(
+
                 Documento.company_id == cid,
+
                 Documento.sujeto_id.in_(s_ids)
+
             ).order_by(Documento.created_at)
+
         ):
+
             docs_por_sujeto.setdefault(d.sujeto_id, []).append(d)
 
+
+
     licencias_db: dict[uuid.UUID, LicenciaInterna] = {}
+
     if s_ids:
+
         for li in db.scalars(
+
             select(LicenciaInterna).where(
+
                 LicenciaInterna.company_id == cid,
+
                 LicenciaInterna.sujeto_id.in_(s_ids)
+
             )
+
         ):
+
             licencias_db[li.sujeto_id] = li
 
+
+
     def _evaluar_sujeto(s: Sujeto, docs: list[Documento]) -> dict:
+
         st = stats_sujeto(docs)
+
         vencidos = [d.titulo for d in docs if d.estado_calc == "venc"]
+
         faltantes = [d.titulo for d in docs if d.estado_calc == "falta"]
+
         prox_vence = None
+
         fechas_futuras = sorted([d.vence for d in docs if d.vence and d.estado_calc in ("ok", "porvenc")])
+
         if fechas_futuras:
+
             prox_vence = fechas_futuras[0].isoformat()
 
+
+
         if s.estado in ("baja", "inactivo"):
+
             estado = "bloqueado"
+
         elif st["vencidos"] > 0:
+
             estado = "vencido"
+
         elif st["docs_total"] > 0 and (st["ok"] + st["por_vencer"]) == st["docs_total"]:
+
             estado = "acreditado"
+
         else:
+
             estado = "enproceso"
 
+
+
         pct = round((st["ok"] + st["por_vencer"]) / max(1, st["docs_total"]) * 100)
+
         return {
+
             "id": str(s.id),
+
             "nombre": s.nombre,
+
             "rut": s.rut,
+
             "cargo": s.cargo,
+
             "patente": s.patente,
+
             "tipo_equipo": s.tipo_equipo,
+
             "marca": s.marca,
+
             "modelo": s.modelo,
+
             "estado": estado,
+
             "ok": st["ok"] + st["por_vencer"],
+
             "total": st["docs_total"],
+
             "pct": pct,
+
             "vencidos": vencidos,
+
             "faltantes": faltantes,
+
             "prox_vence": prox_vence,
+
         }
 
+
+
     personal_items = []
+
     equipos_items = []
+
     licencias_items = []
 
+
+
     for s in sujetos:
+
         s_docs = docs_por_sujeto.get(s.id, [])
+
         if s.tipo == "trabajador":
+
             core_docs = [d for d in s_docs if not d.es_emsipor]
+
             p_obj = _evaluar_sujeto(s, core_docs)
+
             personal_items.append(p_obj)
+
             if s.es_conductor:
+
                 ems_docs = [d for d in s_docs if d.es_emsipor]
+
                 lim = licencias_db.get(s.id)
+
                 st_lim = stats_sujeto(ems_docs)
+
                 lim_ok = st_lim["ok"] + st_lim["por_vencer"]
+
                 lim_tot = st_lim["docs_total"]
+
                 lim_pct = round(lim_ok / max(1, lim_tot) * 100)
+
                 lim_k = "acreditado" if (lim_tot > 0 and lim_ok == lim_tot and lim and lim.estado == "aprobado") else ("vencido" if st_lim["vencidos"] > 0 else "enproceso")
+
                 licencias_items.append({
+
                     "id": str(s.id),
+
                     "nombre": s.nombre,
+
                     "rut": s.rut,
+
                     "estado": lim_k,
+
                     "ok": lim_ok,
+
                     "total": lim_tot,
+
                     "pct": lim_pct,
+
                     "num_lim": lim.numero if lim else None,
+
                     "faltantes": [d.titulo for d in ems_docs if d.estado_calc == "falta"],
+
                 })
+
         elif s.tipo == "equipo":
+
             equipos_items.append(_evaluar_sujeto(s, s_docs))
 
+
+
     # 3. Carpeta de Arranque
+
     arr_reqs = list(db.scalars(
+
         select(ContratoRequisito).where(
+
             ContratoRequisito.company_id == cid,
+
             ContratoRequisito.contrato_id == c.id,
+
             or_(ContratoRequisito.vinculo_tipo == "arranque",
+
                 ContratoRequisito.origen == "arranque"),
+
             ContratoRequisito.activo.is_(True),
+
         ).order_by(ContratoRequisito.titulo)
+
     ))
+
     titulos_arr = {r.titulo.strip().lower() for r in arr_reqs}
+
     arr_docs = []
+
     for d in emp_docs_db:
+
         if d.titulo.strip().lower() in titulos_arr:
+
             arr_docs.append({
+
                 "titulo": d.titulo,
+
                 "obligatorio": d.obligatorio,
+
                 "estado": d.estado_calc,
+
                 "vence": d.vence.isoformat() if d.vence else None,
+
             })
+
+
 
     # 4. Vencidos y por vencer
+
     venc_items = []
+
     def _agregar_venc(who: str, d: Documento):
+
         if d.estado_calc in ("venc", "porvenc"):
+
             dias = (d.vence - hoy).days if d.vence else 0
+
             venc_items.append({
+
                 "documento": d.titulo,
+
                 "corresponde_a": who,
+
                 "vence": d.vence.isoformat() if d.vence else None,
+
                 "estado": d.estado_calc,
+
                 "dias": dias,
+
             })
 
+
+
     for d in emp_docs_db:
+
         _agregar_venc("Empresa", d)
+
     for s in sujetos:
+
         s_who = s.nombre + (f" ({s.patente})" if s.patente else (f" ({s.rut})" if s.rut else ""))
+
         for d in docs_por_sujeto.get(s.id, []):
+
             _agregar_venc(s_who, d)
+
+
 
     venc_items.sort(key=lambda x: x["vence"] or "9999-99-99")
 
+
+
     # 5. KPIs globales
+
     total_docs = len(emp_docs_db) + sum(len(docs_por_sujeto.get(s.id, [])) for s in sujetos)
-    total_ok = sum(1 for d in emp_docs_db if d.estado_calc in ("ok", "porvenc")) + \
-               sum(1 for s in sujetos for d in docs_por_sujeto.get(s.id, []) if d.estado_calc in ("ok", "porvenc"))
+
+    total_ok = sum(1 for d in emp_docs_db if d.estado_calc in ("ok", "porvenc")) +  + sum(1 for s in sujetos for d in docs_por_sujeto.get(s.id, []) if d.estado_calc in ("ok", "porvenc"))
+
     pct_global = round(total_ok / max(1, total_docs) * 100)
 
+
+
     p_acred = sum(1 for p in personal_items if p["estado"] == "acreditado")
+
     e_acred = sum(1 for e in equipos_items if e["estado"] == "acreditado")
+
     l_acred = sum(1 for l in licencias_items if l["estado"] == "acreditado")
+
     venc_count = sum(1 for v in venc_items if v["estado"] == "venc")
+
     porvenc_count = sum(1 for v in venc_items if v["estado"] == "porvenc")
+
+
 
     num_contrato = c.codigo or f"CT-{str(c.id)[:8].upper()}"
 
+
+
     return {
+
         "contrato": {
+
             "id": str(c.id),
+
             "nombre": c.nombre,
+
             "codigo": c.codigo,
+
             "num": num_contrato,
+
             "mandante": mandante_nom,
+
             "faena": {"id": str(c.faena.id), "nombre": faena_nom} if c.faena else None,
+
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+
             "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
+
             "vigencia_sin": vigencia_sin,
+
             "dias_restantes": dias_rest,
+
             "vigencia_estado": vig_estado,
+
             "plataformas": plat_str,
+
         },
+
         "empresa": {"nombre": company_name},
+
         "fecha": hoy.strftime("%d/%m/%Y"),
+
         "kpis": {
+
             "pct_global": pct_global,
+
             "personal_acreditados": p_acred,
+
             "personal_total": len(personal_items),
+
             "equipos_acreditados": e_acred,
+
             "equipos_total": len(equipos_items),
+
             "licencias_acreditadas": l_acred,
+
             "licencias_total": len(licencias_items),
+
             "docs_vencidos": venc_count,
+
             "docs_por_vencer": porvenc_count,
+
             "empresa_ok": emp_ok,
+
             "empresa_total": len(emp_docs),
+
             "arranque_ok": sum(1 for a in arr_docs if a["estado"] in ("ok", "porvenc")),
+
             "arranque_total": len(arr_docs),
+
         },
+
         "secciones": {
+
             "empresa": emp_docs,
+
             "personal": personal_items,
+
             "equipos": equipos_items,
+
             "licencias": licencias_items,
+
             "arranque": arr_docs,
+
             "vencimientos": venc_items,
+
         }
+
     }
 
 
+
+
+
 @router.get("/{contrato_id}/documentos")
+
 def docs_empresa(contrato_id: uuid.UUID, p: Page = Depends(paginacion),
+
                  db: Session = Depends(get_db),
+
                  cid: uuid.UUID = Depends(get_company_id),
+
                  user: User = Depends(get_current_user)):
+
     """Checklist de ámbito empresa del contrato (los que cuelgan del contrato)."""
+
     from .documentos import doc_out, resolver_mapa_plataformas, resolver_plataforma_doc
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     mapa = resolver_mapa_plataformas(db, cid, c.id)
+
     q = select(Documento).where(Documento.company_id == cid,
+
                                 Documento.contrato_id == c.id)
+
     if p.search:
+
         q = q.where(Documento.titulo.ilike(f"%{p.search}%"))
+
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+
     filas = list(db.scalars(q.order_by(Documento.titulo)
+
                             .offset(p.offset).limit(p.page_size)))
 
+
+
     def _doc(d: Documento) -> dict:
+
         p_nom, p_id = resolver_plataforma_doc(d, mapa)
+
         return doc_out(d, plataforma=p_nom, plataforma_id=p_id)
+
+
 
     return sobre([_doc(d) for d in filas], total, p)
 
 
+
+
+
 @router.get("/{contrato_id}/personal")
+
 def personal_contrato(contrato_id: uuid.UUID,
+
                       estado: str | None = Query(None),
+
                       cargo_id: uuid.UUID | None = Query(None),
+
                       cargo: str | None = Query(None),
+
                       es_conductor: bool | None = Query(None),
+
                       p: Page = Depends(paginacion),
+
                       db: Session = Depends(get_db),
+
                       cid: uuid.UUID = Depends(get_company_id),
+
                       user: User = Depends(get_current_user)):
+
     """Personal del contrato. Mismos filtros y formato que `GET /personal`."""
+
     from .sujetos import listar_sujetos
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     return listar_sujetos(db, cid, "trabajador", p, contrato_id=c.id,
+
                           estado=estado, cargo_id=cargo_id, cargo=cargo,
+
                           es_conductor=es_conductor)
 
 
+
+
+
 class ImportarPersonalIn(BaseModel):
+
     sujetos_ids: list[uuid.UUID]
 
 
-def _reutilizar_documentos(db: Session, cid: uuid.UUID, s_new: Sujeto) -> int:
-    """Feedback 17-10 punto 2: los documentos obligatorios VIGENTES de la persona
-    en otros contratos quedan ligados y validados en el registro nuevo, sin que
-    nadie vuelva a subir el archivo.
 
-    Cada copia integra el `documento_destino` del checklist nuevo: el blob se
-    duplica server-side (el índice UNIQUE de `blob_path` impide compartir la
-    fila) pero el contenido es idéntico y el usuario no repite la subida.
+
+
+def normalizar_req(texto: str) -> str:
+
+    sin_tilde = "".join(
+
+        c for c in unicodedata.normalize("NFD", texto or "")
+
+        if unicodedata.category(c) != "Mn"
+
+    )
+
+    return " ".join(sin_tilde.lower().split())
+
+
+
+RD_KEYS = [
+
+    ("cedula", re.compile(r"c[eé]dula|pasaporte", re.I)),
+
+    ("contrato", re.compile(r"contrato (individual )?de trabajo|contrato individual", re.I)),
+
+    ("anexo", re.compile(r"anexo (de )?(contrato|trabajador)", re.I)),
+
+    ("alcohol", re.compile(r"alcohol y drogas", re.I)),
+
+    ("salud", re.compile(r"salud|pre-?ocupacional|ocupacional del trabajador|examen", re.I)),
+
+    ("induccion", re.compile(r"inducci", re.I)),
+
+    ("reglamento", re.compile(r"reglamento interno|riohs", re.I)),
+
+    ("finiquito", re.compile(r"finiquito", re.I)),
+
+    ("irl", re.compile(r"\birl\b|informaci[oó]n de riesgos", re.I)),
+
+    ("odi", re.compile(r"\bodi\b", re.I)),
+
+    ("manejo", re.compile(r"manejo (a la )?defensiv", re.I)),
+
+    ("psico", re.compile(r"psicosens", re.I)),
+
+    ("licencia", re.compile(r"licencia (municipal )?de conducir", re.I)),
+
+    ("hojavida", re.compile(r"hoja de vida", re.I)),
+
+    ("foto", re.compile(r"foto", re.I)),
+
+    ("estudios", re.compile(r"estudios", re.I)),
+
+    ("residencia", re.compile(r"residencia", re.I)),
+
+    ("datos", re.compile(r"datos personales", re.I)),
+
+    ("epp", re.compile(r"\bepp\b|protecci[oó]n personal", re.I)),
+
+    ("competencia", re.compile(r"competencia", re.I)),
+
+    ("permiso", re.compile(r"permiso de circulaci", re.I)),
+
+    ("soap", re.compile(r"\bsoap\b", re.I)),
+
+    ("revtec", re.compile(r"revisi[oó]n t[eé]cnica", re.I)),
+
+    ("gps", re.compile(r"\bgps\b", re.I)),
+
+    ("mant", re.compile(r"mantenci", re.I)),
+
+    ("padron", re.compile(r"padr[oó]n|inscripci[oó]n", re.I)),
+
+]
+
+
+
+def rd_key(titulo: str) -> str:
+
+    norm = normalizar_req(titulo)
+
+    for k, rx in RD_KEYS:
+
+        if rx.search(titulo) or rx.search(norm):
+
+            return k
+
+    return f"norm:{norm}"
+
+
+
+def docs_coinciden(d1_titulo: str, d1_tpl: uuid.UUID | None, d2_titulo: str, d2_tpl: uuid.UUID | None) -> bool:
+
+    if d1_tpl and d2_tpl and d1_tpl == d2_tpl:
+
+        return True
+
+    if normalizar_req(d1_titulo) == normalizar_req(d2_titulo):
+
+        return True
+
+    return rd_key(d1_titulo) == rd_key(d2_titulo)
+
+
+
+
+
+def _reutilizar_documentos(db: Session, cid: uuid.UUID, s_new: Sujeto) -> int:
+
+    """Feedback 17-10 punto 2 / Req 12: los documentos obligatorios VIGENTES de la
+
+    persona o equipo en otros contratos quedan ligados y validados en el registro nuevo,
+
+    sin que nadie vuelva a subir el archivo.
+
     """
+
     from ...models import DocumentoArchivo
+
     from ...services.platform.checklist import calc_estado_doc
+
     from ...services.platform.storage import get_storage, make_blob_path
 
-    # autoflush=False en `SessionLocal`: los documentos recién instanciados son
-    # pendientes; sin flush explícito la consulta los vería como inexistentes.
+
+
     db.flush()
 
-    faltantes = {
-        d.template_id: d
-        for d in db.scalars(select(Documento).where(
-            Documento.sujeto_id == s_new.id, Documento.template_id.is_not(None),
-            Documento.es_emsipor.is_(False), Documento.estado == "falta"))
-        if d.template_id
-    }
+
+
+    faltantes = list(db.scalars(select(Documento).where(
+
+        Documento.sujeto_id == s_new.id,
+
+        Documento.es_emsipor.is_(False),
+
+        Documento.estado == "falta"
+
+    )).all())
+
     if not faltantes:
+
         return 0
 
-    otros = select(Sujeto.id).where(
-        Sujeto.company_id == cid, Sujeto.tipo == "trabajador",
-        Sujeto.rut == s_new.rut, Sujeto.id != s_new.id)
-    # El más actualizado por plantilla: si la persona tira dos registros con el
-    # mismo documento, gana la versión más reciente.
-    fuentes: dict[uuid.UUID, Documento] = {}
-    for d in db.scalars(select(Documento).join(DocumentoArchivo,
-            Documento.id == DocumentoArchivo.documento_id).where(
-            Documento.sujeto_id.in_(otros),
-            Documento.template_id.in_(list(faltantes)),
-            Documento.estado == "ok").order_by(Documento.updated_at.desc())):
-        fuentes.setdefault(d.template_id, d)
-    if not fuentes:
+
+
+    if s_new.tipo == "trabajador" and s_new.rut:
+
+        otros_q = select(Sujeto).where(
+
+            Sujeto.company_id == cid, Sujeto.tipo == "trabajador",
+
+            Sujeto.rut == s_new.rut, Sujeto.id != s_new.id,
+
+            Sujeto.estado != "baja")
+
+    elif s_new.tipo == "equipo" and s_new.patente:
+
+        otros_q = select(Sujeto).where(
+
+            Sujeto.company_id == cid, Sujeto.tipo == "equipo",
+
+            Sujeto.patente == s_new.patente.strip().upper(), Sujeto.id != s_new.id,
+
+            Sujeto.estado != "baja")
+
+    else:
+
         return 0
+
+
+
+    otros_sujetos = list(db.scalars(otros_q).all())
+
+    if not otros_sujetos:
+
+        return 0
+
+    otros_ids = [o.id for o in otros_sujetos]
+
+    contrato_map = {o.id: o.contrato for o in otros_sujetos if o.contrato}
+
+
+
+    fuentes_candidatas = list(db.scalars(
+
+        select(Documento).join(DocumentoArchivo, Documento.id == DocumentoArchivo.documento_id)
+
+        .where(
+
+            Documento.sujeto_id.in_(otros_ids),
+
+            Documento.estado == "ok"
+
+        ).order_by(Documento.updated_at.desc())
+
+    ).unique().all())
+
+
+
+    if not fuentes_candidatas:
+
+        return 0
+
+
 
     storage = get_storage()
+
     ahora = datetime.now(timezone.utc)
+
     usados = 0
-    for tid, fuente in fuentes.items():
-        dest = faltantes[tid]
-        # Sólo copiamos si los bytes del archivo fuente existen: los datos
-        # semilla pueden marcar documentos `ok` con un blob_path sin archivo
-        # real, y fallar aquí rompería la importación completa.
-        filas = [(a, make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename))
-                 for a in fuente.archivos if storage.exists(a.blob_path)]
-        if not filas:
+
+
+
+    for dest in faltantes:
+
+        fuente_elegida = None
+
+        for f in fuentes_candidatas:
+
+            if docs_coinciden(dest.titulo, dest.template_id, f.titulo, f.template_id):
+
+                fuente_elegida = f
+
+                break
+
+        if not fuente_elegida:
+
             continue
+
+
+
+        filas = [(a, make_blob_path(cid, "sujeto", s_new.id, dest.id, a.filename))
+
+                 for a in fuente_elegida.archivos if storage.exists(a.blob_path)]
+
+        if not filas:
+
+            continue
+
+
+
         dest.estado = "ok"
-        dest.vence = fuente.vence
+
+        dest.vence = fuente_elegida.vence
+
         dest.updated_at = ahora
+
         dest.estado_calc = calc_estado_doc(dest)
+
+
+
+        c_orig = contrato_map.get(fuente_elegida.sujeto_id)
+
+        c_nom = c_orig.nombre if c_orig else "Otro contrato"
+
+        c_faena = (c_orig.faena.nombre if c_orig and c_orig.faena else "")
+
+        dest.reutilizado_de = {
+
+            "contrato_id": str(c_orig.id) if c_orig else None,
+
+            "contrato_nombre": c_nom,
+
+            "faena_nombre": c_faena,
+
+            "doc_origen_id": str(fuente_elegida.id),
+
+            "vence": fuente_elegida.vence.isoformat() if fuente_elegida.vence else None,
+
+            "titulo_origen": fuente_elegida.titulo,
+
+        }
+
+
+
         for a, ruta in filas:
+
             storage.save(ruta, storage.read(a.blob_path))
+
             db.add(DocumentoArchivo(
+
                 company_id=cid, documento_id=dest.id, filename=a.filename,
+
                 blob_path=ruta, content_type=a.content_type,
+
                 size_bytes=a.size_bytes, uploaded_by=a.uploaded_by))
+
         usados += 1
+
+
+
     return usados
 
 
+
+
+
 @router.post("/{contrato_id}/personal/importar")
+
 def importar_personal(contrato_id: uuid.UUID, body: ImportarPersonalIn,
+
                       db: Session = Depends(get_db),
+
                       cid: uuid.UUID = Depends(get_company_id),
+
                       user: User = Depends(get_current_user)):
+
     """Importa personal desde nómina u otro contrato copiando el sujeto."""
+
     from ...services.platform.checklist import instanciar_docs
+
+
 
     c = _get_contrato(db, cid, contrato_id, user)
 
+
+
     sujetos = db.scalars(select(Sujeto).where(
+
         Sujeto.company_id == cid,
+
         Sujeto.id.in_(body.sujetos_ids),
+
         Sujeto.tipo == "trabajador"
+
     )).all()
 
+
+
     importados = 0
+
     docs_creados = 0
+
     docs_reutilizados = 0
+
     for s_old in sujetos:
+
         existe = db.scalar(select(Sujeto.id).where(
+
             Sujeto.company_id == cid,
+
             Sujeto.contrato_id == c.id,
+
             Sujeto.rut == s_old.rut,
+
             Sujeto.estado != "baja"
+
         ))
+
         if existe:
+
             continue
 
+
+
         s_new = Sujeto(
+
             company_id=cid,
+
             contrato_id=c.id,
+
             tipo="trabajador",
+
             estado="proc",
+
             nombre=s_old.nombre,
+
             rut=s_old.rut,
+
             cargo=s_old.cargo,
+
             cargo_id=s_old.cargo_id,
+
             es_conductor=s_old.es_conductor
+
         )
+
         db.add(s_new)
+
         db.flush()
 
+
+
         n = instanciar_docs(db, cid, "personal", sujeto_id=s_new.id,
+
                             faena_id=c.faena_id, cargo_id=s_new.cargo_id,
+
                             contrato_plantilla_id=c.id)
+
         docs_creados += n
+
         docs_reutilizados += _reutilizar_documentos(db, cid, s_new)
+
         importados += 1
 
+
+
     actividad.log(db, cid, "creacion", "personal",
+
                   f"Importados {importados} trabajadores al contrato '{c.nombre}'",
+
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
+
     return {"importados": importados, "documentos_creados": docs_creados,
+
             "documentos_reutilizados": docs_reutilizados}
 
 
-@router.get("/{contrato_id}/personal/{sujeto_id}/docs-reutilizables")
-def docs_reutilizables(contrato_id: uuid.UUID, sujeto_id: uuid.UUID,
-                       db: Session = Depends(get_db),
-                       cid: uuid.UUID = Depends(get_company_id),
-                       user: User = Depends(get_current_user)):
-    """Busca documentos vigentes del mismo trabajador en otros contratos."""
-    c = _get_contrato(db, cid, contrato_id, user)
-    s_actual = db.get(Sujeto, sujeto_id)
-    if not s_actual or s_actual.contrato_id != c.id or s_actual.company_id != cid:
-        raise err(404, "NO_ENCONTRADO", "Trabajador no pertenece a este contrato")
+
+
+
+def _docs_reutilizables_sujeto(db: Session, cid: uuid.UUID, c: Contrato, s_actual: Sujeto) -> dict:
 
     docs_actuales = list(db.scalars(
+
         select(Documento).where(Documento.sujeto_id == s_actual.id)
+
     ))
+
     
-    reqs_necesitados = {d.template_id: d for d in docs_actuales if d.estado_calc != "ok" and d.template_id}
+
+    reqs_necesitados = [d for d in docs_actuales if d.estado_calc != "ok"]
+
     if not reqs_necesitados:
+
         return {"reutilizables": []}
 
-    otros_sujetos = select(Sujeto.id).where(
-        Sujeto.company_id == cid,
-        Sujeto.rut == s_actual.rut,
-        Sujeto.id != s_actual.id
-    )
+
+
+    if s_actual.tipo == "trabajador" and s_actual.rut:
+
+        otros_sujetos = select(Sujeto.id).where(
+
+            Sujeto.company_id == cid,
+
+            Sujeto.tipo == "trabajador",
+
+            Sujeto.rut == s_actual.rut,
+
+            Sujeto.id != s_actual.id,
+
+            Sujeto.estado != "baja"
+
+        )
+
+    elif s_actual.tipo == "equipo" and s_actual.patente:
+
+        otros_sujetos = select(Sujeto.id).where(
+
+            Sujeto.company_id == cid,
+
+            Sujeto.tipo == "equipo",
+
+            Sujeto.patente == s_actual.patente.strip().upper(),
+
+            Sujeto.id != s_actual.id,
+
+            Sujeto.estado != "baja"
+
+        )
+
+    else:
+
+        return {"reutilizables": []}
+
+
 
     reutilizables = list(db.scalars(
+
         select(Documento).where(
+
             Documento.sujeto_id.in_(otros_sujetos),
-            Documento.estado_calc == "ok",
-            Documento.template_id.in_(list(reqs_necesitados.keys()))
-        )
-    ))
+
+            Documento.estado == "ok",
+
+            Documento.estado_calc.in_(("ok", "porvenc"))
+
+        ).order_by(Documento.updated_at.desc())
+
+    ).unique().all())
+
+
 
     from .documentos import doc_out
+
     out_docs = []
-    vistos = set()
+
+    usados_dest = set()
+
     for d in reutilizables:
-        if d.template_id in vistos:
-            continue
-        vistos.add(d.template_id)
+
+        doc_dest = None
+
+        for req in reqs_necesitados:
+
+            if req.id not in usados_dest and docs_coinciden(req.titulo, req.template_id, d.titulo, d.template_id):
+
+                doc_dest = req
+
+                usados_dest.add(req.id)
+
+                break
+
         
-        doc_dest = reqs_necesitados[d.template_id]
-        item = doc_out(d)
-        item["documento_destino_id"] = str(doc_dest.id)
-        out_docs.append(item)
+
+        if doc_dest:
+
+            item = doc_out(d)
+
+            item["documento_destino_id"] = str(doc_dest.id)
+
+            out_docs.append(item)
+
+
 
     return {"reutilizables": out_docs}
 
 
-@router.get("/{contrato_id}/equipos")
-def equipos_contrato(contrato_id: uuid.UUID,
-                     estado: str | None = Query(None),
-                     tipo_equipo: str | None = Query(None),
-                     p: Page = Depends(paginacion),
-                     db: Session = Depends(get_db),
-                     cid: uuid.UUID = Depends(get_company_id),
-                     user: User = Depends(get_current_user)):
-    """Flota del contrato. Mismos filtros y formato que `GET /equipos`."""
-    from .sujetos import listar_sujetos
+
+
+
+@router.get("/{contrato_id}/personal/{sujeto_id}/docs-reutilizables")
+
+def docs_reutilizables(contrato_id: uuid.UUID, sujeto_id: uuid.UUID,
+
+                       db: Session = Depends(get_db),
+
+                       cid: uuid.UUID = Depends(get_company_id),
+
+                       user: User = Depends(get_current_user)):
+
+    """Busca documentos vigentes del mismo trabajador en otros contratos."""
 
     c = _get_contrato(db, cid, contrato_id, user)
+
+    s_actual = db.get(Sujeto, sujeto_id)
+
+    if not s_actual or s_actual.contrato_id != c.id or s_actual.company_id != cid:
+
+        raise err(404, "NO_ENCONTRADO", "Trabajador no pertenece a este contrato")
+
+    return _docs_reutilizables_sujeto(db, cid, c, s_actual)
+
+
+
+
+
+@router.get("/{contrato_id}/equipos/{sujeto_id}/docs-reutilizables")
+
+def docs_reutilizables_equipos(contrato_id: uuid.UUID, sujeto_id: uuid.UUID,
+
+                               db: Session = Depends(get_db),
+
+                               cid: uuid.UUID = Depends(get_company_id),
+
+                               user: User = Depends(get_current_user)):
+
+    """Busca documentos vigentes del mismo equipo en otros contratos."""
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
+    s_actual = db.get(Sujeto, sujeto_id)
+
+    if not s_actual or s_actual.contrato_id != c.id or s_actual.company_id != cid:
+
+        raise err(404, "NO_ENCONTRADO", "Equipo no pertenece a este contrato")
+
+    return _docs_reutilizables_sujeto(db, cid, c, s_actual)
+
+
+
+@router.get("/{contrato_id}/equipos")
+
+def equipos_contrato(contrato_id: uuid.UUID,
+
+                     estado: str | None = Query(None),
+
+                     tipo_equipo: str | None = Query(None),
+
+                     p: Page = Depends(paginacion),
+
+                     db: Session = Depends(get_db),
+
+                     cid: uuid.UUID = Depends(get_company_id),
+
+                     user: User = Depends(get_current_user)):
+
+    """Flota del contrato. Mismos filtros y formato que `GET /equipos`."""
+
+    from .sujetos import listar_sujetos
+
+
+
+    c = _get_contrato(db, cid, contrato_id, user)
+
     return listar_sujetos(db, cid, "equipo", p, contrato_id=c.id,
+
                           estado=estado, tipo_equipo=tipo_equipo)
 
 
+
+
+
 @router.post("/{contrato_id}/equipos/importar")
+
 def importar_equipos(contrato_id: uuid.UUID, body: ImportarPersonalIn,
+
                      db: Session = Depends(get_db),
+
                      cid: uuid.UUID = Depends(get_company_id),
+
                      user: User = Depends(get_current_user)):
+
     """Importa equipos de la flota u otro contrato copiando el sujeto."""
+
     from ...services.platform.checklist import instanciar_docs
+
+
 
     c = _get_contrato(db, cid, contrato_id, user)
 
+
+
     sujetos = db.scalars(select(Sujeto).where(
+
         Sujeto.company_id == cid,
+
         Sujeto.id.in_(body.sujetos_ids),
+
         Sujeto.tipo == "equipo"
+
     )).all()
 
+
+
     importados = 0
+
     docs_creados = 0
+
+    docs_reutilizados = 0
+
     for s_old in sujetos:
+
         if not s_old.patente:
+
             continue
+
         existe = db.scalar(select(Sujeto.id).where(
+
             Sujeto.company_id == cid,
+
             Sujeto.contrato_id == c.id,
+
             Sujeto.patente == s_old.patente.strip().upper(),
+
             Sujeto.tipo == "equipo",
+
             Sujeto.estado != "baja"
+
         ))
+
         if existe:
+
             continue
+
+
 
         s_new = Sujeto(
+
             company_id=cid,
+
             contrato_id=c.id,
+
             tipo="equipo",
+
             estado="proc",
+
             nombre=s_old.nombre or s_old.patente,
+
             patente=s_old.patente.strip().upper(),
+
             tipo_equipo=s_old.tipo_equipo,
+
             marca=s_old.marca,
+
             modelo=s_old.modelo,
+
             anio=s_old.anio
+
         )
+
         db.add(s_new)
+
         db.flush()
 
+
+
         n = instanciar_docs(db, cid, "equipo", sujeto_id=s_new.id,
+
                             faena_id=c.faena_id,
+
                             contrato_plantilla_id=c.id)
+
         docs_creados += n
+
+        docs_reutilizados += _reutilizar_documentos(db, cid, s_new)
+
         importados += 1
 
+
+
     actividad.log(db, cid, "creacion", "equipos",
+
                   f"Importados {importados} equipos al contrato '{c.nombre}'",
+
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
-    return {"importados": importados, "documentos_creados": docs_creados}
+
+    return {"importados": importados, "documentos_creados": docs_creados,
+
+            "documentos_reutilizados": docs_reutilizados}
+
+
+
 
 
 @router.get("/{contrato_id}/alertas")
+
 def alertas_contrato(contrato_id: uuid.UUID,
+
                      severidad: str | None = Query(None),
+
                      origen: str | None = Query(None),
+
                      solo_activas: bool = Query(True),
+
                      p: Page = Depends(paginacion),
+
                      db: Session = Depends(get_db),
+
                      cid: uuid.UUID = Depends(get_company_id),
+
                      user: User = Depends(get_current_user)):
+
     """Alertas del contrato, en el mismo formato que `GET /alertas`.
 
+
+
     Solo las que tienen `contrato_id` puesto. Una alerta de un sujeto lo lleva
+
     porque quien la emite (vencimientos, IA) copia el contrato del documento.
+
     """
+
     from .alertas import _out as alerta_out
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     q = select(Alerta).where(Alerta.company_id == cid, Alerta.contrato_id == c.id)
+
     if solo_activas:
+
         q = q.where(Alerta.resuelta_at.is_(None))
+
     if severidad:
+
         q = q.where(Alerta.severidad == severidad)
+
     if origen:
+
         q = q.where(Alerta.origen == origen)
+
     if p.search:
+
         q = q.where(Alerta.titulo.ilike(f"%{p.search}%"))
+
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+
     filas = list(db.scalars(q.order_by(Alerta.created_at.desc())
+
                             .offset(p.offset).limit(p.page_size)))
+
     return sobre([alerta_out(a) for a in filas], total, p)
 
 
+
+
+
 class MailIn(BaseModel):
+
     plantilla: str
+
     para: str | None = None
+
     asunto: str | None = None
 
 
+
+
+
 PLANTILLAS_MAIL: tuple[str, ...] = ("resumen", "porvencer", "observado",
+
                                     "semanal", "invitacion")
+
 _EVENTO_PLANTILLA = {
+
     "resumen": "vencimiento_documento",
+
     "porvencer": "vencimiento_documento",
+
     "observado": "alerta_bloqueante",
+
     "semanal": "reporte_programado",
+
 }
+
 _SEVERIDAD_PLANTILLA = {
+
     "resumen": "advertencia",
+
     "porvencer": "advertencia",
+
     "observado": "advertencia",
+
     "semanal": "info",
+
     "invitacion": "info",
+
 }
+
 _CORREO_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+
+
+
 def _contenido_mail(db: Session, c: Contrato, plantilla: str
+
                     ) -> tuple[str | None, str, str, str]:
+
     """(evento, titulo, descripcion, severidad) con datos reales del contrato."""
+
     stats = _stats(db, c)
+
     pct = stats.get("cumplimiento_pct", 0)
+
     n_alertas = stats.get("alertas_activas", 0)
+
     top = list(db.scalars(
+
         select(Alerta)
+
         .where(Alerta.company_id == c.company_id, Alerta.contrato_id == c.id,
+
                Alerta.resuelta_at.is_(None))
+
         .order_by(Alerta.created_at.desc()).limit(5)))
 
+
+
     if plantilla == "resumen":
+
         return (_EVENTO_PLANTILLA[plantilla],
+
                 f"Resumen de vencimientos — {c.nombre}",
+
                 f"El contrato tiene {n_alertas} alertas activas "
+
                 f"y un cumplimiento documental del {pct}%.",
+
                 _SEVERIDAD_PLANTILLA[plantilla])
+
     if plantilla == "porvencer":
+
         if top:
+
             return (_EVENTO_PLANTILLA[plantilla], top[0].titulo,
+
                     top[0].descripcion or "", _SEVERIDAD_PLANTILLA[plantilla])
+
         return (_EVENTO_PLANTILLA[plantilla], "Sin vencimientos activos",
+
                 f"El contrato {c.nombre} no tiene alertas activas.",
+
                 _SEVERIDAD_PLANTILLA[plantilla])
+
     if plantilla == "observado":
+
         return (_EVENTO_PLANTILLA[plantilla],
+
                 "Documento observado por la IA",
+
                 f"La IA observó un documento del contrato {c.nombre}: "
+
                 "requiere corrección antes de exportarlo.",
+
                 _SEVERIDAD_PLANTILLA[plantilla])
+
     if plantilla == "semanal":
+
         return (_EVENTO_PLANTILLA[plantilla],
+
                 f"Estado semanal — {c.nombre}",
+
                 f"Cumplimiento documental del {pct}% "
+
                 f"con {n_alertas} alertas activas.",
+
                 _SEVERIDAD_PLANTILLA[plantilla])
+
     return (None, f"Te dieron acceso al contrato {c.nombre} en ACREDITTIA",
+
             "Te invitaron a colaborar en ACREDITTIA con permiso "
+
             "de colaborador del contrato.",
+
             _SEVERIDAD_PLANTILLA[plantilla])
 
 
+
+
+
 @router.post("/{contrato_id}/mails")
+
 def enviar_mail(contrato_id: uuid.UUID, body: MailIn,
+
                 db: Session = Depends(get_db),
+
                 cid: uuid.UUID = Depends(get_company_id),
+
                 user: User = Depends(get_current_user)):
+
     """Despacha una plantilla de correo del contrato.
 
+
+
     Con `para` el envío es directo a esa dirección (acción explícita del
+
     usuario, no pasa por preferencias). Sin `para` se difunde a los
+
     responsables del contrato respetando `notificacion_preferencias`.
+
     La plantilla `invitacion` siempre exige destinatario.
+
     """
+
     from ...services.platform.email import _html_alerta, despachar_alerta_email
+
     from ...services.platform.jobs import enqueue
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     if body.plantilla not in PLANTILLAS_MAIL:
+
         raise err(400, "PLANTILLA_INVALIDA",
+
                   f"Plantilla debe ser una de: {', '.join(PLANTILLAS_MAIL)}")
+
     para = (body.para or "").strip() or None
+
     if para is not None and not _CORREO_OK.match(para):
+
         raise err(400, "CORREO_INVALIDO", "El correo destinatario no es válido")
+
     if body.plantilla == "invitacion" and para is None:
+
         raise err(400, "FALTA_DESTINATARIO",
+
                   "La invitación necesita un correo destinatario")
 
+
+
     evento, titulo, descripcion, severidad = _contenido_mail(
+
         db, c, body.plantilla)
+
     asunto = (body.asunto or "").strip() or titulo
 
+
+
     if para is not None:
+
         enqueue("enviar_email", to_email=para, subject=asunto,
+
                 html_body=_html_alerta(
+
                     titulo=titulo, descripcion=descripcion,
+
                     severidad=severidad, contrato_nombre=c.nombre))
+
         enviados, modo = 1, "directo"
+
     else:
+
         enviados = despachar_alerta_email(
+
             db, cid, evento or "vencimiento_documento", titulo, descripcion,
+
             contrato_id=c.id, severidad=severidad, contrato_nombre=c.nombre)
+
         modo = "difusion"
 
+
+
     actividad.log(db, cid, "actualizacion", "contratos",
+
                   f"Correo '{body.plantilla}' enviado ({modo}, {enviados}) "
+
                   f"en el contrato '{c.nombre}'",
+
                   user_id=user.id, entidad_tipo="contrato", entidad_id=c.id)
+
     db.commit()
+
     return {"plantilla": body.plantilla, "asunto": asunto,
+
             "modo": modo, "enviados": enviados}
 
 
+
+
+
 @router.get("/{contrato_id}/agentes")
+
 def agentes_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
+
                      cid: uuid.UUID = Depends(get_company_id),
+
                      user: User = Depends(get_current_user)):
+
     """Historial de interacciones del chatbot con el contrato (pestaña Agentes).
 
+
+
     Lo que la plataforma guarda de verdad son dos fuentes: las conversaciones
+
     del asistente (`chat_historial` del contexto del contrato) y los avisos que
+
     el canal de WhatsApp dejó en las alertas del contrato. Se devuelven
+
     separadas para que la pantalla no mezcle una conversación con un aviso.
+
     """
+
     from ...models import ChatHistorial
+
+
 
     c = _get_contrato(db, cid, contrato_id, user)
 
+
+
     conversaciones = list(db.scalars(
+
         select(ChatHistorial)
+
         .where(ChatHistorial.company_id == cid,
+
                ChatHistorial.contexto == f"contrato_{c.id}")
+
         .order_by(ChatHistorial.created_at.desc())
+
         .limit(100)
+
     ))
+
+
 
     avisos = list(db.scalars(
+
         select(Alerta)
+
         .where(Alerta.company_id == cid, Alerta.contrato_id == c.id,
+
                Alerta.plataforma == "whatsapp")
+
         .order_by(Alerta.created_at.desc())
+
         .limit(100)
+
     ))
 
+
+
     return {
+
         "contrato_id": str(c.id),
+
         "conversaciones": [{
+
             "id": str(h.id),
+
             "mensaje_usuario": h.mensaje_usuario,
+
             "respuesta_ia": h.respuesta_ia,
+
             "created_at": h.created_at.isoformat() if h.created_at else None,
+
         } for h in conversaciones],
+
         "avisos_whatsapp": [{
+
             "id": str(a.id),
+
             "titulo": a.titulo,
+
             "descripcion": a.descripcion,
+
             "severidad": a.severidad,
+
             "estado": a.estado,
+
             "created_at": a.created_at.isoformat() if a.created_at else None,
+
         } for a in avisos],
+
         "totales": {
+
             "conversaciones": len(conversaciones),
+
             "avisos_whatsapp": len(avisos),
+
         },
+
     }
+
+
+
 
 
 @router.get("/{contrato_id}/historial")
+
 def historial_contrato(contrato_id: uuid.UUID,
+
                        modulo: str | None = Query(None),
+
                        tipo: str | None = Query(None),
+
                        p: Page = Depends(paginacion),
+
                        db: Session = Depends(get_db),
+
                        cid: uuid.UUID = Depends(get_company_id),
+
                        user: User = Depends(get_current_user)):
+
     """Actividad relacionada con el contrato, la más reciente primero.
 
+
+
     Reutiliza el filtro de `routers/actividad.py`, que resuelve la pertenencia
+
     por `entidad_id` del propio contrato más la de sus sujetos y documentos, con
+
     sus mismas limitaciones: una acción sin `entidad_id` no se puede atribuir.
+
     """
+
     from .actividad import (ORDEN_ACTIVIDAD, TIPOS, _filtro_contrato,
+
                             _out as actividad_out)
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     if tipo and tipo not in TIPOS:
+
         raise err(400, "TIPO_INVALIDO", f"Tipo debe ser uno de: {', '.join(TIPOS)}")
 
+
+
     q = (select(Actividad, User.nombre, User.email, User.role)
+
          .select_from(Actividad)
+
          .outerjoin(User, User.id == Actividad.user_id)
+
          .where(Actividad.company_id == cid))
+
     if modulo:
+
         q = q.where(Actividad.modulo == modulo)
+
     if tipo:
+
         q = q.where(Actividad.tipo == tipo)
+
     if p.search:
+
         q = q.where(Actividad.descripcion.ilike(f"%{p.search}%"))
+
     q = _filtro_contrato(q, cid, c.id)
 
+
+
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+
     q = aplicar_orden(q, Actividad, p.sort, ORDEN_ACTIVIDAD, "-id")
+
     filas = db.execute(q.offset(p.offset).limit(p.page_size)).all()
+
     items = [actividad_out(f[0], f.nombre, f.email, f.role) for f in filas]
+
     return sobre(items, total, p)
 
 
+
+
+
 # ============================================================================
+
 # §12.1 — Alta asistida: analizar el contrato firmado
+
 # ============================================================================
+
 @router.post("/analizar", status_code=202)
+
 def analizar(body: AnalizarIn, db: Session = Depends(get_db),
+
              cid: uuid.UUID = Depends(get_company_id),
+
              user: User = Depends(get_current_user)):
+
     """Encola la extracción IA de un contrato ya subido por SAS.
 
+
+
     Alias de `POST /ia/extraer-contrato`: delega en el mismo helper para que la
+
     validación, el job y el encolado no puedan divergir. No crea el contrato;
+
     devuelve el `job_id` que luego se pasa a `POST /contratos` como
+
     `ia_review_id`.
+
     """
+
     from .ia import encolar_extraccion_contrato
 
+
+
     return encolar_extraccion_contrato(db, cid, user, body.blob_path,
+
                                        body.filename)
 
 
+
+
+
 # ============================================================================
+
 # §8.4 — Matriz de cumplimiento
+
 # ============================================================================
+
 @router.get("/{contrato_id}/matriz")
+
 def matriz(contrato_id: uuid.UUID,
+
            tipo: str = Query("personal"),
+
            incluir_opcionales: bool = Query(False),
+
            cargo_id: uuid.UUID | None = Query(None),
+
            page: int = Query(1, ge=1),
+
            page_size: int | None = Query(None, ge=1),
+
            db: Session = Depends(get_db),
+
            cid: uuid.UUID = Depends(get_company_id),
+
            user: User = Depends(get_current_user)):
+
     """Matriz dispersa sujeto × requisito del contrato (§8.4).
 
+
+
     Las columnas son los requisitos que aparecen en AL MENOS un sujeto de la
+
     página, no la plantilla teórica: dos trabajadores de cargos distintos tienen
+
     checklists distintos y la cuadrícula debe reflejarlo. El orden de columnas es
+
     estable y determinista —ámbito (empresa, personal, equipo, emsipor), luego
+
     obligatorio primero, luego título alfabético— para que la columna N sea
+
     siempre la misma entre páginas y coincida con la exportación a Excel.
 
+
+
     Las celdas AUSENTES significan «el requisito no aplica a este sujeto». No se
+
     emiten celdas nulas: rellenarlas con `null` se confundiría con `falta`, que
+
     es un incumplimiento y no una exención.
+
     """
+
     from .reportes import ORDEN_AMBITO, _ambito_doc, _docs_por_sujeto
 
+
+
     c = _get_contrato(db, cid, contrato_id, user)
+
     if tipo not in ("personal", "equipo"):
+
         raise err(400, "TIPO_INVALIDO", "tipo debe ser 'personal' o 'equipo'")
+
     if cargo_id and tipo != "personal":
+
         raise err(400, "CARGO_SOLO_PERSONAL",
+
                   "El filtro por cargo solo aplica a la matriz de personal")
 
+
+
     # El tope de filas es propio de la matriz: cada fila arrastra sus celdas y
+
     # una página grande se convierte en un payload enorme.
+
     limite = settings.matriz_filas_max
+
     tam = min(page_size or min(settings.page_size_default, limite), limite)
 
+
+
     subtipo = "trabajador" if tipo == "personal" else "equipo"
+
     q = select(Sujeto).where(Sujeto.company_id == cid,
+
                              Sujeto.contrato_id == c.id,
+
                              Sujeto.tipo == subtipo,
+
                              Sujeto.estado != "baja")
+
     if cargo_id:
+
         q = q.where(Sujeto.cargo_id == cargo_id)
+
     total_filas = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+
     orden = Sujeto.nombre if tipo == "personal" else Sujeto.patente
+
     sujetos = list(db.scalars(q.order_by(orden, Sujeto.id)
+
                               .offset((page - 1) * tam).limit(tam)))
+
     docs = _docs_por_sujeto(db, cid, [s.id for s in sujetos])
 
+
+
     # Columnas: clave -> (peso_ambito, peso_obligatorio, orden_titulo, titulo, ambito)
+
     # `orden_titulo` es el título normalizado (minúsculas y sin tildes) y no el
+
     # título crudo: ordenar por el crudo mezcla mayúsculas y acentos con el
+
     # orden de code points y produce secuencias que no son alfabéticas en
+
     # español («IRL Mina» antes de «Inducción», «Cédula» después de
+
     # «Certificado»). `reportes._filas_matriz` usa exactamente la misma clave,
+
     # que es lo que sostiene la promesa de que la columna N de la pantalla es la
+
     # columna N del Excel.
+
     columnas: dict[str, tuple] = {}
+
     for s in sujetos:
+
         for d in docs.get(s.id, []):
+
             if not d.obligatorio and not incluir_opcionales:
+
                 continue
+
             clave = d.titulo.strip().lower()
+
             if clave not in columnas:
+
                 ambito = _ambito_doc(d, s)
+
                 columnas[clave] = (ORDEN_AMBITO.get(ambito, 9),
+
                                    0 if d.obligatorio else 1,
+
                                    normalizar(d.titulo), d.titulo, ambito)
+
     ordenadas = sorted(columnas.items(), key=lambda kv: kv[1][:3])
+
     claves = [k for k, _ in ordenadas]
+
     indice = {k: i for i, k in enumerate(claves)}
+
     cols_out = [{"titulo": v[3], "obligatorio": v[1] == 0, "ambito": v[4]}
+
                 for _, v in ordenadas]
 
+
+
     filas = []
+
     for s in sujetos:
+
         propios = docs.get(s.id, [])
+
         celdas = []
+
         for d in propios:
+
             i = indice.get(d.titulo.strip().lower())
+
             if i is None:                      # opcional excluido de las columnas
+
                 continue
+
             celdas.append({"col": i, "estado_calc": d.estado_calc,
+
                            "vence": d.vence.isoformat() if d.vence else None})
+
         celdas.sort(key=lambda x: x["col"])
+
         filas.append({
+
             "sujeto_id": str(s.id),
+
             "nombre": s.nombre if tipo == "personal" else (s.patente or s.nombre),
+
             "rut": s.rut or s.patente,
+
             "cargo": s.cargo if tipo == "personal" else s.tipo_equipo,
+
             "cumplimiento_pct": stats_sujeto(propios)["cumplimiento_pct"],
+
             "celdas": celdas,
+
         })
 
+
+
     return {
+
         "tipo": tipo, "contrato_id": str(c.id),
+
         "incluir_opcionales": incluir_opcionales,
+
         "columnas": cols_out, "filas": filas,
+
         "page": page, "page_size": tam, "total_filas": total_filas,
+
         "total_pages": (total_filas + tam - 1) // tam if tam else 0,
+
         "nota": ("Matriz dispersa: una celda ausente significa que el requisito "
+
                  "no aplica a ese sujeto, no que falte."),
+
     }
+
