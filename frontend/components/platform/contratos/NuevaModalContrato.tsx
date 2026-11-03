@@ -84,14 +84,14 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
     if (!abierto) return;
     setFechaInicio(hoyIso());
     setError("");
+    setFaenaId("");
+    setMandante("");
+    setCustomFaenaNombre("");
+    setCustomFaenaMandante("");
     Api.faenas.listar({ page_size: 100 })
       .then((res) => {
         const items = res.items || [];
         setFaenasList(items);
-        if (items.length > 0) {
-          setFaenaId(items[0].id);
-          setMandante(items[0].mandante || "");
-        }
       })
       .catch(console.error);
     Api.contratos.unidadesNegocio()
@@ -201,7 +201,10 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
     setError("");
     if (!nombre.trim()) return setError("Ingresa el nombre del contrato");
     if (!faenaId) return setError("Selecciona una faena");
-    if (isCustom && !customFaenaNombre.trim()) return setError("Ingresa el nombre de la faena");
+    if (isCustom) {
+      if (!customFaenaNombre.trim()) return setError("Ingresa el nombre de la faena");
+      if (!customFaenaMandante.trim()) return setError("Ingresa el mandante / empresa principal");
+    }
     if (!sinVigencia && !fechaTermino) return setError("Indica la fecha de término del contrato o marca «sin vigencia»");
     if (!sinVigencia && fechaTermino < fechaInicio) return setError("La fecha de término debe ser posterior al inicio");
 
@@ -209,7 +212,11 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
     try {
       let finalFaenaId = faenaId;
       if (isCustom) {
-        finalFaenaId = faenasList[0]?.id || "";
+        const nuevaFaena = await Api.faenas.crear({
+          nombre: customFaenaNombre.trim(),
+          mandante: customFaenaMandante.trim(),
+        });
+        finalFaenaId = nuevaFaena.id;
       }
 
       const c = await Api.contratos.crear({
@@ -317,8 +324,17 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
               }}
               className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
             >
-              {faenasList.map((f) => <option key={f.id} value={f.id}>{f.nombre} ({f.mandante})</option>)}
-              <option value="__otra">➕ Otra faena (no integrada)</option>
+              <option value="">— Selecciona una faena —</option>
+              <optgroup label="Faenas integradas">
+                {faenasList.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nombre} ({f.mandante})
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="No integrada">
+                <option value="__otra">➕ Otra faena (no integrada)</option>
+              </optgroup>
             </select>
           </div>
 
@@ -363,14 +379,45 @@ export function NuevaModalContrato({ abierto, onCerrar, onCreado }: NuevaModalCo
           </div>
 
           {isCustom && (
-            <div className="gap-2.5" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+            <div
+              id="nc-otra"
+              className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+              style={{
+                background: "#F8FAFC",
+                border: "1px dashed #CBD5E1",
+                borderRadius: "10px",
+                padding: "12px",
+              }}
+            >
               <div>
-                <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Nombre de la faena</label>
-                <input value={customFaenaNombre} onChange={(e) => setCustomFaenaNombre(e.target.value)} placeholder="Ej: Planta Coronel" className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none" />
+                <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">
+                  Nombre de la faena *
+                </label>
+                <input
+                  required
+                  value={customFaenaNombre}
+                  onChange={(e) => {
+                    setCustomFaenaNombre(e.target.value);
+                    if (error) setError("");
+                  }}
+                  placeholder="Ej: Planta Coronel"
+                  className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
+                />
               </div>
               <div>
-                <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">Mandante</label>
-                <input value={customFaenaMandante} onChange={(e) => setCustomFaenaMandante(e.target.value)} placeholder="Ej: Empresa mandante" className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none" />
+                <label className="block text-[0.75rem] font-bold text-slate-700 mb-1">
+                  Mandante / Empresa principal *
+                </label>
+                <input
+                  required
+                  value={customFaenaMandante}
+                  onChange={(e) => {
+                    setCustomFaenaMandante(e.target.value);
+                    if (error) setError("");
+                  }}
+                  placeholder="Ej: Empresa principal / Mandante"
+                  className="w-full h-9 px-3 border border-slate-300 rounded-lg text-[0.85rem] focus:border-blue-500 outline-none bg-white"
+                />
               </div>
             </div>
           )}

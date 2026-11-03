@@ -1077,3 +1077,32 @@ def test_faenas_agrupado(app_cliente, empresa_a, contrato_a):
     assert "personal" in f
     assert "equipos" in f
     assert "contratos" in f
+
+
+def test_crear_faena_no_integrada_y_asociar_contrato(app_cliente, empresa_a):
+    """[Req 4] Creación de faena no integrada y asociación directa a nuevo contrato."""
+    r_faena = app_cliente.post(
+        f"{API}/faenas",
+        headers=empresa_a["headers"],
+        json={"nombre": "Planta Coronel Test QA", "mandante": "Mandante QA Test"}
+    )
+    assert r_faena.status_code == 201, r_faena.text
+    faena_data = r_faena.json()
+    faena_id = faena_data["id"]
+    assert faena_data["nombre"] == "Planta Coronel Test QA"
+    assert faena_data["mandante"] == "Mandante QA Test"
+
+    r_contrato = app_cliente.post(
+        f"{API}/contratos",
+        headers=empresa_a["headers"],
+        json={
+            "nombre": "Contrato Planta Coronel QA",
+            "faena_id": faena_id,
+            "mandante": "Mandante QA Test",
+            "renovacion_automatica": False,
+        }
+    )
+    assert r_contrato.status_code == 201, r_contrato.text
+    contrato_data = r_contrato.json()
+    assert contrato_data["faena"]["id"] == faena_id
+    assert contrato_data["faena"]["nombre"] == "Planta Coronel Test QA"

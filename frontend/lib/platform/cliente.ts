@@ -179,6 +179,9 @@ export const faenas = {
     mandante?: string;
   }) => api<Pagina<Faena>>("/faenas", { query: q(params) }),
 
+  crear: (body: { nombre: string; mandante: string; grupo?: string; region?: string; sector?: string }) =>
+    api<Faena>("/faenas", { body }),
+
   agrupado: (params?: { unidad_negocio?: string }) =>
     api<FaenaAgrupada[]>("/faenas/agrupado", { query: q(params) }),
 

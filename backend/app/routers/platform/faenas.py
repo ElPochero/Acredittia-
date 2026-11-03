@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...config import TIPOS_EQUIPO
@@ -230,6 +231,64 @@ def _listar_proveedores(db: Session, categoria: str, faena_id: uuid.UUID | None,
 # ============================================================================
 # §6 — Faenas
 # ============================================================================
+class FaenaCreateIn(BaseModel):
+    nombre: str
+    mandante: str
+    grupo: str | None = "Otra"
+    region: str | None = None
+    sector: str = "mineria"
+
+
+@router.post("/faenas", status_code=201)
+def crear_faena_plataforma(body: FaenaCreateIn, db: Session = Depends(get_db),
+                           cid: uuid.UUID = Depends(get_company_id),
+                           user: User = Depends(get_current_user)):
+    """Crea una faena en el catálogo (ej. faena no integrada para un contrato)."""
+    nombre = body.nombre.strip()
+    if not nombre:
+        raise err(400, "NOMBRE_REQUERIDO", "El nombre de la faena es obligatorio")
+    mandante = body.mandante.strip()
+    if not mandante:
+        raise err(400, "MANDANTE_REQUERIDO", "El mandante de la faena es obligatorio")
+
+    existente = db.scalar(select(Faena).where(func.lower(Faena.nombre) == nombre.lower()))
+    if existente:
+        return _faena_out(existente, _stats_faena(db, cid, []))
+
+    from ...database import get_ctx, set_ctx
+    ctx = get_ctx()
+    prev_admin = ctx.is_admin
+    set_ctx(company_id=cid, is_admin=True, user_id=user.id)
+    try:
+        db.execute(text("SELECT set_config('app.is_admin', 'true', false)"))
+        f = Faena(
+            nombre=nombre,
+            mandante=mandante,
+            grupo=body.grupo or "Otra",
+            region=body.region,
+            sector=body.sector or "mineria",
+            activa=True,
+        )
+        db.add(f)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existente = db.scalar(select(Faena).where(func.lower(Faena.nombre) == nombre.lower()))
+            if existente:
+                return _faena_out(existente, _stats_faena(db, cid, []))
+            raise err(409, "FAENA_DUPLICADA", "Ya existe una faena con ese nombre")
+        db.refresh(f)
+        actividad.log(db, cid, "creacion", "faena", f"Faena '{f.nombre}' creada", user_id=user.id)
+        return _faena_out(f, _stats_faena(db, cid, []))
+    finally:
+        set_ctx(company_id=cid, is_admin=prev_admin, user_id=user.id)
+        try:
+            db.execute(text(f"SELECT set_config('app.is_admin', '{'true' if prev_admin else 'false'}', false)"))
+        except Exception:
+            pass
+
+
 @router.get("/faenas")
 def list_faenas(grupo: str | None = Query(None),
                 region: str | None = Query(None),
