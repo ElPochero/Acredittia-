@@ -44,6 +44,7 @@ export default function ContratoDetalle() {
   const [review, setReview] = useState<Revision | null>(null);
   const [subiendo, setSubiendo] = useState<{ docId: string; pct: number; texto: string } | null>(null);
   const [analizandoId, setAnalizandoId] = useState<string | null>(null);
+  const [conductoresVersion, setConductoresVersion] = useState(0);
   const [showCorreosAlertas, setShowCorreosAlertas] = useState(false);
   const [cfgAlertas, setCfgAlertas] = useState<{
     anticipacion: number; frecuencia: number; faltantes: number;
@@ -324,7 +325,11 @@ export default function ContratoDetalle() {
       ))}
 
       {panel("Personal", (
-        <TabPersonalContrato contrato={c} plataformas={plataformas} />
+        <TabPersonalContrato
+          contrato={c}
+          plataformas={plataformas}
+          onConductoresChange={() => setConductoresVersion((v) => v + 1)}
+        />
       ))}
       {panel("Vehículos / Equipos", (
         <TabEquiposContrato contrato={c} plataformas={plataformas} />
@@ -457,7 +462,14 @@ export default function ContratoDetalle() {
       ))}
 
       {panel("Licencia Interna", (
-        <TabLicenciaInternaContrato contrato={c} cambiarTab={cambiarTab} onSubir={subir} subiendo={subiendo} analizandoId={analizandoId} />
+        <TabLicenciaInternaContrato
+          contrato={c}
+          cambiarTab={cambiarTab}
+          onSubir={subir}
+          subiendo={subiendo}
+          analizandoId={analizandoId}
+          refreshKey={conductoresVersion}
+        />
       ))}
 
       {panel("Historial", (

@@ -10,6 +10,7 @@ interface TabLicenciaInternaProps {
   onSubir: (docId: string, file: File) => void;
   subiendo: { docId: string; pct: number; texto: string } | null;
   analizandoId: string | null;
+  refreshKey?: number;
 }
 
 /** Conductor con su expediente EMSIPOR y el estado que lo resume. */
@@ -43,7 +44,7 @@ function iniciales(nombre: string): string {
   return nombre.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-export function TabLicenciaInternaContrato({ contrato, cambiarTab, onSubir, subiendo, analizandoId }: TabLicenciaInternaProps) {
+export function TabLicenciaInternaContrato({ contrato, cambiarTab, onSubir, subiendo, analizandoId, refreshKey }: TabLicenciaInternaProps) {
   const [conductores, setConductores] = useState<Conductor[]>([]);
   const [contadores, setContadores] = useState<Contadores>({
     total: 0, acreditados: 0, vencidos: 0, en_proceso: 0, bloqueados: 0,
@@ -69,7 +70,7 @@ export function TabLicenciaInternaContrato({ contrato, cambiarTab, onSubir, subi
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contrato.id]);
+  }, [contrato.id, refreshKey]);
 
   const verEjemplo = async (clave: string) => {
     try {

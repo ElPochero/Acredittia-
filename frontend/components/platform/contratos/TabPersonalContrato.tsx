@@ -11,9 +11,10 @@ import SubjectDetail from "@/components/platform/SubjectDetail";
 interface TabPersonalContratoProps {
   contrato: Contrato;
   plataformas: PlataformaContrato[];
+  onConductoresChange?: () => void;
 }
 
-export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContratoProps) {
+export function TabPersonalContrato({ contrato, plataformas, onConductoresChange }: TabPersonalContratoProps) {
   const [personal, setPersonal] = useState<Api.Pagina<Sujeto> | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -61,6 +62,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
       setShowImportar(false);
       setSelImportar(new Set());
       cargar();
+      onConductoresChange?.();
     } catch (e: any) {
       toast.error(e.message || "Error al importar");
     } finally {
@@ -85,6 +87,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
       } : null);
       
       await Api.personal.editar(id, { es_conductor: !actual });
+      onConductoresChange?.();
       toast.success("Trabajador actualizado");
     } catch (e: any) {
       toast.error(e.message || "Error al actualizar trabajador");
@@ -114,6 +117,7 @@ export function TabPersonalContrato({ contrato, plataformas }: TabPersonalContra
       setShowAddWorker(false);
       setNewWorker({ nombre: "", rut: "", cargo: "", telefono: "", email: "", es_conductor: false, contrato_id: contrato.id });
       cargar();
+      onConductoresChange?.();
     } catch (e: any) {
       const cod = e.code || "";
       if (cod === "RUT_INVALIDO" || cod === "RUT_DUPLICADO") {
