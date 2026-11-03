@@ -783,6 +783,252 @@ def resumen_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db),
     return out
 
 
+@router.get("/{contrato_id}/reporte-estado")
+def reporte_estado_contrato(contrato_id: uuid.UUID,
+                            db: Session = Depends(get_db),
+                            cid: uuid.UUID = Depends(get_company_id),
+                            user: User = Depends(get_current_user)):
+    """Datos consolidados y vivos para el reporte ejecutivo de contrato (HTML, PDF y Excel)."""
+    from ...models import Company, ContratoPlataforma, LicenciaInterna
+    from .documentos import resolver_mapa_plataformas, resolver_plataforma_doc
+    from .plataformas import plataformas_efectivas
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    comp = db.get(Company, cid)
+    company_name = comp.nombre if comp else "Mi Empresa"
+    mapa = resolver_mapa_plataformas(db, cid, c.id)
+
+    hoy = date.today()
+    dias_rest = (c.fecha_termino - hoy).days if c.fecha_termino else None
+    vigencia_sin = c.fecha_termino is None
+    vig_estado = "Vigente" if (dias_rest is None or dias_rest >= 0) else "Vencido"
+
+    faena_nom = c.faena.nombre if c.faena else "—"
+    mandante_nom = c.mandante or (c.faena.mandante if c.faena else "—") or "—"
+
+    efectivas = plataformas_efectivas(db, cid, c)
+    plat_str = ", ".join(e["nombre"] for e in efectivas if e.get("nombre")) or "—"
+
+    # 1. Empresa docs
+    emp_docs_db = list(db.scalars(
+        select(Documento).where(Documento.company_id == cid,
+                                Documento.contrato_id == c.id)
+        .order_by(Documento.titulo)
+    ))
+    emp_docs = []
+    emp_ok = 0
+    for d in emp_docs_db:
+        p_nom, _ = resolver_plataforma_doc(d, mapa)
+        if d.estado_calc in ("ok", "porvenc"):
+            emp_ok += 1
+        emp_docs.append({
+            "titulo": d.titulo,
+            "obligatorio": d.obligatorio,
+            "plataforma": p_nom,
+            "estado": d.estado_calc,
+            "vence": d.vence.isoformat() if d.vence else None,
+            "dias_para_vencer": (d.vence - hoy).days if d.vence else None,
+        })
+
+    # 2. Personal y Equipos
+    sujetos = list(db.scalars(
+        select(Sujeto).where(
+            Sujeto.company_id == cid,
+            Sujeto.contrato_id == c.id,
+            Sujeto.estado != "baja",
+        ).order_by(Sujeto.nombre)
+    ))
+
+    s_ids = [s.id for s in sujetos]
+    docs_por_sujeto: dict[uuid.UUID, list[Documento]] = {}
+    if s_ids:
+        for d in db.scalars(
+            select(Documento).where(
+                Documento.company_id == cid,
+                Documento.sujeto_id.in_(s_ids)
+            ).order_by(Documento.created_at)
+        ):
+            docs_por_sujeto.setdefault(d.sujeto_id, []).append(d)
+
+    licencias_db: dict[uuid.UUID, LicenciaInterna] = {}
+    if s_ids:
+        for li in db.scalars(
+            select(LicenciaInterna).where(
+                LicenciaInterna.company_id == cid,
+                LicenciaInterna.sujeto_id.in_(s_ids)
+            )
+        ):
+            licencias_db[li.sujeto_id] = li
+
+    def _evaluar_sujeto(s: Sujeto, docs: list[Documento]) -> dict:
+        st = stats_sujeto(docs)
+        vencidos = [d.titulo for d in docs if d.estado_calc == "venc"]
+        faltantes = [d.titulo for d in docs if d.estado_calc == "falta"]
+        prox_vence = None
+        fechas_futuras = sorted([d.vence for d in docs if d.vence and d.estado_calc in ("ok", "porvenc")])
+        if fechas_futuras:
+            prox_vence = fechas_futuras[0].isoformat()
+
+        if s.estado in ("baja", "inactivo"):
+            estado = "bloqueado"
+        elif st["vencidos"] > 0:
+            estado = "vencido"
+        elif st["docs_total"] > 0 and (st["ok"] + st["por_vencer"]) == st["docs_total"]:
+            estado = "acreditado"
+        else:
+            estado = "enproceso"
+
+        pct = round((st["ok"] + st["por_vencer"]) / max(1, st["docs_total"]) * 100)
+        return {
+            "id": str(s.id),
+            "nombre": s.nombre,
+            "rut": s.rut,
+            "cargo": s.cargo,
+            "patente": s.patente,
+            "tipo_equipo": s.tipo_equipo,
+            "marca": s.marca,
+            "modelo": s.modelo,
+            "estado": estado,
+            "ok": st["ok"] + st["por_vencer"],
+            "total": st["docs_total"],
+            "pct": pct,
+            "vencidos": vencidos,
+            "faltantes": faltantes,
+            "prox_vence": prox_vence,
+        }
+
+    personal_items = []
+    equipos_items = []
+    licencias_items = []
+
+    for s in sujetos:
+        s_docs = docs_por_sujeto.get(s.id, [])
+        if s.tipo == "trabajador":
+            core_docs = [d for d in s_docs if not d.es_emsipor]
+            p_obj = _evaluar_sujeto(s, core_docs)
+            personal_items.append(p_obj)
+            if s.es_conductor:
+                ems_docs = [d for d in s_docs if d.es_emsipor]
+                lim = licencias_db.get(s.id)
+                st_lim = stats_sujeto(ems_docs)
+                lim_ok = st_lim["ok"] + st_lim["por_vencer"]
+                lim_tot = st_lim["docs_total"]
+                lim_pct = round(lim_ok / max(1, lim_tot) * 100)
+                lim_k = "acreditado" if (lim_tot > 0 and lim_ok == lim_tot and lim and lim.estado == "aprobado") else ("vencido" if st_lim["vencidos"] > 0 else "enproceso")
+                licencias_items.append({
+                    "id": str(s.id),
+                    "nombre": s.nombre,
+                    "rut": s.rut,
+                    "estado": lim_k,
+                    "ok": lim_ok,
+                    "total": lim_tot,
+                    "pct": lim_pct,
+                    "num_lim": lim.numero if lim else None,
+                    "faltantes": [d.titulo for d in ems_docs if d.estado_calc == "falta"],
+                })
+        elif s.tipo == "equipo":
+            equipos_items.append(_evaluar_sujeto(s, s_docs))
+
+    # 3. Carpeta de Arranque
+    arr_reqs = list(db.scalars(
+        select(ContratoRequisito).where(
+            ContratoRequisito.company_id == cid,
+            ContratoRequisito.contrato_id == c.id,
+            or_(ContratoRequisito.vinculo_tipo == "arranque",
+                ContratoRequisito.origen == "arranque"),
+            ContratoRequisito.activo.is_(True),
+        ).order_by(ContratoRequisito.titulo)
+    ))
+    titulos_arr = {r.titulo.strip().lower() for r in arr_reqs}
+    arr_docs = []
+    for d in emp_docs_db:
+        if d.titulo.strip().lower() in titulos_arr:
+            arr_docs.append({
+                "titulo": d.titulo,
+                "obligatorio": d.obligatorio,
+                "estado": d.estado_calc,
+                "vence": d.vence.isoformat() if d.vence else None,
+            })
+
+    # 4. Vencidos y por vencer
+    venc_items = []
+    def _agregar_venc(who: str, d: Documento):
+        if d.estado_calc in ("venc", "porvenc"):
+            dias = (d.vence - hoy).days if d.vence else 0
+            venc_items.append({
+                "documento": d.titulo,
+                "corresponde_a": who,
+                "vence": d.vence.isoformat() if d.vence else None,
+                "estado": d.estado_calc,
+                "dias": dias,
+            })
+
+    for d in emp_docs_db:
+        _agregar_venc("Empresa", d)
+    for s in sujetos:
+        s_who = s.nombre + (f" ({s.patente})" if s.patente else (f" ({s.rut})" if s.rut else ""))
+        for d in docs_por_sujeto.get(s.id, []):
+            _agregar_venc(s_who, d)
+
+    venc_items.sort(key=lambda x: x["vence"] or "9999-99-99")
+
+    # 5. KPIs globales
+    total_docs = len(emp_docs_db) + sum(len(docs_por_sujeto.get(s.id, [])) for s in sujetos)
+    total_ok = sum(1 for d in emp_docs_db if d.estado_calc in ("ok", "porvenc")) + \
+               sum(1 for s in sujetos for d in docs_por_sujeto.get(s.id, []) if d.estado_calc in ("ok", "porvenc"))
+    pct_global = round(total_ok / max(1, total_docs) * 100)
+
+    p_acred = sum(1 for p in personal_items if p["estado"] == "acreditado")
+    e_acred = sum(1 for e in equipos_items if e["estado"] == "acreditado")
+    l_acred = sum(1 for l in licencias_items if l["estado"] == "acreditado")
+    venc_count = sum(1 for v in venc_items if v["estado"] == "venc")
+    porvenc_count = sum(1 for v in venc_items if v["estado"] == "porvenc")
+
+    num_contrato = c.codigo or f"CT-{str(c.id)[:8].upper()}"
+
+    return {
+        "contrato": {
+            "id": str(c.id),
+            "nombre": c.nombre,
+            "codigo": c.codigo,
+            "num": num_contrato,
+            "mandante": mandante_nom,
+            "faena": {"id": str(c.faena.id), "nombre": faena_nom} if c.faena else None,
+            "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
+            "fecha_termino": c.fecha_termino.isoformat() if c.fecha_termino else None,
+            "vigencia_sin": vigencia_sin,
+            "dias_restantes": dias_rest,
+            "vigencia_estado": vig_estado,
+            "plataformas": plat_str,
+        },
+        "empresa": {"nombre": company_name},
+        "fecha": hoy.strftime("%d/%m/%Y"),
+        "kpis": {
+            "pct_global": pct_global,
+            "personal_acreditados": p_acred,
+            "personal_total": len(personal_items),
+            "equipos_acreditados": e_acred,
+            "equipos_total": len(equipos_items),
+            "licencias_acreditadas": l_acred,
+            "licencias_total": len(licencias_items),
+            "docs_vencidos": venc_count,
+            "docs_por_vencer": porvenc_count,
+            "empresa_ok": emp_ok,
+            "empresa_total": len(emp_docs),
+            "arranque_ok": sum(1 for a in arr_docs if a["estado"] in ("ok", "porvenc")),
+            "arranque_total": len(arr_docs),
+        },
+        "secciones": {
+            "empresa": emp_docs,
+            "personal": personal_items,
+            "equipos": equipos_items,
+            "licencias": licencias_items,
+            "arranque": arr_docs,
+            "vencimientos": venc_items,
+        }
+    }
+
+
 @router.get("/{contrato_id}/documentos")
 def docs_empresa(contrato_id: uuid.UUID, p: Page = Depends(paginacion),
                  db: Session = Depends(get_db),

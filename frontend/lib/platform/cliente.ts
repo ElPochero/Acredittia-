@@ -314,6 +314,8 @@ export const contratos = {
 
   detalle: (id: string) => api<Contrato>(`/contratos/${id}`),
 
+  reporteEstado: (id: string) => api<any>(`/contratos/${id}/reporte-estado`),
+
   crear: (body: ContratoIn) => api<ContratoCreado>("/contratos", { body }),
 
   editar: (id: string, cambios: ContratoPatch) =>
