@@ -1,18 +1,28 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import * as Api from "@/lib/cliente";
 import type { ContratoCertificacionLaboral } from "@/lib/tipos";
 import { Spinner, Kpi, Chip } from "@/components/ui";
+import MisPendientesRrhhView from "@/components/certificacion/MisPendientesRrhhView";
 
 export default function CertificacionLaboralPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Conmutador de vista principal (Sección 3.4, CA 9)
+  const tabQuery = searchParams.get("tab");
+  const [vistaPrincipal, setVistaPrincipal] = useState<"contratos" | "pendientes">(
+    tabQuery === "pendientes" ? "pendientes" : "contratos"
+  );
+  const [totalPendientesRrhh, setTotalPendientesRrhh] = useState<number>(0);
+
   const [contratos, setContratos] = useState<ContratoCertificacionLaboral[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filtros
+  // Filtros de contratos
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
   const [vista, setVista] = useState<"tarjetas" | "tabla">("tarjetas");
@@ -21,11 +31,17 @@ export default function CertificacionLaboralPage() {
     setCargando(true);
     setError(null);
     try {
-      const res = await Api.certificacion.listarContratos({
-        busqueda: busqueda.trim() || undefined,
-        estado: filtroEstado !== "todos" ? filtroEstado : undefined,
-      });
+      const [res, pendientesRes] = await Promise.all([
+        Api.certificacion.listarContratos({
+          busqueda: busqueda.trim() || undefined,
+          estado: filtroEstado !== "todos" ? filtroEstado : undefined,
+        }),
+        Api.certificacion.obtenerMisPendientes().catch(() => null),
+      ]);
       setContratos(res.items || []);
+      if (pendientesRes) {
+        setTotalPendientesRrhh(pendientesRes.total_pendientes || 0);
+      }
     } catch (err: any) {
       console.error("Error al cargar contratos de certificación laboral:", err);
       setError("No se pudieron cargar los contratos para Control Laboral.");
@@ -103,331 +119,369 @@ export default function CertificacionLaboralPage() {
         </div>
       </div>
 
-      {/* Tarjetas de KPIs Generales */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi
-          titulo="Contratos en Control"
-          valor={kpis.totalContratos}
-          sub="Empresas y proyectos"
-          color="#3D62F5"
-        />
-        <Kpi
-          titulo="Cumplimiento Promedio"
-          valor={`${kpis.cumplimientoPromedio}%`}
-          sub="Período vigente"
-          color={colorCumplimiento(kpis.cumplimientoPromedio)}
-        />
-        <Kpi
-          titulo="Documentos Pendientes"
-          valor={kpis.totalPendientes}
-          sub="Por cargar en nóminas"
-          color="#F97316"
-        />
-        <Kpi
-          titulo="Entregas por Revisar"
-          valor={kpis.totalPorRevisar}
-          sub="Bandeja auditoría ADC"
-          color="#DC2626"
-        />
+      {/* Conmutador Superior de Vista (Sección 3.4, CA 9) */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setVistaPrincipal("contratos")}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition ${
+            vistaPrincipal === "contratos"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          }`}
+        >
+          <span>🏢 Mis contratos</span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] ${
+              vistaPrincipal === "contratos" ? "bg-white/20 text-white font-extrabold" : "bg-slate-200 text-slate-700"
+            }`}
+          >
+            {contratos.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setVistaPrincipal("pendientes")}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition ${
+            vistaPrincipal === "pendientes"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          }`}
+        >
+          <span>📋 Mis pendientes</span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] ${
+              vistaPrincipal === "pendientes"
+                ? "bg-white/20 text-white font-extrabold"
+                : "bg-amber-100 text-amber-800 font-extrabold"
+            }`}
+          >
+            {totalPendientesRrhh}
+          </span>
+        </button>
       </div>
 
-      {/* Barra de Filtros y Búsqueda */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        {/* Input Buscador */}
-        <div className="relative flex-1">
-          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
-          <input
-            type="text"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre de contrato, código, faena o mandante..."
-            className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-4 text-sm text-slate-800 placeholder-slate-400 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          />
-          {busqueda && (
-            <button
-              onClick={() => setBusqueda("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* Filtros de Estado */}
-        <div className="flex items-center gap-2">
-          <select
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-indigo-500 focus:outline-none"
-          >
-            <option value="todos">Todos los Estados</option>
-            <option value="vigente">Activo / Vigente</option>
-            <option value="en_evaluacion">En Acreditación</option>
-            <option value="terminado">Finalizado</option>
-          </select>
-
-          {/* Toggle Vista: Cuadrícula vs Tabla */}
-          <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-0.5">
-            <button
-              onClick={() => setVista("tarjetas")}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                vista === "tarjetas" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
-              title="Vista en tarjetas"
-            >
-              ⊞ Tarjetas
-            </button>
-            <button
-              onClick={() => setVista("tabla")}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                vista === "tabla" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
-              title="Vista en tabla"
-            >
-              ☰ Tabla
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Contenido Principal */}
-      {cargando ? (
-        <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-slate-100 bg-white p-8">
-          <Spinner texto="Cargando contratos y KPIs de Control Laboral..." />
-        </div>
-      ) : error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-rose-700">
-          <p className="font-semibold">{error}</p>
-          <button
-            onClick={() => cargarContratos()}
-            className="mt-3 rounded-xl bg-rose-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700"
-          >
-            Reintentar
-          </button>
-        </div>
-      ) : contratosFiltrados.length === 0 ? (
-        <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
-          <span className="text-3xl">📂</span>
-          <h3 className="mt-2 text-base font-bold text-slate-800">No se encontraron contratos</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            {busqueda || filtroEstado !== "todos"
-              ? "Prueba ajustando los criterios de búsqueda o restableciendo los filtros."
-              : "No hay contratos dados de alta para esta empresa."}
-          </p>
-          {(busqueda || filtroEstado !== "todos") && (
-            <button
-              onClick={() => {
-                setBusqueda("");
-                setFiltroEstado("todos");
-              }}
-              className="mt-4 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Limpiar filtros
-            </button>
-          )}
-        </div>
-      ) : vista === "tarjetas" ? (
-        /* Vista en Cuadrícula de Tarjetas (.cl-cts / .cl-ct) */
-        <div className="cl-cts">
-          {contratosFiltrados.map((c) => {
-            const pct = c.porcentaje_cumplimiento || 0;
-            const barColor = colorCumplimiento(pct);
-
-            return (
-              <div
-                key={c.id}
-                onClick={() => irAContrato(c.id)}
-                className="cl-ct group"
-              >
-                {/* Parte Superior: Título y Código */}
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate text-base font-bold text-slate-900 group-hover:text-blue-600">
-                        {c.nombre}
-                      </h3>
-                      {c.codigo && (
-                        <span className="text-[11px] font-medium text-slate-500">
-                          Código: {c.codigo}
-                        </span>
-                      )}
-                    </div>
-                    <Chip estado={c.estado} />
-                  </div>
-
-                  {/* Metadata de Empresa y Faena */}
-                  <div className="mt-2.5 space-y-1 text-xs text-slate-600">
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="text-slate-400">🏢</span>
-                      <span className="font-medium text-slate-700 truncate">
-                        {c.empresa_proveedora || "Empresa Principal"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="text-slate-400">📍</span>
-                      <span className="truncate">{c.faena_nombre || "Faena no asignada"}</span>
-                    </div>
-                  </div>
-
-                  {/* Período Vigente */}
-                  <div className="mt-3.5 rounded-xl border border-slate-100 bg-slate-50/80 p-2.5 text-xs">
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span className="font-semibold text-slate-800">
-                        🗓️ {c.periodo_vigente_nombre || "Sin período activo"}
-                      </span>
-                      {c.estado_periodo && (
-                        <span
-                          className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                            c.estado_periodo === "cerrado"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : c.estado_periodo === "en_auditoria" || c.estado_periodo === "en_revision"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-blue-100 text-blue-800"
-                          }`}
-                        >
-                          {c.estado_periodo}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Barra de Cumplimiento (.cl-mbar) */}
-                    <div className="mt-2">
-                      <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 mb-1">
-                        <span>Cumplimiento período</span>
-                        <span style={{ color: barColor }}>{pct}%</span>
-                      </div>
-                      <div className="cl-mbar">
-                        <div
-                          className="cl-mbar-fill"
-                          style={{
-                            width: `${pct}%`,
-                            backgroundColor: barColor,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Badges de Estado y Acciones Rápidas */}
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    {c.por_revisar_count > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-800 animate-pulse">
-                        🔍 {c.por_revisar_count} por revisar
-                      </span>
-                    )}
-
-                    {c.pendientes_carga_count > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                        ⏳ {c.pendientes_carga_count} pendientes
-                      </span>
-                    )}
-
-                    {c.aprobados_count > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                        ✓ {c.aprobados_count} aprobados
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Botón Inferior: Ingresar al Contrato */}
-                <div className="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between">
-                  <div className="text-[11px] text-slate-400">
-                    ADC: <span className="font-medium text-slate-600">{c.adc_asignado || "No asignado"}</span>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 group-hover:translate-x-0.5 transition-transform">
-                    Ingresar al contrato →
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {/* CONTENIDO SEGÚN VISTA CONMUTADA */}
+      {vistaPrincipal === "pendientes" ? (
+        <MisPendientesRrhhView onTotalActualizado={setTotalPendientesRrhh} />
       ) : (
-        /* Vista en Tabla */
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-left text-xs text-slate-600">
-            <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Contrato / Código</th>
-                <th className="px-4 py-3">Empresa Proveedora</th>
-                <th className="px-4 py-3">Faena / Mandante</th>
-                <th className="px-4 py-3">Período Vigente</th>
-                <th className="px-4 py-3">Cumplimiento</th>
-                <th className="px-4 py-3">Estado Entregas</th>
-                <th className="px-4 py-3 text-right">Acción</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+        <>
+          {/* Tarjetas de KPIs Generales */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Kpi
+              titulo="Contratos en Control"
+              valor={kpis.totalContratos}
+              sub="Empresas y proyectos"
+              color="#3D62F5"
+            />
+            <Kpi
+              titulo="Cumplimiento Promedio"
+              valor={`${kpis.cumplimientoPromedio}%`}
+              sub="Período vigente"
+              color={colorCumplimiento(kpis.cumplimientoPromedio)}
+            />
+            <Kpi
+              titulo="Documentos Pendientes"
+              valor={kpis.totalPendientes}
+              sub="Por cargar en nóminas"
+              color="#F97316"
+            />
+            <Kpi
+              titulo="Entregas por Revisar"
+              valor={kpis.totalPorRevisar}
+              sub="Bandeja auditoría ADC"
+              color="#DC2626"
+            />
+          </div>
+
+          {/* Barra de Filtros y Búsqueda */}
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            {/* Input Buscador */}
+            <div className="relative flex-1">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+              <input
+                type="text"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre de contrato, código, faena o mandante..."
+                className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-4 text-sm text-slate-800 placeholder-slate-400 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              {busqueda && (
+                <button
+                  onClick={() => setBusqueda("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Filtros de Estado y Vista */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={filtroEstado}
+                onChange={(e) => setFiltroEstado(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="todos">Todos los estados</option>
+                <option value="activo">Solo Activos</option>
+                <option value="en_revision">En Revisión</option>
+                <option value="cerrado">Cerrados</option>
+              </select>
+
+              {/* Botones Selector de Vista (Tarjetas / Tabla) */}
+              <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+                <button
+                  onClick={() => setVista("tarjetas")}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                    vista === "tarjetas"
+                      ? "bg-white text-indigo-600 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                  title="Vista Cuadrícula"
+                >
+                  🗂️ Cuadrícula
+                </button>
+                <button
+                  onClick={() => setVista("tabla")}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                    vista === "tabla"
+                      ? "bg-white text-indigo-600 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                  title="Vista Tabla"
+                >
+                  📄 Tabla
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Indicador de Carga */}
+          {cargando && (
+            <div className="flex min-h-[30vh] items-center justify-center">
+              <Spinner texto="Actualizando contratos laborales..." />
+            </div>
+          )}
+
+          {/* Mensaje de Error */}
+          {error && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-sm font-semibold text-rose-700 shadow-sm">
+              ⚠️ {error}
+            </div>
+          )}
+
+          {/* Estado Vacío */}
+          {!cargando && !error && contratosFiltrados.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
+              <span className="text-4xl">📂</span>
+              <h3 className="mt-2 text-base font-bold text-slate-800">
+                No se encontraron contratos para Control Laboral
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {busqueda
+                  ? "Prueba modificando los términos de búsqueda o los filtros."
+                  : "No hay contratos configurados actualmente en faena para este período."}
+              </p>
+            </div>
+          )}
+
+          {/* Renderizado de Contratos: VISTA CUADRÍCULA */}
+          {!cargando && !error && vista === "tarjetas" && contratosFiltrados.length > 0 && (
+            <div className="cl-cts">
               {contratosFiltrados.map((c) => {
-                const pct = c.porcentaje_cumplimiento || 0;
-                const barColor = colorCumplimiento(pct);
+                const tieneAlertas = c.por_revisar_count > 0;
+                const tienePendientes = c.pendientes_carga_count > 0;
 
                 return (
-                  <tr
+                  <div
                     key={c.id}
                     onClick={() => irAContrato(c.id)}
-                    className="cursor-pointer hover:bg-slate-50/80 transition"
+                    className="cl-ct hover:border-indigo-400 hover:shadow-md transition cursor-pointer flex flex-col justify-between"
                   >
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      <div>{c.nombre}</div>
-                      {c.codigo && <div className="text-[10px] text-slate-400 font-normal">{c.codigo}</div>}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-700">
-                      {c.empresa_proveedora || "Empresa Principal"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div>{c.faena_nombre || "Sin faena"}</div>
-                      <div className="text-[10px] text-slate-400">{c.mandante || "Mandante Principal"}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-800">{c.periodo_vigente_nombre}</div>
-                      <span className="text-[10px] text-slate-500 uppercase">{c.estado_periodo}</span>
-                    </td>
-                    <td className="px-4 py-3 min-w-[140px]">
-                      <div className="flex items-center justify-between font-bold mb-1" style={{ color: barColor }}>
-                        <span>{pct}%</span>
+                    <div>
+                      {/* Cabecera de la tarjeta */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <span className="font-mono text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                          {c.codigo || "S/C"}
+                        </span>
+                        <Chip estado={c.estado_contractual || c.estado} texto={c.estado_contractual || c.estado} />
                       </div>
-                      <div className="cl-mbar">
-                        <div className="cl-mbar-fill" style={{ width: `${pct}%`, backgroundColor: barColor }} />
+
+                      {/* Nombre y datos del contrato */}
+                      <h3 className="text-sm font-bold text-slate-900 line-clamp-1 mb-1" title={c.nombre}>
+                        {c.nombre}
+                      </h3>
+                      <p className="text-xs text-slate-500 line-clamp-1 mb-3">
+                        🏢 {c.empresa_proveedora}
+                      </p>
+
+                      <div className="text-[11px] text-slate-600 space-y-0.5 mb-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <div>
+                          <strong className="text-slate-700">Mandante:</strong> {c.mandante_nombre || c.mandante || "Mandante"}
+                        </div>
+                        <div>
+                          <strong className="text-slate-700">Faena:</strong> {c.faena_nombre}
+                        </div>
+                        {c.periodo_vigente_nombre && (
+                          <div className="text-indigo-600 font-semibold pt-0.5">
+                            📅 Período: {c.periodo_vigente_nombre}
+                          </div>
+                        )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3">
+
+                      {/* Barra de progreso de cumplimiento */}
+                      <div className="space-y-1 mb-4">
+                        <div className="flex items-center justify-between text-[11px] font-semibold">
+                          <span className="text-slate-500">Cumplimiento Período</span>
+                          <span style={{ color: colorCumplimiento(c.porcentaje_cumplimiento) }}>
+                            {Math.round(c.porcentaje_cumplimiento)}%
+                          </span>
+                        </div>
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full transition-all duration-300"
+                            style={{
+                              width: `${Math.min(100, Math.round(c.porcentaje_cumplimiento))}%`,
+                              backgroundColor: colorCumplimiento(c.porcentaje_cumplimiento),
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pie de la tarjeta: Badges de alertas y acción */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-[11px]">
                       <div className="flex flex-wrap gap-1">
-                        {c.por_revisar_count > 0 && (
+                        {tieneAlertas && (
                           <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
                             🔍 {c.por_revisar_count} por revisar
                           </span>
                         )}
-                        {c.pendientes_carga_count > 0 && (
+                        {tienePendientes && (
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                             ⏳ {c.pendientes_carga_count} pend.
                           </span>
                         )}
-                        {c.aprobados_count > 0 && (
+                        {!tieneAlertas && !tienePendientes && c.aprobados_count > 0 && (
                           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
-                            ✓ {c.aprobados_count}
+                            ✓ {c.aprobados_count} aprobados
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          irAContrato(c.id);
-                        }}
-                        className="rounded-lg bg-blue-50 px-3 py-1.5 font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
-                      >
+
+                      <span className="font-bold text-indigo-600 hover:underline">
                         Ingresar →
-                      </button>
-                    </td>
-                  </tr>
+                      </span>
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          )}
+
+          {/* Renderizado de Contratos: VISTA TABLA */}
+          {!cargando && !error && vista === "tabla" && contratosFiltrados.length > 0 && (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-left text-xs text-slate-600">
+                <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Código</th>
+                    <th className="px-4 py-3">Nombre del Contrato</th>
+                    <th className="px-4 py-3">Empresa Proveedora</th>
+                    <th className="px-4 py-3">Faena</th>
+                    <th className="px-4 py-3">Período Vigente</th>
+                    <th className="px-4 py-3">Cumplimiento</th>
+                    <th className="px-4 py-3">Alertas</th>
+                    <th className="px-4 py-3 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {contratosFiltrados.map((c) => {
+                    return (
+                      <tr
+                        key={c.id}
+                        onClick={() => irAContrato(c.id)}
+                        className="cursor-pointer hover:bg-slate-50/80 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono font-bold text-slate-500">
+                          {c.codigo || "S/C"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-bold text-slate-900">{c.nombre}</div>
+                          <div className="text-[10px] text-slate-400">
+                            Mandante: {c.mandante_nombre || c.mandante || "Mandante"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-700">
+                          {c.empresa_proveedora}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-700">
+                          {c.faena_nombre}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md">
+                            {c.periodo_vigente_nombre || "Sin período"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="font-bold"
+                              style={{ color: colorCumplimiento(c.porcentaje_cumplimiento) }}
+                            >
+                              {Math.round(c.porcentaje_cumplimiento)}%
+                            </span>
+                            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${Math.min(100, Math.round(c.porcentaje_cumplimiento))}%`,
+                                  backgroundColor: colorCumplimiento(c.porcentaje_cumplimiento),
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {c.por_revisar_count > 0 && (
+                              <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                                🔍 {c.por_revisar_count} por revisar
+                              </span>
+                            )}
+                            {c.pendientes_carga_count > 0 && (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                                ⏳ {c.pendientes_carga_count} pend.
+                              </span>
+                            )}
+                            {c.aprobados_count > 0 && (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                                ✓ {c.aprobados_count}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              irAContrato(c.id);
+                            }}
+                            className="rounded-lg bg-blue-50 px-3 py-1.5 font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
+                          >
+                            Ingresar →
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
