@@ -148,7 +148,7 @@ def _out(db: Session, s: Sujeto, con_docs: bool = False,
         "modelo": s.modelo, "anio": s.anio,
         "contrato": {"id": str(s.contrato.id), "nombre": s.contrato.nombre,
                      "faena_id": str(s.contrato.faena_id),
-                     "faena": s.contrato.faena.nombre},
+                     "faena": s.contrato.faena.nombre} if s.contrato else None,
         "stats": stats_sujeto(docs),
     }
     if con_docs:
@@ -193,7 +193,7 @@ def checklist_out(db: Session, s: Sujeto) -> dict:
         "sujeto": {"id": str(s.id), "tipo": s.tipo, "nombre": s.nombre,
                    "rut": s.rut, "patente": s.patente, "estado": s.estado,
                    "cargo": s.cargo,
-                   "contrato_id": str(s.contrato_id)},
+                   "contrato_id": str(s.contrato_id) if s.contrato_id else None},
         "items": [_doc(d) for d in core],
         "documentos_emsipor": [_doc(d) for d in emsipor],
         "total": len(core),
@@ -376,6 +376,107 @@ def crear_trabajador(body: TrabajadorIn, db: Session = Depends(get_db),
     out["expediente_emsipor_creado"] = n_emsipor > 0
     out["cargo_creado"] = cargo_creado
     return out
+
+
+@router.post("/personal/bulk", status_code=201)
+def crear_personal_bulk(body: list[TrabajadorIn], db: Session = Depends(get_db),
+                        cid: uuid.UUID = Depends(get_company_id),
+                        user: User = Depends(get_current_user)):
+    """Alta masiva de trabajadores.
+
+    Valida RUT normalizado, omite duplicados sin abortar el lote,
+    y crea checklists si tienen contrato_id asignado.
+    """
+    contratos_cache: dict[uuid.UUID, Contrato] = {}
+    creados = []
+    omitidos = []
+    ruts_vistos = set()
+
+    for item in body:
+        rut = normalizar_rut(item.rut)
+        if not rut:
+            omitidos.append({"item": item.model_dump(), "motivo": "RUT_INVALIDO"})
+            continue
+
+        c = None
+        if item.contrato_id:
+            if item.contrato_id not in contratos_cache:
+                try:
+                    contratos_cache[item.contrato_id] = _validar_contrato(
+                        db, cid, item.contrato_id, user
+                    )
+                except Exception:
+                    omitidos.append({"item": item.model_dump(), "motivo": "CONTRATO_INVALIDO"})
+                    continue
+            c = contratos_cache[item.contrato_id]
+
+        clave_lote = (rut, c.id if c else None)
+        if clave_lote in ruts_vistos:
+            omitidos.append({"item": item.model_dump(), "motivo": "DUPLICADO_EN_LOTE"})
+            continue
+
+        q = select(Sujeto.id).where(
+            Sujeto.company_id == cid,
+            Sujeto.rut == rut,
+            Sujeto.tipo == "trabajador",
+            Sujeto.estado != "baja",
+        )
+        if c:
+            q = q.where(Sujeto.contrato_id == c.id)
+        else:
+            q = q.where(Sujeto.contrato_id == None)
+
+        if db.scalar(q):
+            omitidos.append({"item": item.model_dump(), "motivo": "RUT_DUPLICADO"})
+            continue
+
+        ruts_vistos.add(clave_lote)
+
+        cargo, _ = _resolver_cargo_entrada(db, cid, item.cargo_id, item.cargo)
+        s = Sujeto(
+            company_id=cid,
+            contrato_id=c.id if c else None,
+            tipo="trabajador",
+            nombre=item.nombre.strip(),
+            rut=rut,
+            cargo=cargo.nombre if cargo else (item.cargo or None),
+            cargo_id=cargo.id if cargo else None,
+            es_conductor=item.es_conductor,
+            telefono=item.telefono,
+            email=item.email,
+        )
+        if item.estado:
+            s.estado = item.estado
+        db.add(s)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            omitidos.append({"item": item.model_dump(), "motivo": "ERROR_INTEGRIDAD"})
+            continue
+
+        if c:
+            instanciar_docs(
+                db, cid, "personal", sujeto_id=s.id,
+                faena_id=c.faena_id, cargo_id=s.cargo_id,
+                contrato_plantilla_id=c.id,
+            )
+            _sincronizar_emsipor(db, s)
+
+        actividad.log(
+            db, cid, "creacion", "personal",
+            f"Trabajador {s.nombre} agregado masivamente" + (f" a '{c.nombre}'" if c else ""),
+            user_id=user.id, entidad_tipo="sujeto", entidad_id=s.id,
+        )
+        creados.append(s)
+
+    db.commit()
+    return {
+        "creados": len(creados),
+        "omitidos": len(omitidos),
+        "items": [_out(db, s) for s in creados],
+        "detalle_omitidos": omitidos,
+    }
 
 
 @router.get("/personal/{sid}")

@@ -516,6 +516,12 @@ export const personal = {
   /** Acepta `cargo_id` o `cargo` como texto; el texto puede crear el cargo. */
   crear: (body: TrabajadorIn) => api<SujetoCreado>("/personal", { body }),
 
+  bulk: (items: TrabajadorIn[]) =>
+    api<{ creados: number; omitidos: number; items: SujetoCreado[] }>(
+      "/personal/bulk",
+      { body: items }
+    ),
+
   /** Solo campos de personal: los de equipo se ignorarían en silencio. */
   editar: (id: string, cambios: TrabajadorPatch) =>
     patch<SujetoDetalle & { cargo_creado?: boolean; expediente_emsipor_creado?: boolean }>(
@@ -540,6 +546,12 @@ export const equipos = {
   detalle: (id: string) => api<SujetoDetalle>(`/equipos/${id}`),
 
   crear: (body: EquipoIn) => api<SujetoCreado>("/equipos", { body }),
+
+  bulk: (items: EquipoIn[]) =>
+    api<{ creados: number; omitidos: number; items: SujetoCreado[] }>(
+      "/equipos/bulk",
+      { body: items }
+    ),
 
   /** Solo campos de equipo: los de personal se ignorarían en silencio. */
   editar: (id: string, cambios: EquipoPatch) =>
@@ -662,6 +674,13 @@ export const ia = {
   extraerCarpetaArranque: (blob_path: string, filename: string, contrato_id: string) =>
     api<JobEncolado>("/ia/extraer-carpeta-arranque",
       { body: { blob_path, filename, contrato_id } }),
+
+  extraerListado: (body: {
+    tipo: "personal" | "equipo" | "requisitos";
+    texto?: string;
+    file_b64?: string;
+    file_name?: string;
+  }) => api<{ items: any[]; total: number }>("/ia/extraer-listado", { body }),
 };
 
 // ============================================================================

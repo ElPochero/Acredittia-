@@ -613,9 +613,9 @@ export type TrabajadorPatch = {
 };
 
 export type EquipoIn = {
-  contrato_id: string;
+  contrato_id?: string | null;
   patente: string;
-  tipo_equipo: string;
+  tipo_equipo?: string;
   marca?: string | null;
   modelo?: string | null;
   anio?: number | null;

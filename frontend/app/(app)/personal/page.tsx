@@ -5,6 +5,7 @@ import Link from "next/link";
 import * as Api from "@/lib/platform/cliente";
 import type { Sujeto } from "@/lib/platform/tipos";
 import { ExportarDocumentosModal } from "@/components/platform/ExportarDocumentosModal";
+import { AgregarSujetosModal } from "@/components/platform/AgregarSujetosModal";
 import { normalizarRut, validarRut } from "@/lib/platform/rut";
 
 export default function PersonasPage() {
@@ -15,6 +16,7 @@ export default function PersonasPage() {
   const [filtroEstado, setFiltroEstado] = useState("");
   
   // Modals state
+  const [showAgregarModal, setShowAgregarModal] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -53,15 +55,7 @@ export default function PersonasPage() {
   }
 
   const handleOpenNuevo = () => {
-    setIsEditing(false);
-    setEditingId(null);
-    setNombre("");
-    setRut("");
-    setCargo("");
-    setEstado("proc"); // Pendiente por defecto
-    setErrorRut(null);
-    setErrorForm(null);
-    setShowModal(true);
+    setShowAgregarModal(true);
   };
 
   const handleOpenEditar = (p: Sujeto) => {
@@ -423,6 +417,13 @@ export default function PersonasPage() {
       <ExportarDocumentosModal
         abierto={exportando}
         onCerrar={() => setExportando(false)}
+      />
+
+      <AgregarSujetosModal
+        cat="personal"
+        abierto={showAgregarModal}
+        onCerrar={() => setShowAgregarModal(false)}
+        onGuardado={fetchPersonal}
       />
     </div>
   );

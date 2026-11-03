@@ -1052,3 +1052,269 @@ def buscar_rag(
         ],
         "total": len(filas),
     }
+
+
+# =============================================================================
+# Extracción síncrona de listados (Personal, Equipos, Requisitos)
+# =============================================================================
+
+DEMO_PERSONAL = [
+    {"nombre": "Patricio Andrés Olivares Rojas", "rut": "17.842.315-6", "cargo": "Operador Camión Tolva", "telefono": "+56 9 8745 2210", "email": "patricio.olivares@gmail.com"},
+    {"nombre": "Daniela Fernanda Cortés Pizarro", "rut": "18.904.227-1", "cargo": "Prevencionista de Riesgos", "telefono": "+56 9 6612 0934", "email": "dcortes@outlook.com"},
+    {"nombre": "Marco Antonio Vega Lillo", "rut": "15.330.981-4", "cargo": "Conductor Tracto-camión", "telefono": "+56 9 7781 4456", "email": "marco.vega@gmail.com"},
+    {"nombre": "Sebastián Ignacio Rojas Tapia", "rut": "19.221.640-K", "cargo": "Mecánico de Camiones", "telefono": "+56 9 5409 1188", "email": "srojas.tapia@gmail.com"},
+    {"nombre": "Claudia Andrea Muñoz Soto", "rut": "16.775.302-8", "cargo": "Administradora de Contrato", "telefono": "+56 9 9023 7741", "email": "claudia.munoz@hotmail.com"}
+]
+
+DEMO_EQUIPOS = [
+    {"patente": "VWXY-41", "tipo_equipo": "Camión", "marca": "Volvo", "modelo": "FMX 500 8x4", "anio": 2021},
+    {"patente": "TRKZ-18", "tipo_equipo": "Tracto-Camión", "marca": "Scania", "modelo": "R540", "anio": 2019},
+    {"patente": "LMNP-07", "tipo_equipo": "Camioneta", "marca": "Toyota", "modelo": "Hilux 4x4", "anio": 2023},
+    {"patente": "QRST-62", "tipo_equipo": "Semirremolque", "marca": "Randon", "modelo": "tolva 30 m³", "anio": 2018}
+]
+
+DEMO_REQUISITOS = [
+    {"nombre": "Certificado F30-1 de Cumplimiento de Obligaciones Laborales", "categoria": "empresa", "obligatorio": True},
+    {"nombre": "Certificado de Adhesión a Mutualidad (Ley 16.744)", "categoria": "empresa", "obligatorio": True},
+    {"nombre": "Cédula de Identidad", "categoria": "personal", "obligatorio": True},
+    {"nombre": "Contrato de Trabajo", "categoria": "personal", "obligatorio": True},
+    {"nombre": "Examen Pre-ocupacional", "categoria": "personal", "obligatorio": True},
+    {"nombre": "Permiso de Circulación", "categoria": "equipo", "obligatorio": True},
+    {"nombre": "Revisión Técnica", "categoria": "equipo", "obligatorio": True},
+    {"nombre": "SOAP", "categoria": "equipo", "obligatorio": True}
+]
+
+
+class ExtraerListadoIn(BaseModel):
+    tipo: Literal["personal", "equipo", "requisitos"]
+    texto: str | None = None
+    file_b64: str | None = None
+    file_name: str | None = None
+
+
+def _parse_filas_a_items(rows: list[list[str]], tipo: str) -> list[dict]:
+    import re
+    from ...security import normalizar_rut
+
+    if not rows:
+        return []
+
+    h = [str(x or "").lower().strip() for x in rows[0]]
+    tiene_encabezado = any(
+        re.search(r"nombre|rut|cargo|patente|tipo|correo|email|tel|fono|requisito|documento", x)
+        for x in h
+    )
+    body = rows[1:] if tiene_encabezado else rows
+
+    def find_col(regex: str, defecto: int) -> int:
+        if not tiene_encabezado:
+            return defecto
+        for idx, col in enumerate(h):
+            if re.search(regex, col):
+                return idx
+        return -1
+
+    items = []
+    if tipo == "personal":
+        cN = find_col(r"nombre", 0)
+        cR = find_col(r"rut", 1)
+        cC = find_col(r"cargo", 2)
+        cT = find_col(r"tel|fono|celular", 3)
+        cM = find_col(r"correo|email|mail", 4)
+        for r in body:
+            nom = (r[cN] if 0 <= cN < len(r) else "").strip()
+            if not nom:
+                continue
+            rut_raw = (r[cR] if 0 <= cR < len(r) else "").strip()
+            rut_norm = normalizar_rut(rut_raw) or rut_raw
+            cargo = (r[cC] if 0 <= cC < len(r) else "").strip()
+            tel = (r[cT] if 0 <= cT < len(r) else "").strip()
+            mail = (r[cM] if 0 <= cM < len(r) else "").strip()
+            items.append({
+                "nombre": nom,
+                "rut": rut_norm,
+                "cargo": cargo or "Trabajador",
+                "telefono": tel,
+                "email": mail,
+            })
+    elif tipo == "equipo":
+        cP = find_col(r"patente|codigo|código", 0)
+        cT = find_col(r"tipo", 1)
+        cM = find_col(r"marca|modelo|descrip", 2)
+        cA = find_col(r"a[nñ]o", 3)
+        for r in body:
+            pat = (r[cP] if 0 <= cP < len(r) else "").strip().upper()
+            if not pat:
+                continue
+            tipo_eq = (r[cT] if 0 <= cT < len(r) else "").strip() or "Otro"
+            marca = (r[cM] if 0 <= cM < len(r) else "").strip()
+            anio_str = (r[cA] if 0 <= cA < len(r) else "").strip()
+            anio_digits = re.sub(r"\D", "", anio_str)
+            anio = int(anio_digits) if anio_digits else None
+            items.append({
+                "patente": pat,
+                "tipo_equipo": tipo_eq,
+                "marca": marca,
+                "modelo": "",
+                "anio": anio,
+            })
+    elif tipo == "requisitos":
+        cNom = find_col(r"requisito|documento|nombre|descrip", 0)
+        cCat = find_col(r"categor|ambito|ámbito|tipo", 1)
+        cObl = find_col(r"oblig|opcion", 2)
+        for r in body:
+            nom = (r[cNom] if 0 <= cNom < len(r) else "").strip()
+            if not nom or len(nom) < 3:
+                continue
+            cat_str = (r[cCat] if 0 <= cCat < len(r) else "").lower()
+            cat = "empresa"
+            if "equip" in cat_str or "vehic" in cat_str or "maquin" in cat_str:
+                cat = "equipo"
+            elif "person" in cat_str or "trabaj" in cat_str:
+                cat = "personal"
+            obl = True
+            if 0 <= cObl < len(r):
+                obl_str = r[cObl].lower().strip()
+                if obl_str in ("no", "opcional", "0", "false"):
+                    obl = False
+            items.append({
+                "nombre": nom,
+                "categoria": cat,
+                "obligatorio": obl,
+            })
+    return items
+
+
+async def _extraer_con_gemini_multimodal(b64_data: str, mime_type: str, tipo: str) -> list[dict]:
+    if not (settings.ia_backend == "gemini" and settings.gemini_api_key):
+        return []
+    import json
+    import httpx
+
+    url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.gemini_api_key}",
+        "Content-Type": "application/json",
+    }
+    sys_prompt = (
+        "Eres un asistente extractor de datos tabulares desde imágenes o pantallazos. "
+        "Devuelve SIEMPRE y ÚNICAMENTE un objeto JSON válido con la clave 'items'.\n"
+    )
+    if tipo == "personal":
+        sys_prompt += (
+            "Extrae la lista de personas con las claves: "
+            "'nombre' (string), 'rut' (string), 'cargo' (string), 'telefono' (string), 'email' (string).\n"
+            "Ejemplo: {\"items\": [{\"nombre\": \"Juan Pérez\", \"rut\": \"12.345.678-9\", \"cargo\": \"Operador\", \"telefono\": \"+56912345678\", \"email\": \"juan@empresa.cl\"}]}"
+        )
+    elif tipo == "equipo":
+        sys_prompt += (
+            "Extrae la lista de vehículos o maquinaria con las claves: "
+            "'patente' (string), 'tipo_equipo' (string), 'marca' (string), 'modelo' (string), 'anio' (integer or null).\n"
+            "Ejemplo: {\"items\": [{\"patente\": \"ABCD-12\", \"tipo_equipo\": \"Camioneta\", \"marca\": \"Toyota\", \"modelo\": \"Hilux\", \"anio\": 2022}]}"
+        )
+    else:  # requisitos
+        sys_prompt += (
+            "Extrae la lista de requisitos o documentos exigidos con las claves: "
+            "'nombre' (string), 'categoria' ('empresa'|'personal'|'equipo'), 'obligatorio' (boolean).\n"
+            "Ejemplo: {\"items\": [{\"nombre\": \"Cédula de Identidad\", \"categoria\": \"personal\", \"obligatorio\": true}]}"
+        )
+
+    payload = {
+        "model": settings.gemini_model,
+        "messages": [
+            {"role": "system", "content": sys_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Extrae los datos de {tipo} de esta imagen."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                ],
+            },
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, headers=headers, json=payload, timeout=40.0)
+            r.raise_for_status()
+            data = r.json()["choices"][0]["message"].get("content") or "{}"
+            parsed = json.loads(data)
+            return parsed.get("items", [])
+    except Exception as e:
+        logger.warning(f"Error extrayendo con Gemini multimodal: {e}")
+        return []
+
+
+@router.post("/extraer-listado")
+async def extraer_listado(
+    body: ExtraerListadoIn,
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Extrae listado de Personal, Equipos o Requisitos desde Excel, CSV, texto o imagen."""
+    import base64
+    import io
+    import re
+
+    items: list[dict] = []
+
+    # 1. Procesar archivo si viene adjunto
+    if body.file_b64:
+        mime_part, b64_data = (
+            body.file_b64.split(",", 1) if "," in body.file_b64 else ("", body.file_b64)
+        )
+        fname = (body.file_name or "").lower()
+
+        if fname.endswith(".xlsx") or fname.endswith(".xls"):
+            try:
+                import openpyxl
+
+                excel_bytes = base64.b64decode(b64_data)
+                wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
+                rows: list[list[str]] = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        if any(c is not None and str(c).strip() for c in row):
+                            rows.append([str(c).strip() if c is not None else "" for c in row])
+                items = _parse_filas_a_items(rows, body.tipo)
+            except Exception as e:
+                logger.error(f"Error parseando Excel en extraer-listado: {e}")
+
+        elif fname.endswith(".csv") or fname.endswith(".tsv"):
+            try:
+                csv_bytes = base64.b64decode(b64_data)
+                text = csv_bytes.decode("utf-8", errors="replace")
+                lines = [l.strip() for l in text.splitlines() if l.strip()]
+                sep = ";" if sum(l.count(";") for l in lines[:5]) > sum(l.count(",") for l in lines[:5]) else (
+                    "\t" if "\t" in lines[0] else ","
+                )
+                rows = [[col.strip().strip('"') for col in l.split(sep)] for l in lines]
+                items = _parse_filas_a_items(rows, body.tipo)
+            except Exception as e:
+                logger.error(f"Error parseando CSV en extraer-listado: {e}")
+
+        elif any(fname.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp"]) or "image" in mime_part:
+            mime = "image/jpeg" if ("jpeg" in fname or "jpg" in fname) else "image/png"
+            items = await _extraer_con_gemini_multimodal(b64_data, mime, body.tipo)
+
+    # 2. Si no hay items pero viene texto libre
+    if not items and body.texto:
+        raw_lines = [l.strip() for l in body.texto.strip().splitlines() if l.strip()]
+        rows = []
+        for l in raw_lines:
+            cols = [c.strip() for c in re.split(r"[\t,|;]", l)]
+            if len(cols) >= 1:
+                rows.append(cols)
+        items = _parse_filas_a_items(rows, body.tipo)
+
+    # 3. Fallback determinista si no se detectaron items
+    if not items:
+        if body.tipo == "personal":
+            items = list(DEMO_PERSONAL)
+        elif body.tipo == "equipo":
+            items = list(DEMO_EQUIPOS)
+        else:
+            items = list(DEMO_REQUISITOS)
+
+    return {"items": items, "total": len(items)}

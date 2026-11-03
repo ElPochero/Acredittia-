@@ -526,3 +526,47 @@ def test_filtros_del_listado_de_personal(app_cliente, empresa_a, contrato_a,
     assert [i["nombre"] for i in r.json()["items"]] == ["Ana Díaz", "Juan Soto"]
     r = app_cliente.get(f"{API}/personal?sort=-nombre", headers=h)
     assert [i["nombre"] for i in r.json()["items"]] == ["Juan Soto", "Ana Díaz"]
+
+
+
+# ============================================================================
+# Carga masiva y serialización sin contrato (Día 3 - Req 8)
+# ============================================================================
+def test_sujeto_sin_contrato_no_falla_serializador(app_cliente, empresa_a):
+    r = app_cliente.post(f"{API}/personal", headers=empresa_a["headers"], json={
+        "contrato_id": None, "nombre": "Pedro Sin Contrato",
+        "rut": rut_valido(85), "cargo": "Jornal"})
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["contrato"] is None
+    assert data["nombre"] == "Pedro Sin Contrato"
+
+
+def test_personal_bulk_crea_y_omite_duplicados(app_cliente, empresa_a, contrato_a):
+    r1 = rut_valido(86)
+    r2 = rut_valido(87)
+    payload = [
+        {"contrato_id": contrato_a["id"], "nombre": "Bulk Uno", "rut": r1, "cargo": "Operador"},
+        {"contrato_id": contrato_a["id"], "nombre": "Bulk Dos", "rut": r2, "cargo": "Mecánico"},
+        {"contrato_id": contrato_a["id"], "nombre": "Bulk Uno Repetido", "rut": r1, "cargo": "Operador"},
+        {"contrato_id": contrato_a["id"], "nombre": "Bulk Invalido", "rut": "123-K", "cargo": "Ayudante"},
+    ]
+    r = app_cliente.post(f"{API}/personal/bulk", headers=empresa_a["headers"], json=payload)
+    assert r.status_code == 201, r.text
+    res = r.json()
+    assert res["creados"] == 2
+    assert res["omitidos"] == 2
+    nombres_creados = {it["nombre"] for it in res["items"]}
+    assert "Bulk Uno" in nombres_creados
+    assert "Bulk Dos" in nombres_creados
+
+
+def test_extraer_listado_ia_personal(app_cliente, empresa_a):
+    texto = "Carlos Silva\t18.904.227-1\tPrevencionista\t+56911112222\tcarlos@empresa.cl"
+    r = app_cliente.post(f"{API}/ia/extraer-listado", headers=empresa_a["headers"], json={
+        "tipo": "personal", "texto": texto})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["nombre"] == "Carlos Silva"
+    assert "18.904.227-1" in items[0]["rut"]
