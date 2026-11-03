@@ -77,9 +77,9 @@ class TrabajadorIn(BaseModel):
 
 
 class EquipoIn(BaseModel):
-    contrato_id: uuid.UUID
+    contrato_id: uuid.UUID | None = None
     patente: str
-    tipo_equipo: str
+    tipo_equipo: str | None = None
     marca: str | None = None
     modelo: str | None = None
     anio: int | None = None
@@ -561,19 +561,32 @@ def crear_equipo(body: EquipoIn, db: Session = Depends(get_db),
                  cid: uuid.UUID = Depends(get_company_id),
                  user: User = Depends(get_current_user)):
     """Da de alta un equipo o vehículo e instancia su checklist."""
-    c = _validar_contrato(db, cid, body.contrato_id, user)
-    if body.tipo_equipo not in TIPOS_EQUIPO:
+    c = None
+    if body.contrato_id:
+        c = _validar_contrato(db, cid, body.contrato_id, user)
+    tipo_equipo = body.tipo_equipo
+    if not tipo_equipo:
+        tipo_equipo = "Otro"
+    elif tipo_equipo not in TIPOS_EQUIPO:
         raise err(422, "TIPO_INVALIDO", "Tipo de equipo no reconocido")
     patente = body.patente.strip().upper()
-    if db.scalar(select(Sujeto.id).where(
-            Sujeto.company_id == cid, Sujeto.contrato_id == c.id,
-            Sujeto.patente == patente, Sujeto.tipo == "equipo",
-            Sujeto.estado != "baja")):
+    query = select(Sujeto.id).where(
+        Sujeto.company_id == cid,
+        Sujeto.patente == patente,
+        Sujeto.tipo == "equipo",
+        Sujeto.estado != "baja",
+    )
+    if c:
+        query = query.where(Sujeto.contrato_id == c.id)
+    else:
+        query = query.where(Sujeto.contrato_id == None)
+
+    if db.scalar(query):
         raise err(409, "PATENTE_DUPLICADA",
-                  "El equipo ya está activo en este contrato")
-    s = Sujeto(company_id=cid, contrato_id=c.id, tipo="equipo",
+                  "El equipo ya está activo con esa patente")
+    s = Sujeto(company_id=cid, contrato_id=c.id if c else None, tipo="equipo",
                nombre=f"{body.marca or ''} {body.modelo or ''}".strip() or patente,
-               patente=patente, tipo_equipo=body.tipo_equipo,
+               patente=patente, tipo_equipo=tipo_equipo,
                marca=body.marca, modelo=body.modelo, anio=body.anio)
     db.add(s)
     try:
@@ -582,15 +595,115 @@ def crear_equipo(body: EquipoIn, db: Session = Depends(get_db),
         db.rollback()
         raise err(409, "PATENTE_DUPLICADA", "El equipo ya existe en este contrato")
 
-    n = instanciar_docs(db, cid, "equipo", sujeto_id=s.id, faena_id=c.faena_id,
-                        contrato_plantilla_id=c.id)
+    n = 0
+    if c:
+        n = instanciar_docs(db, cid, "equipo", sujeto_id=s.id, faena_id=c.faena_id,
+                            contrato_plantilla_id=c.id)
     actividad.log(db, cid, "creacion", "equipos",
-                  f"Equipo {patente} ({body.tipo_equipo}) agregado a '{c.nombre}'",
+                  f"Equipo {patente} ({tipo_equipo}) agregado" + (f" a '{c.nombre}'" if c else ""),
                   user_id=user.id, entidad_tipo="sujeto", entidad_id=s.id)
     db.commit()
     out = _out(db, s)
     out["documentos_creados"] = n
     return out
+
+
+@router.post("/equipos/bulk", status_code=201)
+def crear_equipos_bulk(body: list[EquipoIn], db: Session = Depends(get_db),
+                       cid: uuid.UUID = Depends(get_company_id),
+                       user: User = Depends(get_current_user)):
+    """Alta masiva de equipos."""
+    contratos_cache: dict[uuid.UUID, Contrato] = {}
+    creados = []
+    omitidos = []
+    patentes_vistas = set()
+
+    for item in body:
+        patente = (item.patente or "").strip().upper()
+        if not patente:
+            omitidos.append({"item": item.model_dump(), "motivo": "PATENTE_REQUERIDA"})
+            continue
+
+        tipo_equipo = item.tipo_equipo
+        if not tipo_equipo:
+            tipo_equipo = "Otro"
+        elif tipo_equipo not in TIPOS_EQUIPO:
+            omitidos.append({"item": item.model_dump(), "motivo": "TIPO_INVALIDO"})
+            continue
+
+        c = None
+        if item.contrato_id:
+            if item.contrato_id not in contratos_cache:
+                try:
+                    contratos_cache[item.contrato_id] = _validar_contrato(
+                        db, cid, item.contrato_id, user
+                    )
+                except Exception:
+                    omitidos.append({"item": item.model_dump(), "motivo": "CONTRATO_INVALIDO"})
+                    continue
+            c = contratos_cache[item.contrato_id]
+
+        clave_lote = (patente, c.id if c else None)
+        if clave_lote in patentes_vistas:
+            omitidos.append({"item": item.model_dump(), "motivo": "DUPLICADO_EN_LOTE"})
+            continue
+
+        q = select(Sujeto.id).where(
+            Sujeto.company_id == cid,
+            Sujeto.patente == patente,
+            Sujeto.tipo == "equipo",
+            Sujeto.estado != "baja",
+        )
+        if c:
+            q = q.where(Sujeto.contrato_id == c.id)
+        else:
+            q = q.where(Sujeto.contrato_id == None)
+
+        if db.scalar(q):
+            omitidos.append({"item": item.model_dump(), "motivo": "PATENTE_DUPLICADA"})
+            continue
+
+        patentes_vistas.add(clave_lote)
+
+        s = Sujeto(
+            company_id=cid,
+            contrato_id=c.id if c else None,
+            tipo="equipo",
+            nombre=f"{item.marca or ''} {item.modelo or ''}".strip() or patente,
+            patente=patente,
+            tipo_equipo=tipo_equipo,
+            marca=item.marca,
+            modelo=item.modelo,
+            anio=item.anio,
+        )
+        db.add(s)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            omitidos.append({"item": item.model_dump(), "motivo": "ERROR_INTEGRIDAD"})
+            continue
+
+        if c:
+            instanciar_docs(
+                db, cid, "equipo", sujeto_id=s.id, faena_id=c.faena_id,
+                contrato_plantilla_id=c.id,
+            )
+
+        actividad.log(
+            db, cid, "creacion", "equipos",
+            f"Equipo {patente} ({tipo_equipo}) agregado masivamente" + (f" a '{c.nombre}'" if c else ""),
+            user_id=user.id, entidad_tipo="sujeto", entidad_id=s.id,
+        )
+        creados.append(s)
+
+    db.commit()
+    return {
+        "creados": len(creados),
+        "omitidos": len(omitidos),
+        "items": [_out(db, s) for s in creados],
+        "detalle_omitidos": omitidos,
+    }
 
 
 @router.get("/equipos/{sid}")

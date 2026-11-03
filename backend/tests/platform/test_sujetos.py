@@ -570,3 +570,58 @@ def test_extraer_listado_ia_personal(app_cliente, empresa_a):
     assert len(items) >= 1
     assert items[0]["nombre"] == "Carlos Silva"
     assert "18.904.227-1" in items[0]["rut"]
+
+
+
+# ============================================================================
+# Carga masiva y solo patente en Equipos (Día 3 - Req 9)
+# ============================================================================
+def test_alta_equipo_solo_patente_normaliza_tipo_otro(app_cliente, empresa_a, contrato_a):
+    pat = patente_valida(31)
+    r = app_cliente.post(f"{API}/equipos", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"],
+        "patente": pat,
+    })
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["patente"] == pat
+    assert data["tipo_equipo"] == "Otro"
+
+
+def test_alta_equipo_tipo_invalido_devuelve_422(app_cliente, empresa_a, contrato_a):
+    r = app_cliente.post(f"{API}/equipos", headers=empresa_a["headers"], json={
+        "contrato_id": contrato_a["id"],
+        "patente": patente_valida(32),
+        "tipo_equipo": "TipoInventadoInvalido",
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_equipos_bulk_crea_y_omite_duplicados(app_cliente, empresa_a, contrato_a):
+    p1 = patente_valida(33)
+    p2 = patente_valida(34)
+    payload = [
+        {"contrato_id": contrato_a["id"], "patente": p1, "marca": "Volvo"},
+        {"contrato_id": contrato_a["id"], "patente": p2, "tipo_equipo": "Camioneta", "marca": "Toyota"},
+        {"contrato_id": contrato_a["id"], "patente": p1, "marca": "Volvo Repetido"},
+        {"contrato_id": contrato_a["id"], "patente": "", "marca": "Sin Patente"},
+    ]
+    r = app_cliente.post(f"{API}/equipos/bulk", headers=empresa_a["headers"], json=payload)
+    assert r.status_code == 201, r.text
+    res = r.json()
+    assert res["creados"] == 2
+    assert res["omitidos"] == 2
+    patentes_creadas = {it["patente"] for it in res["items"]}
+    assert p1 in patentes_creadas
+    assert p2 in patentes_creadas
+
+
+def test_extraer_listado_ia_equipos(app_cliente, empresa_a):
+    texto = "VWXY-41\tCamión\tVolvo\tFMX 500\t2021"
+    r = app_cliente.post(f"{API}/ia/extraer-listado", headers=empresa_a["headers"], json={
+        "tipo": "equipo", "texto": texto})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["patente"] == "VWXY-41"
+    assert items[0]["tipo_equipo"] == "Camión"
