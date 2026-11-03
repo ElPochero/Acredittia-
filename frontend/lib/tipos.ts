@@ -1240,6 +1240,9 @@ export type PeriodoDocumento = {
   cargado_por?: string | null;
   observaciones?: string | null;
   version?: number;
+  abierto_por_adc?: boolean;
+  revisado_por?: string | null;
+  fecha_revision?: string | null;
 };
 
 export type AuditoriaDocumento = {
@@ -1342,4 +1345,53 @@ export type NominaPeriodoRespuesta = {
     incorporaciones: TrabajadorNominaItem[];
     bajas: TrabajadorNominaItem[];
   };
+};
+
+export type PeriodoDocumentoVersionItem = {
+  id: string;
+  version: number;
+  archivo_url?: string | null;
+  cargado_por?: string | null;
+  subido_por_nombre?: string | null;
+  fecha_carga?: string | null;
+  estado: EstadoPeriodoDoc;
+  observaciones?: string | null;
+  revisado_por?: string | null;
+  revisado_por_nombre?: string | null;
+  fecha_revision?: string | null;
+  abierto_por_adc?: boolean;
+};
+
+export type MisPendientesDocumentoItem = {
+  documento_id: string;
+  periodo_id: string;
+  periodo_nombre: string;
+  contrato_id: string;
+  contrato_nombre: string;
+  requisito_nombre: string;
+  ambito: string;
+  sujeto_nombre: string;
+  estado: EstadoPeriodoDoc;
+  observaciones?: string | null;
+  version?: number;
+  fecha_revision?: string | null;
+  fecha_limite?: string | null;
+};
+
+export type MisPendientesPeriodoItem = {
+  periodo_id: string;
+  periodo_nombre: string;
+  contrato_id: string;
+  contrato_nombre: string;
+  fecha_limite?: string | null;
+  dias_restantes: number;
+  estado: EstadoPeriodo;
+  porcentaje_cumplimiento: number;
+};
+
+export type MisPendientesRrhhRespuesta = {
+  observados_rechazados: MisPendientesDocumentoItem[];
+  pendientes_carga: MisPendientesDocumentoItem[];
+  periodos_proximos: MisPendientesPeriodoItem[];
+  total_pendientes: number;
 };

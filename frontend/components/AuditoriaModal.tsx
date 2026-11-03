@@ -1,23 +1,28 @@
 "use client";
-import React, { useState } from "react";
-import type { PeriodoDocumento, AuditoriaDocumento } from "@/lib/tipos";
+
+import React, { useState, useEffect } from "react";
+import type { PeriodoDocumento, AuditoriaDocumento, PeriodoDocumentoVersionItem } from "@/lib/tipos";
 import { Modal, Chip } from "@/components/ui";
+import * as Api from "@/lib/cliente";
 
 interface AuditoriaModalProps {
   abierto: boolean;
   onCerrar: () => void;
+  periodoId?: string;
   doc?: PeriodoDocumento | null;
   sujetoNombre?: string;
   sujetoRut?: string;
   requisitoNombre?: string;
   onSubirDocumento?: (file: File) => Promise<void>;
-  onAuditar?: (accion: "aprobar" | "observar" | "rechazar", observacion?: string) => Promise<void>;
+  onAuditar?: (accion: "aprobar" | "observar" | "rechazar" | "no_aplica", observacion?: string) => Promise<void>;
   historial?: AuditoriaDocumento[];
+  periodoCerrado?: boolean;
 }
 
 export default function AuditoriaModal({
   abierto,
   onCerrar,
+  periodoId,
   doc,
   sujetoNombre,
   sujetoRut,
@@ -25,18 +30,67 @@ export default function AuditoriaModal({
   onSubirDocumento,
   onAuditar,
   historial = [],
+  periodoCerrado = false,
 }: AuditoriaModalProps) {
   const [observacion, setObservacion] = useState("");
+  const [accionSeleccionada, setAccionSeleccionada] = useState<"observar" | "rechazar" | null>(null);
   const [cargando, setCargando] = useState(false);
   const [archivoSeleccionado, setArchivoSeleccionado] = useState<File | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [versiones, setVersiones] = useState<PeriodoDocumentoVersionItem[]>([]);
+  const [cargandoVersiones, setCargandoVersiones] = useState(false);
+  const [acordeonVersionesAbierto, setAcordeonVersionesAbierto] = useState(true);
+
+  const nombreTrabajador = doc?.sujeto_nombre || sujetoNombre || "Documento General";
+  const rutTrabajador = doc?.sujeto_rut || sujetoRut || "";
+  const nombreDoc = doc?.requisito_nombre || requisitoNombre || "Requisito Laboral";
+  const estadoActual = doc?.estado || "pendiente";
+
+  // Cargar historial de versiones reales
+  useEffect(() => {
+    if (!abierto || !doc?.id || !periodoId) {
+      setVersiones([]);
+      setAccionSeleccionada(null);
+      setObservacion("");
+      setErrorMsg(null);
+      return;
+    }
+
+    let cancelado = false;
+    setCargandoVersiones(true);
+
+    Api.certificacion
+      .listarVersiones(periodoId, doc.id)
+      .then((res) => {
+        if (!cancelado) {
+          setVersiones(res || []);
+        }
+      })
+      .catch((err) => {
+        console.error("Error al cargar versiones del documento:", err);
+      })
+      .finally(() => {
+        if (!cancelado) setCargandoVersiones(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [abierto, doc?.id, periodoId]);
 
   if (!abierto) return null;
 
-  const nombreTrabajador = doc?.sujeto_nombre || sujetoNombre || "Trabajador";
-  const rutTrabajador = doc?.sujeto_rut || sujetoRut || "";
-  const nombreDoc = doc?.requisito_nombre || requisitoNombre || "Documento Requerido";
-  const estadoActual = doc?.estado || "pendiente";
+  const handleVerArchivo = async () => {
+    if (!doc?.archivo_url) return;
+    if (periodoId && doc.id) {
+      try {
+        await Api.certificacion.marcarDocumentoVisto(periodoId, doc.id);
+      } catch (err) {
+        console.warn("No se pudo marcar como visto por ADC:", err);
+      }
+    }
+    window.open(doc.archivo_url, "_blank");
+  };
 
   const handleSubir = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +100,8 @@ export default function AuditoriaModal({
     try {
       await onSubirDocumento(archivoSeleccionado);
       setArchivoSeleccionado(null);
-      alert("Documento subido correctamente.");
+      alert("Documento subido correctamente. Ha quedado en estado 'En revisión'.");
+      onCerrar();
     } catch (err: any) {
       setErrorMsg(err?.message || "Error al subir documento");
     } finally {
@@ -54,11 +109,13 @@ export default function AuditoriaModal({
     }
   };
 
-  const handleAccionAuditoria = async (accion: "aprobar" | "observar" | "rechazar") => {
+  const handleEjecutarAccion = async (accion: "aprobar" | "observar" | "rechazar" | "no_aplica") => {
     if ((accion === "observar" || accion === "rechazar") && !observacion.trim()) {
-      setErrorMsg(`Para ${accion === "observar" ? "observar" : "rechazar"}, debes ingresar el motivo en la observación.`);
+      setAccionSeleccionada(accion);
+      setErrorMsg(`El comentario es obligatorio para ${accion} el documento. Se notificará a RR.HH.`);
       return;
     }
+
     setErrorMsg(null);
     setCargando(true);
     try {
@@ -66,6 +123,7 @@ export default function AuditoriaModal({
         await onAuditar(accion, observacion.trim());
       }
       setObservacion("");
+      setAccionSeleccionada(null);
       onCerrar();
     } catch (err: any) {
       setErrorMsg(err?.message || "Error al auditar documento");
@@ -77,37 +135,65 @@ export default function AuditoriaModal({
   return (
     <Modal
       abierto={abierto}
-      titulo="Revisión & Auditoría de Documento"
+      titulo="Revisión & Auditoría de Documento (ADC)"
       onCerrar={onCerrar}
-      ancho="max-w-2xl"
+      ancho="max-w-3xl"
     >
-      <div className="space-y-6">
-        {/* Document & Worker Context Card */}
+      <div className="space-y-6 text-slate-800">
+        {/* Banner de Período Cerrado */}
+        {periodoCerrado && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900 flex items-center gap-2">
+            <span>🔒</span>
+            <span>
+              Este período se encuentra <strong>cerrado</strong> formalmente. La auditoría y los archivos son inmutables.
+            </span>
+          </div>
+        )}
+
+        {/* Ficha del Documento */}
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-700">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
                 {nombreDoc}
               </span>
               <h4 className="text-base font-bold text-slate-900">{nombreTrabajador}</h4>
               {rutTrabajador && <p className="text-xs font-mono text-slate-500">RUT: {rutTrabajador}</p>}
             </div>
-            <Chip estado={estadoActual} />
+            <div className="flex flex-col items-end gap-1">
+              <Chip estado={estadoActual} texto={estadoActual} />
+              <span className="text-[11px] font-mono text-slate-500">
+                Versión: v{doc?.version || 1}
+              </span>
+            </div>
           </div>
 
-          {doc?.archivo_url && (
-            <div className="mt-3 flex items-center justify-between border-t border-slate-200/60 pt-2 text-xs">
-              <span className="font-medium text-slate-600">
-                📎 Archivo cargado (v{doc.version || 1})
-              </span>
-              <a
-                href={doc.archivo_url}
-                target="_blank"
-                rel="noreferrer"
-                className="font-bold text-cyan-600 hover:underline"
+          {doc?.observaciones && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/80 p-2.5 text-xs text-amber-900">
+              <span className="font-bold">📝 Última observación ADC: </span>
+              <span>{doc.observaciones}</span>
+            </div>
+          )}
+
+          {doc?.archivo_url ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60 pt-3 text-xs">
+              <div className="flex items-center gap-2 font-medium text-slate-600">
+                <span>📎 Archivo entregado:</span>
+                <span className="font-semibold text-slate-800">
+                  v{doc.version || 1} {doc.abierto_por_adc ? "• 👁 Visto por ADC" : "• ⏳ No abierto"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleVerArchivo}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
               >
-                Ver / Descargar PDF ↗
-              </a>
+                <span>👁 Ver / Descargar archivo</span>
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 border-t border-slate-200/60 pt-3 text-xs italic text-slate-400">
+              No hay archivo subido para este requisito en la versión actual.
             </div>
           )}
         </div>
@@ -118,105 +204,219 @@ export default function AuditoriaModal({
           </div>
         )}
 
-        {/* Section 1: Upload / Replace Document */}
-        <div className="rounded-xl border border-slate-200 p-4">
-          <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">
-            📤 Subir o Reemplazar Documento
-          </h5>
-          <form onSubmit={handleSubir} className="space-y-3">
-            <input
-              type="file"
-              accept=".pdf,.png,.jpg,.jpeg"
-              onChange={(e) => setArchivoSeleccionado(e.target.files?.[0] || null)}
-              className="w-full rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-700 hover:file:bg-slate-200"
-            />
-            {archivoSeleccionado && (
+        {/* Sección: Evaluación del Auditor ADC */}
+        {!periodoCerrado && (
+          <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-white">
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <span>🔍</span> Dictamen de Revisión ADC (CA 11)
+              </h5>
+              <span className="text-[11px] text-slate-500">
+                RR.HH. y ADC ven el estado actualizado en tiempo real
+              </span>
+            </div>
+
+            {/* Modal/Caja de comentario obligatorio (#cl-obs) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Comentario u Observación para RR.HH. {accionSeleccionada ? `(Obligatorio para ${accionSeleccionada})` : "(Opcional para aprobar)"}:
+              </label>
+              <textarea
+                id="cl-obs"
+                rows={3}
+                placeholder="Escriba las observaciones detalladas que el Encargado de RR.HH. debe corregir en su entrega..."
+                value={observacion}
+                onChange={(e) => setObservacion(e.target.value)}
+                className={`w-full rounded-xl border p-3 text-xs text-slate-800 placeholder-slate-400 transition focus:outline-none focus:ring-1 ${
+                  accionSeleccionada && !observacion.trim()
+                    ? "border-amber-400 bg-amber-50/30 focus:ring-amber-500"
+                    : "border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                }`}
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                ℹ️ Al observar o rechazar, el Encargado de RR.HH. recibirá una notificación y verá el comentario en su bandeja <strong>Mis pendientes</strong>.
+              </p>
+            </div>
+
+            {/* Botones de Dictamen */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
               <button
-                type="submit"
+                type="button"
+                onClick={() => handleEjecutarAccion("aprobar")}
                 disabled={cargando}
-                className="w-full rounded-xl bg-cyan-600 p-2.5 text-xs font-bold text-white transition hover:bg-cyan-700 disabled:opacity-50"
+                className="cl-b ok w-full py-2.5 text-xs font-bold rounded-xl transition shadow-sm disabled:opacity-50"
               >
-                {cargando ? "Subiendo..." : "Confirmar Carga de Documento"}
+                ✓ Aprobar
               </button>
-            )}
-          </form>
-        </div>
-
-        {/* Section 2: Audit Controls (Auditor Actions) */}
-        <div className="rounded-xl border border-slate-200 p-4">
-          <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">
-            🔍 Evaluación del Auditor
-          </h5>
-
-          <textarea
-            rows={3}
-            placeholder="Escribe observaciones, correcciones requeridas o notas de aprobación..."
-            value={observacion}
-            onChange={(e) => setObservacion(e.target.value)}
-            className="mb-3 w-full rounded-xl border border-slate-200 p-3 text-xs text-slate-800 focus:border-cyan-500 focus:outline-none"
-          />
-
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => handleAccionAuditoria("aprobar")}
-              disabled={cargando}
-              className="rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
-            >
-              ✅ Aprobar
-            </button>
-            <button
-              onClick={() => handleAccionAuditoria("observar")}
-              disabled={cargando}
-              className="rounded-xl bg-amber-500 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50 shadow-sm"
-            >
-              ⚠️ Observar
-            </button>
-            <button
-              onClick={() => handleAccionAuditoria("rechazar")}
-              disabled={cargando}
-              className="rounded-xl bg-rose-600 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-rose-700 disabled:opacity-50 shadow-sm"
-            >
-              ❌ Rechazar
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAccionSeleccionada("observar");
+                  if (!observacion.trim()) {
+                    setErrorMsg("Por favor, ingrese el motivo obligatorio de la observación en el cuadro de texto.");
+                  } else {
+                    handleEjecutarAccion("observar");
+                  }
+                }}
+                disabled={cargando}
+                className="cl-b ob w-full py-2.5 text-xs font-bold rounded-xl transition shadow-sm disabled:opacity-50"
+              >
+                📝 Observar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAccionSeleccionada("rechazar");
+                  if (!observacion.trim()) {
+                    setErrorMsg("Por favor, ingrese el motivo obligatorio del rechazo en el cuadro de texto.");
+                  } else {
+                    handleEjecutarAccion("rechazar");
+                  }
+                }}
+                disabled={cargando}
+                className="cl-b re w-full py-2.5 text-xs font-bold rounded-xl transition shadow-sm disabled:opacity-50"
+              >
+                ⛔ Rechazar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEjecutarAccion("no_aplica")}
+                disabled={cargando}
+                className="rounded-xl border border-slate-300 bg-slate-100 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-200 transition shadow-sm disabled:opacity-50"
+              >
+                ⚪ No aplica
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Section 3: Revision History Timeline */}
-        <div>
-          <h5 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">
-            📜 Historial de Revisiones y Trazabilidad
-          </h5>
+        {/* Sección: Historial de Versiones de Entrega (Sección 4.4, CA 9) */}
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAcordeonVersionesAbierto(!acordeonVersionesAbierto)}
+            className="w-full flex items-center justify-between p-3.5 bg-slate-50 hover:bg-slate-100 transition text-left"
+          >
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <span>📚</span> Historial de Versiones de Entrega ({versiones.length > 0 ? versiones.length : doc?.version || 1})
+            </span>
+            <span className="text-xs text-slate-500 font-mono">
+              {acordeonVersionesAbierto ? "▲ Ocultar" : "▼ Desplegar"}
+            </span>
+          </button>
 
-          {historial.length === 0 ? (
-            <p className="text-center text-xs text-slate-400 italic py-2">
-              No hay revisiones anteriores para este documento.
-            </p>
-          ) : (
-            <div className="relative border-l-2 border-slate-200 pl-4 space-y-4 text-xs">
-              {historial.map((item) => (
-                <div key={item.id} className="relative">
-                  {/* Circle Marker */}
-                  <span className="absolute -left-[21px] top-0 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-cyan-600 ring-4 ring-white" />
-
-                  <div className="flex items-center justify-between text-slate-500">
-                    <span className="font-semibold text-slate-800">{item.auditor_nombre}</span>
-                    <span className="text-[10px]">{item.fecha}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="rounded-md bg-slate-100 px-2 py-0.5 font-bold uppercase text-[10px] text-slate-700">
-                      {item.accion} (v{item.version})
-                    </span>
-                  </div>
-                  {item.observacion && (
-                    <p className="mt-1.5 rounded-lg bg-slate-50 p-2.5 text-slate-700 italic border border-slate-100">
-                      "{item.observacion}"
-                    </p>
-                  )}
+          {acordeonVersionesAbierto && (
+            <div className="p-4 space-y-3">
+              {cargandoVersiones ? (
+                <div className="py-4 text-center text-xs text-slate-400">
+                  Cargando versiones del documento...
                 </div>
-              ))}
+              ) : versiones.length === 0 ? (
+                <div className="py-2 text-center text-xs text-slate-400 italic">
+                  Solo existe la versión actual (v{doc?.version || 1}).
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {versiones.map((v) => (
+                    <div
+                      key={v.id}
+                      className={`rounded-xl border p-3 text-xs transition ${
+                        v.version === (doc?.version || 1)
+                          ? "border-blue-200 bg-blue-50/30"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-md bg-slate-200 px-2 py-0.5 font-bold font-mono text-[11px] text-slate-800">
+                            v{v.version}
+                          </span>
+                          <Chip estado={v.estado} texto={v.estado} />
+                          {v.version === (doc?.version || 1) && (
+                            <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
+                              Entrega actual
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {v.fecha_carga ? `Subido el ${v.fecha_carga.replace("T", " ").slice(0, 16)}` : ""}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 my-1">
+                        <div>
+                          <span className="font-medium text-slate-500">Subido por: </span>
+                          <span className="font-semibold text-slate-800">
+                            {v.subido_por_nombre || v.cargado_por || "Encargado RR.HH."}
+                          </span>
+                        </div>
+                        {v.revisado_por_nombre && (
+                          <div>
+                            <span className="font-medium text-slate-500">Revisado por: </span>
+                            <span className="font-semibold text-slate-800">
+                              {v.revisado_por_nombre}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {v.observaciones && (
+                        <div className="mt-2 rounded-lg bg-amber-50 p-2 text-amber-900 border border-amber-100 italic">
+                          " {v.observaciones} "
+                        </div>
+                      )}
+
+                      {v.archivo_url && (
+                        <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+                          <span className="text-[11px] text-slate-500">
+                            {v.abierto_por_adc ? "👁 Revisado por ADC" : "⏳ No abierto por ADC"}
+                          </span>
+                          <a
+                            href={v.archivo_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-bold text-blue-600 hover:underline"
+                          >
+                            Descargar archivo v{v.version} ↗
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
+
+        {/* Sección: Carga Directa (Para RR.HH.) */}
+        {!periodoCerrado && onSubirDocumento && (
+          <div className="rounded-xl border border-slate-200 p-4 bg-slate-50">
+            <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <span>📤</span> Subir Archivo o Corrección
+            </h5>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Si el documento ya fue revisado por ADC, subir un nuevo archivo creará automáticamente la <strong>versión {((doc?.version || 1) + 1)}</strong> conservando intactas las anteriores (CA 9).
+            </p>
+            <form onSubmit={handleSubir} className="space-y-3">
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg"
+                onChange={(e) => setArchivoSeleccionado(e.target.files?.[0] || null)}
+                className="w-full rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+              />
+              {archivoSeleccionado && (
+                <button
+                  type="submit"
+                  disabled={cargando}
+                  className="w-full rounded-xl bg-blue-600 p-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-50 shadow-sm"
+                >
+                  {cargando ? "Subiendo..." : "Confirmar Carga de Documento"}
+                </button>
+              )}
+            </form>
+          </div>
+        )}
       </div>
     </Modal>
   );

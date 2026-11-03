@@ -1,5 +1,6 @@
 "use client";
-import React, { useEffect, useState, useCallback } from "react";
+
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import * as Api from "@/lib/cliente";
 import type {
@@ -9,7 +10,8 @@ import type {
   MatrizCumplimientoData,
   PeriodoDocumento,
   CumplimientoDashboardData,
-  AuditoriaDocumento, TrazabilidadEvento,
+  AuditoriaDocumento,
+  TrazabilidadEvento,
 } from "@/lib/tipos";
 import PeriodoCard from "@/components/PeriodoCard";
 import TabNominaPeriodo from "@/components/certificacion/TabNominaPeriodo";
@@ -17,9 +19,10 @@ import MatrizDocumental from "@/components/MatrizDocumental";
 import AuditoriaModal from "@/components/AuditoriaModal";
 import CumplimientoDashboard from "@/components/CumplimientoDashboard";
 import { CompartirContratoModal } from "@/components/contratos/CompartirContratoModal";
-import { Chip, Spinner, Donut } from "@/components/ui";
+import { Chip, Spinner, Donut, Modal } from "@/components/ui";
 
 type TabTipo = "dashboard" | "documentos" | "nomina" | "auditoria" | "trazabilidad";
+type FiltroAuditoriaTipo = "por_revisar" | "todos" | "observados_rechazados" | "aprobados";
 
 export default function ContratoCertificacionDetallePage() {
   const params = useParams();
@@ -45,7 +48,7 @@ export default function ContratoCertificacionDetallePage() {
   const [matrizData, setMatrizData] = useState<MatrizCumplimientoData | null>(null);
   const [dashboardData, setDashboardData] = useState<CumplimientoDashboardData | null>(null);
 
-  // Modal de Auditoría
+  // Modal de Auditoría Completo
   const [modalAuditoriaAbierto, setModalAuditoriaAbierto] = useState(false);
   const [docSeleccionado, setDocSeleccionado] = useState<PeriodoDocumento | null>(null);
   const [sujetoSelNombre, setSujetoSelNombre] = useState("");
@@ -54,6 +57,18 @@ export default function ContratoCertificacionDetallePage() {
   const [historialAuditoria, setHistorialAuditoria] = useState<AuditoriaDocumento[]>([]);
   const [trazabilidadEventos, setTrazabilidadEventos] = useState<TrazabilidadEvento[]>([]);
   const [cargandoTrazabilidad, setCargandoTrazabilidad] = useState(false);
+
+  // Estado para la Bandeja de Auditoría (Día 4, CA 10 & 11)
+  const [filtroAuditoria, setFiltroAuditoria] = useState<FiltroAuditoriaTipo>("por_revisar");
+  const [busquedaAuditoria, setBusquedaAuditoria] = useState("");
+
+  // Modal rápido de observación (#cl-obs)
+  const [modalObsAbierto, setModalObsAbierto] = useState(false);
+  const [docParaObservar, setDocParaObservar] = useState<PeriodoDocumento | null>(null);
+  const [accionObs, setAccionObs] = useState<"observar" | "rechazar">("observar");
+  const [comentarioObs, setComentarioObs] = useState("");
+  const [cargandoAccionObs, setCargandoAccionObs] = useState(false);
+  const [errorObs, setErrorObs] = useState<string | null>(null);
 
   // 1. Cargar Contrato y sus Períodos Mensuales generados (CA 2)
   const cargarContratoYPeriodos = useCallback(async () => {
@@ -122,6 +137,25 @@ export default function ContratoCertificacionDetallePage() {
       cargarTrazabilidad();
     }
   }, [tabActiva, cargarTrazabilidad]);
+
+  // Recargar datos del período activo
+  const recargarDetallesPeriodo = useCallback(async () => {
+    if (!periodoActivo?.id) return;
+    try {
+      const [mat, dash, pActualizado] = await Promise.all([
+        Api.certificacion.matrizDocumental(periodoActivo.id).catch(() => null),
+        Api.certificacion.dashboardCumplimiento(periodoActivo.id).catch(() => null),
+        Api.certificacion.obtenerPeriodo(periodoActivo.id).catch(() => null),
+      ]);
+      setMatrizData(mat);
+      setDashboardData(dash);
+      if (pActualizado) {
+        setPeriodoActivo(pActualizado);
+      }
+    } catch (err) {
+      console.error("Error al recargar datos del período:", err);
+    }
+  }, [periodoActivo?.id]);
 
   // 2. Cargar datos del período activo (Matriz y Dashboard)
   useEffect(() => {
@@ -203,18 +237,12 @@ export default function ContratoCertificacionDetallePage() {
         archivo_url: urlFake,
         archivo_nombre: file.name,
       });
-      // Recargar matriz, dashboard y contrato
-      const [mat, dash] = await Promise.all([
-        Api.certificacion.matrizDocumental(periodoActivo.id),
-        Api.certificacion.dashboardCumplimiento(periodoActivo.id),
-      ]);
-      setMatrizData(mat);
-      setDashboardData(dash);
+      await recargarDetallesPeriodo();
       if (tabActiva === "trazabilidad") {
         cargarTrazabilidad();
       }
-    } catch (err) {
-      console.error("Error en subida directa:", err);
+    } catch (err: any) {
+      alert(err?.message || "Error en subida directa");
     }
   };
 
@@ -256,33 +284,178 @@ export default function ContratoCertificacionDetallePage() {
       });
     }
     setDocSeleccionado(docActualizado);
+    await recargarDetallesPeriodo();
   };
 
   const handleAuditarDocumento = async (
-    accion: "aprobar" | "observar" | "rechazar",
+    accion: "aprobar" | "observar" | "rechazar" | "no_aplica",
     observacion?: string
   ) => {
-    if (!docSeleccionado || !matrizData) return;
-    await Api.certificacion.auditarDocumento(docSeleccionado.id, { accion, observacion });
-
-    const nuevoEstado =
-      accion === "aprobar" ? "aprobado" : accion === "observar" ? "observado" : "rechazado";
-    const celdaKey = `${docSeleccionado.sujeto_id}_${docSeleccionado.requisito_template_id}`;
-
-    const docActualizado: PeriodoDocumento = {
-      ...docSeleccionado,
-      estado: nuevoEstado,
-      observaciones: observacion || null,
-    };
-
-    setMatrizData({
-      ...matrizData,
-      celdas: {
-        ...matrizData.celdas,
-        [celdaKey]: docActualizado,
-      },
-    });
+    if (!docSeleccionado || !periodoActivo) return;
+    try {
+      await Api.certificacion.revisarDocumento(periodoActivo.id, docSeleccionado.id, {
+        accion,
+        comentario: observacion,
+      });
+      await recargarDetallesPeriodo();
+      if (tabActiva === "trazabilidad") {
+        cargarTrazabilidad();
+      }
+    } catch (err: any) {
+      alert(err?.message || "Error al revisar documento");
+    }
   };
+
+  // Acción rápida desde la tabla de auditoría: Aprobar / No aplica
+  const handleAccionRapidaAuditoria = async (
+    doc: PeriodoDocumento,
+    accion: "aprobar" | "no_aplica"
+  ) => {
+    if (!periodoActivo) return;
+    try {
+      await Api.certificacion.revisarDocumento(periodoActivo.id, doc.id, {
+        accion,
+      });
+      await recargarDetallesPeriodo();
+      if (tabActiva === "trazabilidad") {
+        cargarTrazabilidad();
+      }
+    } catch (err: any) {
+      alert(err?.message || `Error al ejecutar acción ${accion}`);
+    }
+  };
+
+  // Abrir modal de observación (#cl-obs) desde la tabla de auditoría
+  const abrirModalObservacionRapida = (
+    doc: PeriodoDocumento,
+    accion: "observar" | "rechazar"
+  ) => {
+    setDocParaObservar(doc);
+    setAccionObs(accion);
+    setComentarioObs("");
+    setErrorObs(null);
+    setModalObsAbierto(true);
+  };
+
+  // Confirmar observación/rechazo en modal #cl-obs
+  const confirmarObservacionRapida = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!docParaObservar || !periodoActivo) return;
+    if (!comentarioObs.trim()) {
+      setErrorObs("El comentario es obligatorio para dictaminar observación o rechazo.");
+      return;
+    }
+
+    setCargandoAccionObs(true);
+    setErrorObs(null);
+    try {
+      await Api.certificacion.revisarDocumento(periodoActivo.id, docParaObservar.id, {
+        accion: accionObs,
+        comentario: comentarioObs.trim(),
+      });
+      setModalObsAbierto(false);
+      setDocParaObservar(null);
+      setComentarioObs("");
+      await recargarDetallesPeriodo();
+      if (tabActiva === "trazabilidad") {
+        cargarTrazabilidad();
+      }
+    } catch (err: any) {
+      setErrorObs(err?.message || "Error al dictaminar documento");
+    } finally {
+      setCargandoAccionObs(false);
+    }
+  };
+
+  // Ver archivo y marcar visto por ADC
+  const handleVerArchivoYMarcarVisto = async (doc: PeriodoDocumento) => {
+    if (!doc.archivo_url) return;
+    if (periodoActivo?.id && doc.id) {
+      try {
+        await Api.certificacion.marcarDocumentoVisto(periodoActivo.id, doc.id);
+      } catch (err) {
+        console.warn("No se pudo marcar visto por ADC:", err);
+      }
+    }
+    window.open(doc.archivo_url, "_blank");
+  };
+
+  // Regla de Cierre al 100% (Sección 10, CA 12)
+  const handleCerrarPeriodo = async () => {
+    if (!periodoActivo) return;
+    const pct = Math.round(periodoActivo.porcentaje_cumplimiento || 0);
+
+    if (pct < 100) {
+      alert(
+        `⛔ No es posible cerrar el período: El cumplimiento debe ser del 100% (actualmente ${pct}%).\n` +
+        `Aún existen requisitos pendientes de carga, en revisión u observados en este contrato.`
+      );
+      return;
+    }
+
+    const confirmado = window.confirm(
+      `¿Confirmar el cierre definitivo del período mensual "${periodoActivo.nombre}"?\n\n` +
+      `Al cerrar:\n` +
+      `• La nómina y los documentos quedarán archivados de forma inmutable.\n` +
+      `• No se admitirán nuevas subidas de archivos ni dictámenes posteriores.\n` +
+      `• Quedará registrado en la bitácora de trazabilidad.`
+    );
+    if (!confirmado) return;
+
+    try {
+      const cerrado = await Api.certificacion.cerrarPeriodo(periodoActivo.id);
+      alert(`✅ Período "${cerrado.nombre}" cerrado formalmente con 100% de cumplimiento.`);
+      await cargarContratoYPeriodos();
+      setPeriodoActivo(cerrado);
+      await recargarDetallesPeriodo();
+    } catch (err: any) {
+      alert(err?.message || "Error al cerrar el período");
+    }
+  };
+
+  // Lista plana de documentos del período para la bandeja de auditoría
+  const documentosAuditoria = useMemo(() => {
+    if (!matrizData?.celdas) return [];
+    return Object.values(matrizData.celdas);
+  }, [matrizData?.celdas]);
+
+  // Conteos para los filtros de la bandeja
+  const conteosAuditoria = useMemo(() => {
+    const porRevisar = documentosAuditoria.filter((d) => d.estado === "en_revision").length;
+    const obsRech = documentosAuditoria.filter(
+      (d) => d.estado === "observado" || d.estado === "rechazado"
+    ).length;
+    const aprobados = documentosAuditoria.filter((d) => d.estado === "aprobado").length;
+    const todos = documentosAuditoria.length;
+
+    return { porRevisar, obsRech, aprobados, todos };
+  }, [documentosAuditoria]);
+
+  // Documentos filtrados en la bandeja
+  const documentosAuditoriaFiltrados = useMemo(() => {
+    return documentosAuditoria.filter((d) => {
+      // 1. Filtro rápido superior
+      if (filtroAuditoria === "por_revisar" && d.estado !== "en_revision") return false;
+      if (
+        filtroAuditoria === "observados_rechazados" &&
+        d.estado !== "observado" &&
+        d.estado !== "rechazado"
+      )
+        return false;
+      if (filtroAuditoria === "aprobados" && d.estado !== "aprobado") return false;
+
+      // 2. Buscador por texto
+      if (busquedaAuditoria.trim()) {
+        const term = busquedaAuditoria.toLowerCase().trim();
+        const matchSujeto = d.sujeto_nombre.toLowerCase().includes(term);
+        const matchRut = d.sujeto_rut.toLowerCase().includes(term);
+        const matchReq = d.requisito_nombre.toLowerCase().includes(term);
+        if (!matchSujeto && !matchRut && !matchReq) return false;
+      }
+
+      return true;
+    });
+  }, [documentosAuditoria, filtroAuditoria, busquedaAuditoria]);
 
   if (cargandoContrato) {
     return (
@@ -306,9 +479,11 @@ export default function ContratoCertificacionDetallePage() {
     );
   }
 
+  const periodoCerrado = periodoActivo?.estado === "cerrado";
+
   return (
     <div className="space-y-6 pb-12">
-      {/* 1. Barra Superior con Botón de Retorno */}
+      {/* 1. Barra Superior con Retorno */}
       <div className="flex items-center justify-between">
         <button
           onClick={volverAContratos}
@@ -329,7 +504,10 @@ export default function ContratoCertificacionDetallePage() {
               <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
                 {contrato.codigo || "S/C"}
               </span>
-              <Chip estado={contrato.estado_contractual || contrato.estado} texto={contrato.estado_contractual || contrato.estado} />
+              <Chip
+                estado={contrato.estado_contractual || contrato.estado}
+                texto={contrato.estado_contractual || contrato.estado}
+              />
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">
               {contrato.nombre}
@@ -358,7 +536,9 @@ export default function ContratoCertificacionDetallePage() {
           </div>
           <div>
             <span className="block text-slate-400 font-medium">🏭 Mandante</span>
-            <span className="font-bold text-slate-800">{contrato.mandante_nombre || contrato.mandante || "Mandante"}</span>
+            <span className="font-bold text-slate-800">
+              {contrato.mandante_nombre || contrato.mandante || "Mandante"}
+            </span>
           </div>
           <div>
             <span className="block text-slate-400 font-medium">⛰️ Faena</span>
@@ -381,23 +561,59 @@ export default function ContratoCertificacionDetallePage() {
 
       {/* 3. Tira de Tarjetas Mensuales (.cl-pers / .cl-per) */}
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <span>📅</span> Períodos Mensuales del Contrato
             <span className="text-xs font-normal text-slate-500">
               ({periodos.length} períodos generados según vigencia)
             </span>
           </h2>
+
+          {/* Botón de Cierre de Período al 100% (CA 12, Sección 10) */}
           {periodoActivo && (
-            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-              Seleccionado: {periodoActivo.nombre}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                Seleccionado: {periodoActivo.nombre}
+              </span>
+
+              {periodoCerrado ? (
+                <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-100 px-3.5 py-1 text-xs font-bold text-slate-700 shadow-sm">
+                  🔒 Período Cerrado e Inmutable
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCerrarPeriodo}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1 text-xs font-bold shadow-sm transition ${
+                    (periodoActivo.porcentaje_cumplimiento || 0) >= 100
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed hover:bg-slate-200 hover:text-slate-600"
+                  }`}
+                  title={
+                    (periodoActivo.porcentaje_cumplimiento || 0) >= 100
+                      ? "Cerrar período formalmente (100% de cumplimiento alcanzado)"
+                      : `Requiere 100% de cumplimiento para cerrar (actual: ${Math.round(
+                          periodoActivo.porcentaje_cumplimiento || 0
+                        )}%)`
+                  }
+                >
+                  <span>✓ Cerrar período</span>
+                  {(periodoActivo.porcentaje_cumplimiento || 0) >= 100 && (
+                    <span className="rounded-full bg-emerald-500 px-1.5 py-0.2 text-[10px] text-white">
+                      100%
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
         {periodos.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
-            <p className="text-sm font-semibold">No hay períodos mensuales generados para este contrato.</p>
+            <p className="text-sm font-semibold">
+              No hay períodos mensuales generados para este contrato.
+            </p>
             <p className="text-xs text-slate-400 mt-1">
               Verifique las fechas de inicio y término del contrato.
             </p>
@@ -445,7 +661,7 @@ export default function ContratoCertificacionDetallePage() {
           onClick={() => setTabActiva("auditoria")}
           className={`cl-tab ${tabActiva === "auditoria" ? "on !bg-blue-600 !border-blue-600 !text-white" : ""}`}
         >
-          🔍 Auditoría
+          🔍 Auditoría {conteosAuditoria.porRevisar > 0 && `(${conteosAuditoria.porRevisar})`}
         </button>
         <button
           type="button"
@@ -518,37 +734,245 @@ export default function ContratoCertificacionDetallePage() {
             />
           )}
 
-          {/* Pestaña: Auditoría */}
+          {/* Pestaña: Auditoría (Día 4, CA 10 & 11) */}
           {tabActiva === "auditoria" && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <span>📋</span> Centro de Auditoría de Revisiones del Período {periodoActivo.nombre}
-              </h3>
-              <p className="text-xs text-slate-500">
-                Bandeja de auditoría del ADC. Seleccione un documento para evaluar y dictaminar observaciones o aprobaciones.
-              </p>
-              {matrizData && matrizData.sujetos.length > 0 ? (
-                <div className="divide-y divide-slate-100">
-                  {matrizData.sujetos.map((s) => (
-                    <div key={s.id} className="py-3 flex items-center justify-between gap-4">
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-800">{s.nombre}</h4>
-                        <p className="text-xs text-slate-500 font-mono">
-                          RUT: {s.rut} • Cargo: {s.cargo || "Sin cargo"}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => abrirModalParaCelda(s.id, matrizData.requisitos[0]?.id)}
-                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition"
-                      >
-                        🔍 Revisar Documentos
-                      </button>
-                    </div>
-                  ))}
+            <div className="space-y-4">
+              {/* Cabecera y Filtros Rápidos de la Bandeja */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <span>🔍</span> Bandeja de Auditoría ADC — Período {periodoActivo.nombre}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Evaluación interactiva de entregas. Toda observación exige comentario y notifica a RR.HH.
+                    </p>
+                  </div>
+
+                  {/* Buscador */}
+                  <div className="relative min-w-[260px]">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Buscar por trabajador, RUT o documento..."
+                      value={busquedaAuditoria}
+                      onChange={(e) => setBusquedaAuditoria(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 py-1.5 pl-8 pr-3 text-xs text-slate-800 placeholder-slate-400 transition focus:border-blue-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
-              ) : (
-                <div className="text-xs text-slate-400 py-4">No hay trabajadores para auditar en este período.</div>
-              )}
+
+                {/* Filtros de la Bandeja */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFiltroAuditoria("por_revisar")}
+                    className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
+                      filtroAuditoria === "por_revisar"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span>📥 Bandeja Por revisar</span>
+                    <span
+                      className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+                        filtroAuditoria === "por_revisar"
+                          ? "bg-white text-blue-700 font-extrabold"
+                          : "bg-blue-100 text-blue-700 font-bold"
+                      }`}
+                    >
+                      {conteosAuditoria.porRevisar}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFiltroAuditoria("todos")}
+                    className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold transition flex items-center gap-1.5 ${
+                      filtroAuditoria === "todos"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span>Todos</span>
+                    <span className="text-[10px] opacity-75">({conteosAuditoria.todos})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFiltroAuditoria("observados_rechazados")}
+                    className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold transition flex items-center gap-1.5 ${
+                      filtroAuditoria === "observados_rechazados"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span>Observados / Rechazados</span>
+                    <span className="text-[10px] opacity-75">({conteosAuditoria.obsRech})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFiltroAuditoria("aprobados")}
+                    className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold transition flex items-center gap-1.5 ${
+                      filtroAuditoria === "aprobados"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    <span>Aprobados</span>
+                    <span className="text-[10px] opacity-75">({conteosAuditoria.aprobados})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabla de Entregas para Auditoría ADC */}
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                {documentosAuditoriaFiltrados.length === 0 ? (
+                  <div className="p-12 text-center text-slate-400 text-xs italic">
+                    {filtroAuditoria === "por_revisar"
+                      ? "🎉 ¡Al día! No hay entregas pendientes de revisión en este período."
+                      : "No se encontraron documentos con los filtros seleccionados."}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold uppercase text-[11px]">
+                        <tr>
+                          <th className="px-4 py-3">Documento Requerido</th>
+                          <th className="px-4 py-3">Trabajador / Ámbito</th>
+                          <th className="px-4 py-3">Versión</th>
+                          <th className="px-4 py-3">Estado</th>
+                          <th className="px-4 py-3">Archivo / Apertura</th>
+                          <th className="px-4 py-3 text-right">Acciones Rápidas (ADC)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {documentosAuditoriaFiltrados.map((doc) => {
+                          const tieneArchivo = Boolean(doc.archivo_url);
+
+                          return (
+                            <tr
+                              key={doc.id}
+                              className={`transition-colors ${
+                                doc.estado === "en_revision"
+                                  ? "bg-blue-50/20 hover:bg-blue-50/40"
+                                  : "hover:bg-slate-50/70"
+                              }`}
+                            >
+                              {/* Documento */}
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-slate-900">{doc.requisito_nombre}</div>
+                                {doc.observaciones && (
+                                  <div className="mt-1 text-[11px] text-amber-800 line-clamp-1 italic">
+                                    Obs: "{doc.observaciones}"
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Trabajador / Ámbito */}
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-800">{doc.sujeto_nombre}</div>
+                                {doc.sujeto_rut && (
+                                  <div className="font-mono text-[10px] text-slate-400">
+                                    RUT: {doc.sujeto_rut}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Versión */}
+                              <td className="px-4 py-3">
+                                <span className="rounded-md bg-slate-100 px-2 py-0.5 font-bold font-mono text-[10px] text-slate-700 border border-slate-200">
+                                  v{doc.version || 1}
+                                </span>
+                              </td>
+
+                              {/* Estado */}
+                              <td className="px-4 py-3">
+                                <Chip estado={doc.estado} texto={doc.estado} />
+                              </td>
+
+                              {/* Archivo / Apertura */}
+                              <td className="px-4 py-3">
+                                {tieneArchivo ? (
+                                  <div className="flex flex-col gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleVerArchivoYMarcarVisto(doc)}
+                                      className="inline-flex items-center gap-1 font-bold text-blue-600 hover:text-blue-800 text-[11px]"
+                                    >
+                                      <span>👁 Ver archivo</span>
+                                    </button>
+                                    <span className="text-[10px] text-slate-400">
+                                      {doc.abierto_por_adc ? "Visto por ADC" : "⏳ No abierto"}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 italic text-[11px]">Sin archivo</span>
+                                )}
+                              </td>
+
+                              {/* Acciones Rápidas */}
+                              <td className="px-4 py-3 text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  {!periodoCerrado ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAccionRapidaAuditoria(doc, "aprobar")}
+                                        className="cl-b ok !py-1 !px-2 !text-[11px]"
+                                        title="Aprobar requisito"
+                                      >
+                                        ✓ Aprobar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirModalObservacionRapida(doc, "observar")}
+                                        className="cl-b ob !py-1 !px-2 !text-[11px]"
+                                        title="Observar entrega (comentario obligatorio)"
+                                      >
+                                        📝 Observar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirModalObservacionRapida(doc, "rechazar")}
+                                        className="cl-b re !py-1 !px-2 !text-[11px]"
+                                        title="Rechazar entrega (comentario obligatorio)"
+                                      >
+                                        ⛔ Rechazar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAccionRapidaAuditoria(doc, "no_aplica")}
+                                        className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+                                        title="Marcar No aplica"
+                                      >
+                                        No aplica
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-400 italic">Cerrado</span>
+                                  )}
+
+                                  {/* Botón Ver Historial / Modal Completo */}
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalParaCelda(doc.sujeto_id, doc.requisito_template_id, doc)}
+                                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+                                    title="Ver historial de versiones y auditoría"
+                                  >
+                                    📚 Historial
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -620,9 +1044,7 @@ export default function ContratoCertificacionDetallePage() {
                           <td className="px-4 py-3 font-medium text-slate-800">
                             {ev.documento_nombre || "—"}
                           </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {ev.detalle}
-                          </td>
+                          <td className="px-4 py-3 text-slate-600">{ev.detalle}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -644,10 +1066,74 @@ export default function ContratoCertificacionDetallePage() {
         />
       )}
 
-      {/* Modal de Auditoría de Documentos */}
+      {/* Modal Rápido de Observación Obligatoria (#cl-obs, CA 11) */}
+      {modalObsAbierto && docParaObservar && (
+        <Modal
+          abierto={modalObsAbierto}
+          titulo={`Dictamen ADC: ${accionObs === "observar" ? "📝 Observar Entrega" : "⛔ Rechazar Entrega"}`}
+          onCerrar={() => setModalObsAbierto(false)}
+          ancho="max-w-lg"
+        >
+          <form onSubmit={confirmarObservacionRapida} className="space-y-4 text-xs">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <span className="text-[11px] font-bold text-blue-700 uppercase">
+                {docParaObservar.requisito_nombre}
+              </span>
+              <h4 className="text-sm font-bold text-slate-900">{docParaObservar.sujeto_nombre}</h4>
+              <p className="font-mono text-slate-500">v{docParaObservar.version || 1}</p>
+            </div>
+
+            {errorObs && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 font-medium text-rose-700">
+                ⚠️ {errorObs}
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="cl-obs-rapido" className="block font-bold text-slate-800 mb-1">
+                Motivo / Comentario Obligatorio para RR.HH. <span className="text-rose-600">*</span>
+              </label>
+              <textarea
+                id="cl-obs-rapido"
+                rows={4}
+                required
+                value={comentarioObs}
+                onChange={(e) => setComentarioObs(e.target.value)}
+                placeholder="Indique con claridad las correcciones requeridas para que el Encargado de RR.HH. subsane la entrega..."
+                className="w-full rounded-xl border border-slate-300 p-3 text-xs text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                ℹ️ Esta observación será enviada de inmediato al Encargado de RR.HH. y aparecerá en su bandeja <strong>Mis pendientes</strong>.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setModalObsAbierto(false)}
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={cargandoAccionObs}
+                className={`rounded-xl px-4 py-2 font-bold text-white shadow-sm transition disabled:opacity-50 ${
+                  accionObs === "observar" ? "bg-amber-600 hover:bg-amber-700" : "bg-rose-600 hover:bg-rose-700"
+                }`}
+              >
+                {cargandoAccionObs ? "Dictaminando..." : `Confirmar ${accionObs === "observar" ? "Observación" : "Rechazo"}`}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Modal Completo de Auditoría y Versiones */}
       <AuditoriaModal
         abierto={modalAuditoriaAbierto}
         onCerrar={() => setModalAuditoriaAbierto(false)}
+        periodoId={periodoActivo?.id}
         doc={docSeleccionado}
         sujetoNombre={sujetoSelNombre}
         sujetoRut={sujetoSelRut}
@@ -655,6 +1141,7 @@ export default function ContratoCertificacionDetallePage() {
         onSubirDocumento={handleSubirDocumento}
         onAuditar={handleAuditarDocumento}
         historial={historialAuditoria}
+        periodoCerrado={periodoCerrado}
       />
     </div>
   );

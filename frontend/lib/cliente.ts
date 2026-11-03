@@ -33,7 +33,7 @@ import type {
   RequisitoFila, RequisitoTerreno, RequisitosCargo, ResetDemo, ResumenAlertas,
   Revision, RecursoExport, Sesion, Sujeto, SujetoCreado, SujetoDetalle,
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
-  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento,
+  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento, PeriodoDocumentoVersionItem, MisPendientesRrhhRespuesta,
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
   CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
   SeccionExport,
@@ -957,6 +957,37 @@ export const certificacion = {
 
   dashboardCumplimiento: async (periodoId: string): Promise<CumplimientoDashboardData> => {
     return await api<CumplimientoDashboardData>(`/periodos/${periodoId}/dashboard`);
+  },
+
+  revisarDocumento: async (
+    periodoId: string,
+    docId: string,
+    body: { accion: "aprobar" | "observar" | "rechazar" | "no_aplica"; comentario?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos/${docId}/revisar`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  marcarDocumentoVisto: async (periodoId: string, docId: string) => {
+    return await api<{ ok: boolean }>(`/periodos/${periodoId}/documentos/${docId}/marcar-visto`, {
+      method: "POST",
+    });
+  },
+
+  listarVersiones: async (periodoId: string, docId: string): Promise<PeriodoDocumentoVersionItem[]> => {
+    return await api<PeriodoDocumentoVersionItem[]>(`/periodos/${periodoId}/documentos/${docId}/versiones`);
+  },
+
+  cerrarPeriodo: async (periodoId: string): Promise<PeriodoLaboral> => {
+    return await api<PeriodoLaboral>(`/periodos/${periodoId}/cerrar`, {
+      method: "POST",
+    });
+  },
+
+  obtenerMisPendientes: async (): Promise<MisPendientesRrhhRespuesta> => {
+    return await api<MisPendientesRrhhRespuesta>("/certificacion-laboral/mis-pendientes");
   },
 };
 

@@ -1438,7 +1438,7 @@ def matriz_documental(
         sujeto_nombre = row.sujeto_nombre or "Desconocido"
         sujeto_rut = row.sujeto_rut or ""
         sujeto_cargo = row.sujeto_cargo
-        requisito_nombre = row.requisito_nombre or "Desconocido"
+        requisito_nombre = row.requisito_nombre or getattr(d, "nombre", None) or "Desconocido"
 
         if d.estado == "aprobado": total_aprobados += 1
         elif d.estado == "pendiente": total_pendientes += 1
@@ -1459,8 +1459,9 @@ def matriz_documental(
             "estado": d.estado,
             "fecha_carga": d.fecha_carga.isoformat() if d.fecha_carga else None,
             "cargado_por": str(d.cargado_por) if d.cargado_por else None,
-            "observaciones": None,
-            "version": 1
+            "observaciones": d.observaciones,
+            "version": getattr(d, "version", 1) or 1,
+            "abierto_por_adc": bool(getattr(d, "abierto_por_adc", False)),
         }
         
         if d.sujeto_id not in sujetos_map:
