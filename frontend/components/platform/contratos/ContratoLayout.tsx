@@ -278,7 +278,7 @@ export function ContratoLayout({
                   )}
                   {pl.nota && <div className="text-[0.65rem] text-emerald-600 mt-0.5 font-semibold">{pl.nota}</div>}
                   {(!pl.nota || pl.credenciales === 0) && <div className="text-[0.65rem] text-slate-500 mt-0.5">Sin cuentas registradas</div>}
-                  <div className="mt-2.5 flex gap-3">{!soloLectura && <span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => onManagePlataforma(pl)}>Gestionar usuarios →</span>}<span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => setDetallePlat(pl)}>Ver requisitos →</span></div>
+                  <div className="mt-2.5 flex gap-3">{!soloLectura && <span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => onManagePlataforma(pl)}>Gestionar usuarios →</span>}<span className="text-[0.7rem] text-blue-600 hover:underline cursor-pointer font-medium" onClick={() => setDetallePlat(pl)}>Ver / Agregar requisitos →</span></div>
                 </div>
                 );
              })
@@ -326,6 +326,7 @@ export function ContratoLayout({
         plataforma={detallePlat}
         contratoId={c.id}
         onCerrar={() => setDetallePlat(null)}
+        onRefreshPlataformas={onRefreshPlataformas}
       />
     </div>
   );

@@ -1106,3 +1106,27 @@ def test_crear_faena_no_integrada_y_asociar_contrato(app_cliente, empresa_a):
     contrato_data = r_contrato.json()
     assert contrato_data["faena"]["id"] == faena_id
     assert contrato_data["faena"]["nombre"] == "Planta Coronel Test QA"
+
+
+
+# ============================================================================
+# Requisitos en plataforma heredada (Día 3 - Req 13)
+# ============================================================================
+def test_requisitos_en_plataforma_heredada_materializa_y_crea(app_cliente, empresa_a, faena_pelambres):
+    c = crear_contrato(app_cliente, empresa_a, faena_pelambres['id'])
+    r = app_cliente.get(f"{API}/contratos/{c['id']}/plataformas", headers=empresa_a["headers"])
+    assert r.status_code == 200
+    plat_heredada = r.json()["items"][0]
+    assert plat_heredada["id"] is None
+    fp_id = plat_heredada["faena_plataforma_id"]
+    assert fp_id is not None
+
+    r_add = app_cliente.post(
+        f"{API}/contratos/{c['id']}/plataformas/{fp_id}/requisitos",
+        headers=empresa_a["headers"],
+        json={"ambito": "personal", "titulo": "Requisito Plataforma Heredada", "obligatorio": True}
+    )
+    assert r_add.status_code == 201, r_add.text
+    res = r_add.json()
+    assert res["titulo"] == "Requisito Plataforma Heredada"
+    assert res["heredadas_materializadas"] > 0

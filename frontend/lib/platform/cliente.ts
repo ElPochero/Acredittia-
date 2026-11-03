@@ -407,12 +407,15 @@ export const contratos = {
     api<Record<string, unknown>>(`/contratos/${id}/requisitos`,
       { body, query: q(opciones) }),
 
-  /** Requisito anclado a una plataforma (`contrato_requisitos.py:509`). */
+  /** Requisito anclado a una plataforma (`contrato_requisitos.py:537`). */
   crearRequisitoPlataforma: (id: string, platId: string, body: {
     ambito: string; titulo: string; obligatorio?: boolean;
     vigencia_meses?: number | null;
-  }) => api<Record<string, unknown>>(
-    `/contratos/${id}/plataformas/${platId}/requisitos`, { body }),
+  } | Array<{
+    ambito: string; titulo: string; obligatorio?: boolean;
+    vigencia_meses?: number | null;
+  }>, opciones?: { bulk?: boolean; aplicar_retroactivo?: boolean }) => api<Record<string, unknown>>(
+    `/contratos/${id}/plataformas/${platId}/requisitos`, { body, query: q(opciones) }),
 
   editarRequisito: (id: string, rid: string, cambios: object) =>
     patch<Record<string, unknown>>(`/contratos/${id}/requisitos/${rid}`, cambios),
