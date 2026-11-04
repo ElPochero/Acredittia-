@@ -44,7 +44,7 @@ router = APIRouter(prefix="/company", tags=["company"])
 # para reenviarle el enlace si caduca.
 ACTIVACION_TTL_HORAS = 72
 
-ROLES_INVITABLES = ("company", "contract_admin", "visor")
+ROLES_INVITABLES = ("company", "contract_admin", "visor", "adc", "rrhh")
 ORDEN_USUARIOS = {"nombre", "email", "role", "created_at", "last_login_at", "activo"}
 
 # Cómo se le explica el permiso al invitado (va en el correo).
@@ -52,6 +52,8 @@ _ROL_ETIQUETA = {
     "company": "Administrador — acceso a toda la empresa",
     "contract_admin": "Editor — puede ver y modificar este contrato",
     "visor": "Visor — solo lectura",
+    "adc": "Auditor de Cumplimiento (ADC)",
+    "rrhh": "RR.HH. — solo Control Laboral",
 }
 
 
@@ -200,11 +202,11 @@ def _valida_contrato(db: Session, cid: uuid.UUID,
 
 def _valida_rol(role: str, contrato_id: uuid.UUID | None) -> None:
     """Refleja el CHECK de `users`: el contrato es obligatorio y exclusivo de
-    los roles acotados (contract_admin, visor)."""
+    los roles acotados (contract_admin, visor, rrhh)."""
     if role not in ROLES_INVITABLES:
         raise err(400, "ROL_INVALIDO",
-                  "role debe ser 'company', 'contract_admin' o 'visor'")
-    if role in ("contract_admin", "visor") and not contrato_id:
+                  "role debe ser 'company', 'contract_admin', 'visor', 'adc' o 'rrhh'")
+    if role in ("contract_admin", "visor", "rrhh") and not contrato_id:
         raise err(400, "CONTRATO_REQUERIDO",
                   "Un usuario acotado a contrato necesita contrato_id")
     if role == "company" and contrato_id:

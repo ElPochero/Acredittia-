@@ -3951,3 +3951,97 @@ def matriz(contrato_id: uuid.UUID,
 
     }
 
+
+
+class CompartirContratoIn(BaseModel):
+    email: str
+    nombre: str | None = None
+    role: str = "rrhh"
+    unidad_negocio: str | None = None
+
+
+@router.post("/{contrato_id}/compartir", status_code=200)
+def compartir_contrato_endpoint(
+    contrato_id: uuid.UUID,
+    body: CompartirContratoIn,
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user)
+):
+    """
+    Asigna un usuario al contrato con rol especificado ('rrhh', 'adc', 'visor', 'contract_admin').
+    Soporta alta/invitación con permiso 'RR.HH. — solo Control Laboral' (Sección 3.1, CA 8).
+    El rol 'rrhh' no puede compartir contratos (403 Forbidden).
+    """
+    if getattr(user, "role", None) == "rrhh":
+        raise err(403, "FORBIDDEN", "El rol RR.HH. no tiene permisos para compartir contratos ni asignar usuarios")
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    email_limpio = body.email.lower().strip()
+    u = db.execute(select(User).where(User.email == email_limpio)).scalars().first()
+    temp_pass = None
+
+    if not u:
+        temp_pass = "Tmp" + uuid.uuid4().hex[:8] + "!"
+        from ...security import hash_password
+        u = User(
+            company_id=cid,
+            email=email_limpio,
+            nombre=(body.nombre or email_limpio.split("@")[0]).strip(),
+            role=body.role,
+            contrato_id=c.id if body.role in ("contract_admin", "visor", "rrhh") else None,
+            password_hash=hash_password(temp_pass),
+            status="approved",
+            activo=True,
+            unidad_negocio=body.unidad_negocio
+        )
+        db.add(u)
+        db.flush()
+    else:
+        if body.role in ("contract_admin", "visor", "rrhh") and not u.contrato_id:
+            u.contrato_id = c.id
+        if body.role == "rrhh" and u.role not in ("admin", "company"):
+            u.role = "rrhh"
+
+    from ...models import ContratoUsuarioRol
+    rel = db.execute(
+        select(ContratoUsuarioRol).where(
+            ContratoUsuarioRol.contrato_id == c.id,
+            ContratoUsuarioRol.user_id == u.id,
+            ContratoUsuarioRol.rol_contrato == body.role
+        )
+    ).scalars().first()
+    if not rel:
+        db.add(ContratoUsuarioRol(
+            contrato_id=c.id,
+            user_id=u.id,
+            rol_contrato=body.role
+        ))
+
+    try:
+        from ...services.platform.email import despachar_alerta_email
+        despachar_alerta_email(
+            db=db,
+            destinatarios=[u.email],
+            asunto=f"Invitación a colaborar en {c.nombre} (ACREDITTIA)",
+            cuerpo=f"Hola {u.nombre},\n\nHas sido asignado al contrato '{c.nombre}' con el rol '{body.role}'.\nAccede a la plataforma para gestionar tus actividades.",
+            severidad="informativa"
+        )
+    except Exception as e:
+        log.warning(f"No se pudo despachar email de invitación: {e}")
+
+    db.commit()
+    db.refresh(u)
+
+    res = {
+        "ok": True,
+        "contrato_id": str(c.id),
+        "user_id": str(u.id),
+        "nombre": u.nombre,
+        "email": u.email,
+        "role": u.role,
+        "rol_contrato": body.role
+    }
+    if temp_pass:
+        res["_dev_clave"] = temp_pass
+    return res

@@ -401,3 +401,78 @@ def expirar_credenciales(db: Session, dias_aviso: int = 30) -> int:
 
     db.commit()
     return len(vencidas)
+
+
+# --------------------------------------------------- notificaciones certificación laboral
+def notificar_evento_certificacion_laboral(
+    db: Session,
+    contrato_id: uuid.UUID,
+    periodo_nombre: str,
+    doc_nombre: str,
+    accion: str,
+    detalle: str | None = None,
+    destinatario_email: str | None = None,
+) -> None:
+    """
+    Emite alerta y despacha notificación por correo según la configuración
+    de alertas_config del contrato (Sección 4.3).
+    """
+    c = db.get(Contrato, contrato_id)
+    if not c:
+        return
+
+    sev = "advertencia" if accion in ("observar", "rechazar") else "informativa"
+    est = "nueva"
+
+    if accion == "observar":
+        titulo = f"Documento observado en {periodo_nombre}: {doc_nombre}"
+        descripcion = f"El ADC ha registrado observaciones: {detalle or 'Sin detalle adicional'}. Requiere corrección por RR.HH."
+    elif accion == "rechazar":
+        titulo = f"Documento rechazado en {periodo_nombre}: {doc_nombre}"
+        descripcion = f"El ADC ha rechazado la entrega: {detalle or 'Sin detalle adicional'}. Debe subirse una nueva versión."
+    elif accion == "aprobar":
+        titulo = f"Documento aprobado en {periodo_nombre}: {doc_nombre}"
+        descripcion = f"El requisito '{doc_nombre}' fue aprobado por la auditoría ADC."
+    elif accion == "cargar":
+        titulo = f"Nueva entrega en {periodo_nombre}: {doc_nombre}"
+        descripcion = f"Se cargó una nueva entrega para revisión ADC: {detalle or ''}"
+    elif accion == "cierre":
+        titulo = f"Período cerrado exitosamente: {periodo_nombre}"
+        descripcion = f"El período {periodo_nombre} del contrato {c.nombre} alcanzó 100% de cumplimiento y fue cerrado."
+        sev = "informativa"
+    else:
+        titulo = f"Actualización en {periodo_nombre}: {doc_nombre}"
+        descripcion = detalle or ""
+
+    alerta = Alerta(
+        company_id=c.company_id,
+        contrato_id=c.id,
+        severidad=sev,
+        estado=est,
+        origen="sistema",
+        titulo=titulo,
+        descripcion=descripcion
+    )
+    db.add(alerta)
+
+    email_dest = destinatario_email
+    if not email_dest and getattr(c, "alertas_config", None) and isinstance(c.alertas_config, dict):
+        destinatarios = c.alertas_config.get("destinatarios") or []
+        if destinatarios and isinstance(destinatarios, list):
+            email_dest = destinatarios[0]
+
+    if not email_dest:
+        email_dest = "rrhh@acredittia.cl" if accion in ("observar", "rechazar") else "adc@acredittia.cl"
+
+    try:
+        from .email import enviar_email
+        cuerpo = f"""
+        <p><strong>Contrato:</strong> {c.nombre} ({c.codigo or 'S/C'})</p>
+        <p><strong>Período:</strong> {periodo_nombre}</p>
+        <p><strong>Documento:</strong> {doc_nombre}</p>
+        <p><strong>Acción:</strong> {accion.upper()}</p>
+        <p><strong>Detalle:</strong> {detalle or 'Sin comentarios'}</p>
+        """
+        enviar_email(email_dest, f"[Certificación Laboral] {titulo}", cuerpo)
+    except Exception as e:
+        log.warning("No se pudo despachar email de notificación certificación laboral: %s", e)

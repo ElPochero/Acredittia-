@@ -69,7 +69,7 @@ import type {
 
   SyncLog, Tendencia, TipoRequisito, TipoReporte, Tokens, TrabajadorIn, TrabajadorPatch,
 
-  Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento,
+  Rol, Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento, PeriodoDocumentoVersionItem, MisPendientesRrhhRespuesta,
 
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
 
@@ -317,7 +317,7 @@ export const empresa = {
 
   invitar: (body: {
 
-    nombre: string; email: string; role?: "company" | "contract_admin" | "visor";
+    nombre: string; email: string; role?: "company" | "contract_admin" | "visor" | "adc" | "rrhh";
 
     contrato_id?: string | null; unidad_negocio?: string | null;
 
@@ -1926,130 +1926,174 @@ export const suscripcion = {
 // ============================================================================
 
 export const certificacion = {
+  compartir: async (
+    contratoId: string,
+    body: { nombre: string; email: string; role?: Rol; unidad_negocio?: string | null }
+  ) => {
+    return await api<{
+      ok: boolean;
+      contrato_id: string;
+      user_id: string;
+      email: string;
+      role: string;
+      _dev_clave?: string;
+    }>(`/contratos/${contratoId}/compartir`, { method: "POST", body });
+  },
+
+  listarPeriodosContrato: async (
+    contratoId: string,
+    params?: ParamsPagina & { estado?: string; orden?: string }
+  ) => {
+    return await api<Pagina<PeriodoLaboral>>(`/contratos/${contratoId}/periodos`, { query: q(params) });
+  },
+
+  obtenerNominaPeriodo: async (contratoId: string, periodoId: string) => {
+    return await api<NominaPeriodoRespuesta>(`/contratos/${contratoId}/periodos/${periodoId}/nomina`);
+  },
+
+  obtenerContrato: async (contratoId: string) => {
+    return await api<ContratoCertificacionLaboral>(`/certificacion-laboral/contratos/${contratoId}`);
+  },
+
+  listarContratos: async (params?: ParamsPagina & { busqueda?: string; estado?: string }) => {
+    return await api<Pagina<ContratoCertificacionLaboral>>("/certificacion-laboral/contratos", { query: q(params) });
+  },
+
+  listarRequisitosContrato: async (contratoId: string) => {
+    return await api<ContratoRequisitoLaboral[]>(`/contratos/${contratoId}/requisitos-laborales`);
+  },
+
+  actualizarRequisitoContrato: async (
+    contratoId: string,
+    reqId: string,
+    cambios: { obligatorio?: boolean; regla_no_aplica?: string; fuente?: string }
+  ) => {
+    return await patch<ContratoRequisitoLaboral>(
+      `/contratos/${contratoId}/requisitos-laborales/${reqId}`,
+      cambios
+    );
+  },
 
   listarPeriodos: async (params?: ParamsPagina & { estado?: string; contrato_id?: string; search?: string }) => {
-
     return await api<Pagina<PeriodoLaboral>>("/periodos", { query: q(params) });
-
   },
-
-
 
   obtenerPeriodo: async (id: string) => {
-
     return await api<PeriodoLaboral>(`/periodos/${id}`);
-
   },
-
-
 
   crearPeriodo: async (body: {
-
     contrato_id: string;
-
     nombre: string;
-
     tipo: string;
-
     fecha_inicio: string;
-
     fecha_fin: string;
-
   }) => {
-
     return await api<PeriodoLaboral>(`/contratos/${body.contrato_id}/periodos`, { method: "POST", body });
-
   },
-
-
 
   actualizarPeriodo: async (id: string, cambios: Partial<PeriodoLaboral>) => {
-
     return await patch<PeriodoLaboral>(`/periodos/${id}`, cambios);
-
   },
-
-
 
   eliminarPeriodo: async (id: string) => {
-
     return await api<{ ok: boolean }>(`/periodos/${id}`, { method: "DELETE" });
-
   },
-
-
 
   matrizDocumental: async (periodoId: string): Promise<MatrizCumplimientoData> => {
-
     return await api<MatrizCumplimientoData>(`/periodos/${periodoId}/matriz`);
-
   },
-
-
 
   subirDocumento: async (
-
     periodoId: string,
-
     body: { sujeto_id: string; requisito_template_id: string; archivo_url?: string }
-
   ) => {
-
     return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos`, {
-
       method: "POST",
-
       body,
-
     });
-
   },
-
-
 
   auditarDocumento: async (
-
     documentoId: string,
-
     body: { accion: "aprobar" | "observar" | "rechazar"; observacion?: string }
-
   ) => {
-
     return await api<PeriodoDocumento>(`/periodos/documentos/${documentoId}/auditar`, {
-
       method: "POST",
-
       body,
-
     });
-
   },
-
-
 
   historialAuditoria: async (documentoId: string): Promise<AuditoriaDocumento[]> => {
-
     return await api<AuditoriaDocumento[]>(`/periodos/documentos/${documentoId}/historial`);
-
   },
 
+  subirDocumentoDirecto: async (
+    periodoId: string,
+    docId: string,
+    body: { archivo_url: string; archivo_nombre?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos/${docId}/subir`, {
+      method: "POST",
+      body,
+    });
+  },
 
+  listarTrazabilidad: async (periodoId: string) => {
+    return await api<TrazabilidadEvento[]>(`/periodos/${periodoId}/trazabilidad`);
+  },
 
   dashboardCumplimiento: async (periodoId: string): Promise<CumplimientoDashboardData> => {
-
     return await api<CumplimientoDashboardData>(`/periodos/${periodoId}/dashboard`);
-
   },
 
+  revisarDocumento: async (
+    periodoId: string,
+    docId: string,
+    body: { accion: "aprobar" | "observar" | "rechazar" | "no_aplica"; comentario?: string }
+  ) => {
+    return await api<PeriodoDocumento>(`/periodos/${periodoId}/documentos/${docId}/revisar`, {
+      method: "POST",
+      body,
+    });
+  },
+
+  marcarDocumentoVisto: async (periodoId: string, docId: string) => {
+    return await api<{ ok: boolean }>(`/periodos/${periodoId}/documentos/${docId}/marcar-visto`, {
+      method: "POST",
+    });
+  },
+
+  listarVersiones: async (periodoId: string, docId: string): Promise<PeriodoDocumentoVersionItem[]> => {
+    return await api<PeriodoDocumentoVersionItem[]>(`/periodos/${periodoId}/documentos/${docId}/versiones`);
+  },
+
+  cerrarPeriodo: async (periodoId: string): Promise<PeriodoLaboral> => {
+    return await api<PeriodoLaboral>(`/periodos/${periodoId}/cerrar`, {
+      method: "POST",
+    });
+  },
+
+  obtenerMisPendientes: async (): Promise<MisPendientesRrhhRespuesta> => {
+    return await api<MisPendientesRrhhRespuesta>("/certificacion-laboral/mis-pendientes");
+  },
+
+  sincronizarBuk: async (contratoId: string, periodoId: string, simularExito?: boolean) => {
+    return await api<{
+      ok: boolean;
+      modo: "buk_api" | "manual_fallback";
+      mensaje: string;
+      trabajadores_sincronizados: number;
+      documentos_sincronizados: number;
+      logs: string[];
+    }>(
+      `/contratos/${contratoId}/periodos/${periodoId}/sincronizar-buk${
+        simularExito ? "?simular_exito=true" : ""
+      }`,
+      { method: "POST" }
+    );
+  },
 };
-
-
-
-
-
-
-
-
 
 export const emails = {
 

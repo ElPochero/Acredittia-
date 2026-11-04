@@ -80,7 +80,7 @@ export type ParamsPagina = {
 
 // ============================================================================
 
-export type Rol = "admin" | "company" | "contract_admin" | "visor";
+export type Rol = "admin" | "company" | "contract_admin" | "visor" | "adc" | "rrhh";
 
 export type EstadoEmpresa = "pending" | "approved" | "rejected";
 
@@ -2538,203 +2538,254 @@ export type RequisitoFila = {
 
 // ============================================================================
 
-export type EstadoPeriodo = "abierto" | "en_revision" | "cerrado";
-
+export type EstadoPeriodo = "abierto" | "en_auditoria" | "en_revision" | "cerrado" | "sin_periodo";
 export type EstadoPeriodoDoc =
-
   | "pendiente"
-
   | "cargado"
-
   | "en_revision"
-
   | "aprobado"
-
   | "observado"
+  | "rechazado"
+  | "vencido"
+  | "no_aplica";
 
-  | "rechazado";
+export type ContratoCertificacionLaboral = {
+  id: string;
+  nombre: string;
+  codigo?: string | null;
+  empresa_proveedora?: string | null;
+  empresa_nombre?: string | null;
+  mandante?: string | null;
+  mandante_nombre?: string | null;
+  faena_nombre?: string | null;
+  estado: string;
+  estado_contractual?: string;
+  fecha_inicio?: string | null;
+  fecha_termino?: string | null;
+  periodo_vigente_id?: string | null;
+  periodo_vigente_nombre?: string | null;
+  estado_periodo?: string | null;
+  porcentaje_cumplimiento: number;
+  pendientes_carga_count: number;
+  por_revisar_count: number;
+  aprobados_count: number;
+  observados_count: number;
+  adc_asignado?: string | null;
+  rrhh_asignado?: string | null;
+};
 
-
+export type ContratoRequisitoLaboral = {
+  id: string;
+  contrato_id: string;
+  nombre: string;
+  ambito: "contrato" | "trabajador";
+  fuente: "manual" | "buk";
+  obligatorio: boolean;
+  regla_no_aplica: "excluir" | "cumplido";
+  created_at?: string;
+  updated_at?: string;
+};
 
 export type PeriodoLaboral = {
-
   id: string;
-
   contrato_id: string;
-
   contrato_nombre?: string;
-
   nombre: string;
-
   tipo: "mensual" | "quincenal" | "otro";
-
   fecha_inicio: string;
-
   fecha_fin: string;
-
   estado: EstadoPeriodo;
-
   porcentaje_cumplimiento: number;
-
+  mes_anio?: string | null;
+  fecha_limite?: string | null;
+  por_revisar_count?: number;
   total_requeridos?: number;
-
   total_aprobados?: number;
-
   total_pendientes?: number;
-
   total_observados?: number;
-
   total_rechazados?: number;
-
   created_at?: string;
-
 };
-
-
 
 export type PeriodoDocumentoRequerido = {
-
   id: string;
-
   periodo_id: string;
-
   requisito_template_id: string;
-
   requisito_nombre: string;
-
   ambito: Ambito;
-
   obligatorio: boolean;
-
 };
-
-
 
 export type PeriodoDocumento = {
-
   id: string;
-
   periodo_id: string;
-
   sujeto_id: string;
-
   sujeto_nombre: string;
-
   sujeto_rut: string;
-
   sujeto_cargo?: string;
-
   requisito_template_id: string;
-
   requisito_nombre: string;
-
   archivo_url?: string | null;
-
   estado: EstadoPeriodoDoc;
-
   fecha_carga?: string | null;
-
   cargado_por?: string | null;
-
   observaciones?: string | null;
-
   version?: number;
-
+  abierto_por_adc?: boolean;
+  revisado_por?: string | null;
+  fecha_revision?: string | null;
 };
-
-
 
 export type AuditoriaDocumento = {
-
   id: string;
-
   periodo_documento_id: string;
-
   auditor_id?: string;
-
   auditor_nombre: string;
-
   accion: "cargar" | "aprobar" | "observar" | "rechazar";
-
   observacion?: string;
-
   fecha: string;
-
   version: number;
-
 };
-
-
 
 export type MatrizSujeto = {
-
   id: string;
-
   nombre: string;
-
   rut: string;
-
   cargo?: string;
-
 };
-
-
 
 export type MatrizRequisito = {
-
   id: string;
-
   nombre: string;
-
   ambito: Ambito;
-
   obligatorio: boolean;
-
 };
-
-
 
 export type MatrizCumplimientoData = {
-
   periodo: PeriodoLaboral;
-
   sujetos: MatrizSujeto[];
-
   requisitos: MatrizRequisito[];
-
   celdas: Record<string, PeriodoDocumento>;
-
 };
 
-
+export type DocumentoCumplimientoItem = {
+  nombre: string;
+  ambito: string;
+  total: number;
+  aprobados: number;
+  observados: number;
+  en_revision: number;
+  pendientes: number;
+  porcentaje: number;
+};
 
 export type CumplimientoDashboardData = {
-
   total_requeridos: number;
-
   pendientes: number;
-
   cargados: number;
-
   en_revision: number;
-
   aprobados: number;
-
   observados: number;
-
   rechazados: number;
-
   porcentaje_cumplimiento: number;
-
-  por_tipo: { tipo: string; porcentaje: number; total: number; aprobados: number }[];
-
+  etapa_actual?: number;
+  etapa_nombre?: string;
+  por_documento?: DocumentoCumplimientoItem[];
+  por_tipo?: { tipo: string; porcentaje: number; total: number; aprobados: number }[];
   alertas: string[];
+};
 
+export type TrazabilidadEvento = {
+  id: string;
+  fecha: string;
+  usuario_nombre: string;
+  rol: string;
+  accion: string;
+  icono: string;
+  detalle: string;
+  documento_nombre?: string | null;
+  version?: number;
 };
 
 
 
+export type TrabajadorNominaItem = {
+  id: string;
+  nombre: string;
+  rut: string;
+  cargo: string;
+  estado: string;
+  fecha_ingreso?: string | null;
+};
 
+export type ResumenNominaPeriodo = {
+  total_vigentes: number;
+  total_incorporaciones: number;
+  total_bajas: number;
+  total_nomina: number;
+};
+
+export type NominaPeriodoRespuesta = {
+  periodo_id: string;
+  periodo_nombre: string;
+  estado_periodo: string;
+  inmutable: boolean;
+  datos: {
+    resumen: ResumenNominaPeriodo;
+    vigentes: TrabajadorNominaItem[];
+    incorporaciones: TrabajadorNominaItem[];
+    bajas: TrabajadorNominaItem[];
+  };
+};
+
+export type PeriodoDocumentoVersionItem = {
+  id: string;
+  version: number;
+  archivo_url?: string | null;
+  cargado_por?: string | null;
+  subido_por_nombre?: string | null;
+  fecha_carga?: string | null;
+  estado: EstadoPeriodoDoc;
+  observaciones?: string | null;
+  revisado_por?: string | null;
+  revisado_por_nombre?: string | null;
+  fecha_revision?: string | null;
+  abierto_por_adc?: boolean;
+};
+
+export type MisPendientesDocumentoItem = {
+  documento_id: string;
+  periodo_id: string;
+  periodo_nombre: string;
+  contrato_id: string;
+  contrato_nombre: string;
+  requisito_nombre: string;
+  ambito: string;
+  sujeto_nombre: string;
+  estado: EstadoPeriodoDoc;
+  observaciones?: string | null;
+  version?: number;
+  fecha_revision?: string | null;
+  fecha_limite?: string | null;
+};
+
+export type MisPendientesPeriodoItem = {
+  periodo_id: string;
+  periodo_nombre: string;
+  contrato_id: string;
+  contrato_nombre: string;
+  fecha_limite?: string | null;
+  dias_restantes: number;
+  estado: EstadoPeriodo;
+  porcentaje_cumplimiento: number;
+};
+
+export type MisPendientesRrhhRespuesta = {
+  observados_rechazados: MisPendientesDocumentoItem[];
+  pendientes_carga: MisPendientesDocumentoItem[];
+  periodos_proximos: MisPendientesPeriodoItem[];
+  total_pendientes: number;
+};
 
 export interface EmailPreview {
 

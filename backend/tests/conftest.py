@@ -592,3 +592,25 @@ def crear_contract_admin(
         "contrato_id": contrato_id,
         "headers": {"Authorization": f"Bearer {token}"},
     }
+
+
+@pytest.fixture
+def client(app_cliente):
+    return app_cliente
+
+
+@pytest.fixture
+def user_token(empresa_a, contrato_a):
+    return empresa_a["token"]
+
+
+@pytest.fixture
+def session(sesion_db):
+    from app.database import set_ctx
+
+    @sa.event.listens_for(sesion_db, "after_begin")
+    def _ensure_admin_begin(s, transaction, connection):
+        set_ctx(is_admin=True)
+        connection.exec_driver_sql("SELECT set_config('app.is_admin', 'true', true)")
+
+    return sesion_db

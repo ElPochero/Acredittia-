@@ -34,9 +34,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ayudaAbierta, setAyudaAbierta] = useState(false);
 
   useEffect(() => {
-    if (!currentUser()) {
+    const u = currentUser();
+    if (!u) {
       router.replace("/login");
       return;
+    }
+    // RBAC: perfil RR.HH. entra directamente y exclusivamente a Certificación Laboral (CA 8)
+    if (u.role === "rrhh") {
+      const p = window.location.pathname;
+      if (!p.startsWith("/certificacion-laboral") && p !== "/alertas") {
+        if (typeof (window as any).setAppRoute === "function") {
+          (window as any).setAppRoute("/certificacion-laboral");
+        } else {
+          router.replace("/certificacion-laboral");
+        }
+      }
     }
     setListo(true);
   }, [router]);

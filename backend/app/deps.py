@@ -118,7 +118,7 @@ def contrato_permitido(user: User, contrato) -> bool:
     * un `contract_admin`/`visor` **encargado jerárquico** de la unidad de
       negocio del contrato: ese acceso es automático (v14).
     """
-    if user.role not in ("contract_admin", "visor"):
+    if user.role not in ("contract_admin", "visor", "rrhh"):
         return True
     if user.contrato_id == contrato.id:
         return True
@@ -133,7 +133,7 @@ def require_contrato(contrato_id: uuid.UUID, user: User, contrato=None) -> None:
     `contrato` es opcional: si se pasa el contrato ya cargado, también se
     acepta el acceso por unidad de negocio.
     """
-    if user.role in ("contract_admin", "visor"):
+    if user.role in ("contract_admin", "visor", "rrhh"):
         if user.contrato_id == contrato_id:
             return
         if contrato is not None and contrato_permitido(user, contrato):
@@ -143,7 +143,7 @@ def require_contrato(contrato_id: uuid.UUID, user: User, contrato=None) -> None:
 
 def contrato_scope(user: User) -> uuid.UUID | None:
     """Contrato al que está acotado el usuario, o None si ve todos."""
-    return user.contrato_id if user.role in ("contract_admin", "visor") else None
+    return user.contrato_id if user.role in ("contract_admin", "visor", "rrhh") else None
 
 
 # --------------------------------------------------------------- paginación
