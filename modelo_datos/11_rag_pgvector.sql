@@ -104,3 +104,6 @@ BEGIN
     CREATE INDEX IF NOT EXISTS ix_sujetos_plantilla ON sujetos (plantilla_id);
   END IF;
 END $$;
+
+
+INSERT INTO app_schema_migrations (version) VALUES (11) ON CONFLICT DO NOTHING;

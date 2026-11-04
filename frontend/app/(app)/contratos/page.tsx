@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import * as Api from "@/lib/cliente";
-import { NuevaModalContrato } from "@/components/contratos/NuevaModalContrato";
-import { ContratosTable, estadoVigencia, type EstadoVig } from "@/components/contratos/ContratosTable";
-import { Modal } from "@/components/ui";
-import type { Contrato } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import { NuevaModalContrato } from "@/components/platform/contratos/NuevaModalContrato";
+import { ContratosTable, estadoVigencia, type EstadoVig } from "@/components/platform/contratos/ContratosTable";
+import { Modal } from "@/components/shared/ui";
+import type { Contrato } from "@/lib/platform/tipos";
 
 export default function ContratosPage() {
   const [loading, setLoading] = useState(true);

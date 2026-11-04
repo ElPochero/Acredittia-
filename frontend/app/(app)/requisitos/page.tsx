@@ -2,10 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import * as Api from "@/lib/cliente";
-import { abrirDescarga } from "@/lib/api";
-import { Modal, Paginador, Stepper } from "@/components/ui";
-import type { RequisitoFila, Ambito, TipoRequisito, EstadoCalc } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import { abrirDescarga } from "@/lib/platform/api";
+import { Modal, Paginador, Stepper } from "@/components/shared/ui";
+import type { RequisitoFila, Ambito, TipoRequisito, EstadoCalc } from "@/lib/platform/tipos";
 
 type RequisitoFilaExt = RequisitoFila & {
   codigo?: string;

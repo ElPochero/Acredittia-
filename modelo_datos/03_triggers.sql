@@ -159,6 +159,9 @@ CREATE OR REPLACE FUNCTION fn_check_sujeto_tenant() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE v_owner uuid;
 BEGIN
+  IF NEW.contrato_id IS NULL THEN
+    RETURN NEW;
+  END IF;
   SELECT company_id INTO v_owner FROM contratos WHERE id = NEW.contrato_id;
   IF v_owner IS NULL OR v_owner <> NEW.company_id THEN
     RAISE EXCEPTION 'sujetos.company_id (%) no coincide con el contrato (%)', NEW.company_id, v_owner
@@ -187,3 +190,6 @@ CREATE TRIGGER trg_actividad_inmutable
 CREATE TRIGGER trg_bitacora_inmutable
   BEFORE UPDATE OR DELETE ON bitacora_cambios
   FOR EACH ROW EXECUTE FUNCTION fn_solo_insert();
+
+
+INSERT INTO app_schema_migrations (version) VALUES (3) ON CONFLICT DO NOTHING;

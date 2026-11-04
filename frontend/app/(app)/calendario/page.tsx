@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import * as Api from "@/lib/cliente";
-import type { EventoCalendario, Contrato, CategoriaEvento } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { EventoCalendario, Contrato, CategoriaEvento } from "@/lib/platform/tipos";
 
 // --- Íconos SVG limpios ---
 const CalendarIcon = () => (

@@ -124,3 +124,6 @@ CREATE POLICY p_hallazgos ON ia_hallazgos
                  AND (app_is_admin() OR r.company_id = app_company_id())))
   WITH CHECK (EXISTS (SELECT 1 FROM ia_reviews r WHERE r.id = review_id
                  AND (app_is_admin() OR r.company_id = app_company_id())));
+
+
+INSERT INTO app_schema_migrations (version) VALUES (4) ON CONFLICT DO NOTHING;

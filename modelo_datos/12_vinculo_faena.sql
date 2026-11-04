@@ -8,3 +8,6 @@
 -- ============================================================================
 
 ALTER TYPE vinculo_tipo ADD VALUE IF NOT EXISTS 'faena';
+
+
+INSERT INTO app_schema_migrations (version) VALUES (12) ON CONFLICT DO NOTHING;

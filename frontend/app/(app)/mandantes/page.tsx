@@ -2,10 +2,10 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import * as Api from "@/lib/cliente";
-import type { MandanteAgrupado } from "@/lib/tipos";
-import { Spinner, Vacio } from "@/components/ui";
-import { NuevaModalContrato } from "@/components/contratos/NuevaModalContrato";
+import * as Api from "@/lib/platform/cliente";
+import type { MandanteAgrupado } from "@/lib/platform/tipos";
+import { Spinner, Vacio } from "@/components/shared/ui";
+import { NuevaModalContrato } from "@/components/platform/contratos/NuevaModalContrato";
 
 export default function MandantesPage() {
   const [loading, setLoading] = useState(true);

@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import * as Api from "@/lib/cliente";
-import type { PlantillaRequisito, Faena } from "@/lib/tipos";
+import * as Api from "@/lib/platform/cliente";
+import type { PlantillaRequisito, Faena } from "@/lib/platform/tipos";
 
 // --- Íconos SVG limpios ---
 const FileTextIcon = () => (

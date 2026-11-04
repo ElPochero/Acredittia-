@@ -2,28 +2,31 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import * as Api from "@/lib/cliente";
-import type { Sujeto } from "@/lib/tipos";
-import { ExportarDocumentosModal } from "@/components/ExportarDocumentosModal";
+import * as Api from "@/lib/platform/cliente";
+import type { Sujeto } from "@/lib/platform/tipos";
+import { ExportarDocumentosModal } from "@/components/platform/ExportarDocumentosModal";
+import { AgregarSujetosModal } from "@/components/platform/AgregarSujetosModal";
 
 export default function EquiposPage() {
   const [loading, setLoading] = useState(true);
   const [equiposList, setEquiposList] = useState<Sujeto[]>([]);
   const [search, setSearch] = useState("");
   const [exportando, setExportando] = useState(false);
+  const [showAgregarModal, setShowAgregarModal] = useState(false);
+
+  async function fetchEquipos() {
+    setLoading(true);
+    try {
+      const res = await Api.equipos.listar({ page_size: 50 });
+      setEquiposList(res.items || []);
+    } catch (err) {
+      console.error("Error al cargar equipos:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function fetchEquipos() {
-      setLoading(true);
-      try {
-        const res = await Api.equipos.listar({ page_size: 50 });
-        setEquiposList(res.items || []);
-      } catch (err) {
-        console.error("Error al cargar equipos:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchEquipos();
   }, []);
 
@@ -50,7 +53,10 @@ export default function EquiposPage() {
           <button onClick={() => setExportando(true)} className="px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50">
             ↓ Exportar
           </button>
-          <button className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+          <button
+            onClick={() => setShowAgregarModal(true)}
+            className="px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          >
             + Agregar equipo
           </button>
         </div>
@@ -185,6 +191,13 @@ export default function EquiposPage() {
       <ExportarDocumentosModal
         abierto={exportando}
         onCerrar={() => setExportando(false)}
+      />
+
+      <AgregarSujetosModal
+        cat="equipo"
+        abierto={showAgregarModal}
+        onCerrar={() => setShowAgregarModal(false)}
+        onGuardado={fetchEquipos}
       />
     </div>
   );

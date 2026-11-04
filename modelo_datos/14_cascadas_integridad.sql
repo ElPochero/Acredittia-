@@ -52,3 +52,6 @@ ALTER TABLE alertas DROP CONSTRAINT IF EXISTS alertas_documento_id_fkey,
 
 ALTER TABLE eventos_calendario DROP CONSTRAINT IF EXISTS eventos_calendario_documento_id_fkey,
   ADD CONSTRAINT eventos_calendario_documento_id_fkey FOREIGN KEY (documento_id) REFERENCES documentos(id) ON DELETE CASCADE;
+
+
+INSERT INTO app_schema_migrations (version) VALUES (14) ON CONFLICT DO NOTHING;

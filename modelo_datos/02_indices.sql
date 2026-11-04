@@ -80,3 +80,6 @@ CREATE INDEX ix_notifpref_company    ON notificacion_preferencias (company_id);
 -- --- Bitácora técnica ---
 CREATE INDEX ix_bitacora_registro    ON bitacora_cambios (tabla, registro_id);
 CREATE INDEX ix_bitacora_brin        ON bitacora_cambios USING brin (created_at);
+
+INSERT INTO app_schema_migrations (version) VALUES (2) ON CONFLICT DO NOTHING;
+
