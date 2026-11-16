@@ -81,8 +81,9 @@ SCHEMA_SCRIPTS = [
     "16_alertas_ia.sql",
     "17_gemini_embeddings.sql",
     "18_contratos_mandante.sql",
+    "19_eventos_calendario_sujeto_contrato.sql",
 ]
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -254,16 +255,20 @@ def _indice_existe(conn, tabla: str, indice: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = cascadas integridad · 15 = unidad de negocio · 16 = alertas IA por contrato · 17 = embeddings Gemini 768 dims · 18 = contratos mandante."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = cascadas integridad · 15 = unidad de negocio · 16 = alertas IA por contrato · 17 = embeddings Gemini 768 dims · 18 = contratos mandante · 19 = eventos calendario sujeto contrato."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "app_schema_migrations"):
             v = c.execute(text("SELECT max(version) FROM app_schema_migrations")).scalar()
             if v is not None:
-                return int(v)
+                if int(v) >= 19 and not _columna_existe(c, "eventos_calendario", "sujeto_id"):
+                    return 18
+                return 17 if int(v) >= 18 and not (_columna_existe(c, "users", "auth_version") and _tabla_existe(c, "contrato_requisitos_laborales") and _columna_existe(c, "documentos", "estado_plataforma") and _enum_tiene(c, "user_role", "adc")) else int(v)
         if _tabla_existe(c, "documento_chunk"):
-            if _columna_existe(c, "contratos", "mandante"):
+            if _columna_existe(c, "eventos_calendario", "sujeto_id"):
+                return 19
+            if _columna_existe(c, "contratos", "mandante") and _columna_existe(c, "users", "auth_version") and _tabla_existe(c, "contrato_requisitos_laborales") and _columna_existe(c, "documentos", "estado_plataforma") and _enum_tiene(c, "user_role", "adc"):
                 return 18
             if _indice_existe(c, "documento_chunk", "ix_chunk_embedding_hnsw"):
                 return 17
@@ -364,6 +369,13 @@ def apply_schema(schema_dir: str | None = None) -> int:
                   ADD COLUMN IF NOT EXISTS ciclo_actor_id uuid REFERENCES users(id) ON DELETE SET NULL;
                 CREATE INDEX IF NOT EXISTS ix_contratos_company_ciclo ON contratos (company_id, ciclo_estado, nombre);
                 CREATE INDEX IF NOT EXISTS ix_contratos_ciclo_actor ON contratos (ciclo_actor_id);
+                ALTER TABLE eventos_calendario
+                  ADD COLUMN IF NOT EXISTS sujeto_id UUID REFERENCES sujetos(id) ON DELETE CASCADE,
+                  ADD COLUMN IF NOT EXISTS contrato_id UUID REFERENCES contratos(id) ON DELETE CASCADE,
+                  ADD COLUMN IF NOT EXISTS centro_atencion TEXT,
+                  ADD COLUMN IF NOT EXISTS enviar_notificacion BOOLEAN NOT NULL DEFAULT FALSE;
+                CREATE INDEX IF NOT EXISTS ix_eventos_calendario_sujeto ON eventos_calendario (sujeto_id);
+                CREATE INDEX IF NOT EXISTS ix_eventos_calendario_contrato ON eventos_calendario (contrato_id);
             """)
         finally:
             raw.close()
@@ -395,9 +407,11 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 14: SCHEMA_SCRIPTS[13:],
                 15: SCHEMA_SCRIPTS[14:],
                 16: SCHEMA_SCRIPTS[15:],
-                17: SCHEMA_SCRIPTS[16:],
+                17: ["09_certificacion_laboral.sql", "13_rol_visor.sql", "16_alertas_ia.sql", "18_contratos_mandante.sql", "19_eventos_calendario_sujeto_contrato.sql"],
+                18: ["19_eventos_calendario_sujeto_contrato.sql"],
             }
             pendientes = scripts_por_version.get(actual, [])
+            cur.execute("CREATE TABLE IF NOT EXISTS app_schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
 
             for nombre in pendientes:
                 ruta = os.path.join(sdir, nombre)

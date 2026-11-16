@@ -840,6 +840,10 @@ class EventoCalendario(Base):
     fecha: Mapped[date] = mapped_column(Date)
     descripcion: Mapped[str | None] = mapped_column(Text)
     documento_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("documentos.id"))
+    sujeto_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sujetos.id", ondelete="CASCADE"))
+    contrato_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contratos.id", ondelete="CASCADE"))
+    centro_atencion: Mapped[str | None] = mapped_column(Text)
+    enviar_notificacion: Mapped[bool] = mapped_column(Boolean, default=False)
     completado: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
