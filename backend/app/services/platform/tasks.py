@@ -34,17 +34,20 @@ import random
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from . import ia_consultas
 from ...database import worker_session
 from ...models import (
     Alerta,
+    Company,
     Contrato,
     Documento,
     DocumentoArchivo,
+    EquivalenciaValidacion,
     Faena,
+    FaenaReglaValidacion,
     IaHallazgo,
     IaReview,
     Reporte,
@@ -56,6 +59,13 @@ from .email import datos_observado_documento, despachar_alerta_email
 from .ia import get_reviewer
 from .jobs import tarea
 from .storage import get_storage
+from .validador_documental import (
+    _extraer_fecha_vencimiento,
+    inferir_clasificacion_documento,
+    normalizar_patente,
+    normalizar_rut_compacto,
+    normalizar_texto,
+)
 
 logger = logging.getLogger("acredittia.tasks")
 
@@ -197,16 +207,243 @@ def _reescribir_hallazgos(db: Session, review: IaReview, hallazgos: list[dict]) 
         )
 
 
+def cargar_contexto_validacion(
+    db: Session,
+    cid: uuid.UUID,
+    *,
+    doc: Documento | None = None,
+    sujeto: Sujeto | None = None,
+    contrato_id: uuid.UUID | None = None,
+    faena_id: uuid.UUID | None = None,
+    tipo_documento_ia: str | None = None,
+) -> dict:
+    """Reúne el contexto de 3 niveles y fuente de verdad del titular para validar."""
+    suj = sujeto or (doc.sujeto if doc and doc.sujeto_id else None)
+    ct_id = contrato_id or (doc.contrato_id if doc else None) or (suj.contrato_id if suj else None)
+    ct = db.get(Contrato, ct_id) if ct_id else None
+    f_id = faena_id or (ct.faena_id if ct else None)
+
+    empresa = db.get(Company, cid)
+    empresa_esperada = (
+        {"nombre": empresa.nombre, "rut": empresa.rut} if empresa else {}
+    )
+
+    if not tipo_documento_ia and doc is not None:
+        ej = doc.template.ejemplo_clave if doc.template else None
+        fam_tpl = getattr(doc.template, "familia_validacion", None) if doc.template else None
+        tipo_tpl = getattr(doc.template, "tipo_documento_ia", None) if doc.template else None
+        _, tipo_documento_ia = inferir_clasificacion_documento(
+            doc.titulo,
+            contexto=contexto_de_documento(doc),
+            ejemplo_clave=ej,
+            familia_override=fam_tpl,
+            tipo_override=tipo_tpl,
+        )
+
+    sujeto_esperado: dict = {}
+    cedula_aprobada: dict | None = None
+    padron_aprobado: dict | None = None
+    anexos_vigentes: list[dict] = []
+
+    if suj is not None:
+        sujeto_esperado = {
+            "id": str(suj.id),
+            "tipo": suj.tipo,
+            "nombre": suj.nombre,
+            "rut": suj.rut,
+            "patente": suj.patente,
+            "cargo": suj.cargo,
+            "marca": suj.marca,
+            "modelo": suj.modelo,
+            "anio": suj.anio,
+        }
+        verif = suj.datos_verificados or {}
+        if verif.get("tipo") == "cedula" or (suj.tipo == "trabajador" and verif.get("nombre_completo")):
+            cedula_aprobada = verif
+        elif verif.get("tipo") == "padron" or (suj.tipo == "equipo" and verif.get("patente")):
+            padron_aprobado = verif
+
+        # Si el trabajador/equipo ya tiene cédula o padrón verificado en otro contrato, heredarlo
+        if suj.tipo == "trabajador" and not cedula_aprobada and suj.rut:
+            rut_obj = normalizar_rut_compacto(suj.rut)
+            rut_norm_sql = func.ltrim(
+                func.regexp_replace(func.upper(Sujeto.rut), r"[^0-9K]", "", "g"),
+                "0",
+            )
+            otro_suj = db.scalar(
+                select(Sujeto)
+                .where(
+                    Sujeto.company_id == cid,
+                    Sujeto.tipo == "trabajador",
+                    Sujeto.id != suj.id,
+                    Sujeto.rut.is_not(None),
+                    rut_norm_sql == rut_obj.lstrip("0"),
+                    Sujeto.datos_verificados["nombre_completo"].as_string().is_not(None),
+                )
+                .limit(1)
+            )
+            if otro_suj is not None:
+                cedula_aprobada = otro_suj.datos_verificados
+        elif suj.tipo == "equipo" and not padron_aprobado and suj.patente:
+            pat_obj = normalizar_patente(suj.patente)
+            pat_norm_sql = func.regexp_replace(
+                func.upper(Sujeto.patente), r"[^A-Z0-9]", "", "g"
+            )
+            otro_eq = db.scalar(
+                select(Sujeto)
+                .where(
+                    Sujeto.company_id == cid,
+                    Sujeto.tipo == "equipo",
+                    Sujeto.id != suj.id,
+                    Sujeto.patente.is_not(None),
+                    pat_norm_sql == pat_obj,
+                    Sujeto.datos_verificados["patente"].as_string().is_not(None),
+                )
+                .limit(1)
+            )
+            if otro_eq is not None:
+                padron_aprobado = otro_eq.datos_verificados
+
+        if tipo_documento_ia == "contrato":
+            hoy_anexo = date.today()
+            docs_anexo = list(
+                db.scalars(
+                    select(Documento).where(
+                        Documento.company_id == cid,
+                        Documento.sujeto_id == suj.id,
+                        Documento.estado == "ok",
+                    )
+                )
+            )
+            for d_anx in docs_anexo:
+                t_anx = normalizar_texto(d_anx.titulo).lower()
+                if "anexo" not in t_anx:
+                    continue
+                if d_anx.vence is not None and d_anx.vence < hoy_anexo:
+                    continue
+                # Revisar último IaReview aprobado del anexo si existe
+                rev_anx = db.scalar(
+                    select(IaReview)
+                    .join(DocumentoArchivo, DocumentoArchivo.ia_review_id == IaReview.id)
+                    .where(
+                        DocumentoArchivo.documento_id == d_anx.id,
+                        IaReview.status == "done",
+                    )
+                    .order_by(IaReview.finished_at.desc().nullslast())
+                    .limit(1)
+                )
+                campos_anx = (rev_anx.campos_extraidos or {}) if rev_anx else {}
+                vig_anx = campos_anx.get("vigencia") if isinstance(campos_anx.get("vigencia"), dict) else {}
+                tipo_anx = normalizar_texto(
+                    vig_anx.get("tipo_contrato") or campos_anx.get("tipo_contrato")
+                ).lower()
+                pasa_indef = bool(
+                    campos_anx.get("pasa_indefinido") is True
+                    or "indefinid" in tipo_anx
+                    or "indefinid" in t_anx
+                )
+                fecha_anx = d_anx.vence or _extraer_fecha_vencimiento(campos_anx)
+                es_prorroga = bool(
+                    pasa_indef
+                    or (fecha_anx is not None and fecha_anx >= hoy_anexo)
+                    or any(k in t_anx for k in ("prorrog", "extension", "vigencia", "plazo", "renov"))
+                    or campos_anx.get("nueva_fecha_termino")
+                )
+                if es_prorroga and (fecha_anx is None or fecha_anx >= hoy_anexo):
+                    anexos_vigentes.append(
+                        {
+                            "documento_id": str(d_anx.id),
+                            "titulo": d_anx.titulo,
+                            "fecha_termino": fecha_anx.isoformat() if fecha_anx else None,
+                            "pasa_indefinido": pasa_indef,
+                        }
+                    )
+
+    override_faena: dict = {}
+    if tipo_documento_ia:
+        reglas_ov = list(
+            db.scalars(
+                select(FaenaReglaValidacion).where(
+                    FaenaReglaValidacion.company_id == cid,
+                    FaenaReglaValidacion.tipo_documento_ia == tipo_documento_ia,
+                )
+            )
+        )
+        # Prioridad: faena -> contrato específico
+        for ov in sorted(
+            reglas_ov,
+            key=lambda x: (
+                1 if (ct_id and x.contrato_id == ct_id) else 0,
+                1 if (f_id and x.faena_id == f_id) else 0,
+            ),
+        ):
+            if (ov.faena_id is None or ov.faena_id == f_id) and (
+                ov.contrato_id is None or ov.contrato_id == ct_id
+            ):
+                override_faena = {
+                    "reglas_activas": {
+                        **(override_faena.get("reglas_activas") or {}),
+                        **(ov.reglas_activas or {}),
+                    },
+                    "bloqueantes_override": {
+                        **(override_faena.get("bloqueantes_override") or {}),
+                        **(ov.bloqueantes_override or {}),
+                    },
+                    "parametros": {
+                        **(override_faena.get("parametros") or {}),
+                        **(ov.parametros or {}),
+                    },
+                }
+
+    equivalencias_list: list[dict] = []
+    eq_rows = list(
+        db.scalars(
+            select(EquivalenciaValidacion).where(
+                EquivalenciaValidacion.company_id == cid
+            )
+        )
+    )
+    for eq in sorted(
+        eq_rows,
+        key=lambda x: 1 if (f_id and x.faena_id == f_id) else 0,
+        reverse=True,
+    ):
+        if eq.faena_id is None or eq.faena_id == f_id:
+            equivalencias_list.append(
+                {
+                    "familia": eq.familia,
+                    "nombre_detectado": eq.nombre_detectado,
+                    "nombre_canonico": eq.nombre_canonico,
+                    "codigo_catalogo": eq.codigo_catalogo,
+                    "confianza": float(eq.confianza),
+                    "confirmado": eq.confirmado,
+                }
+            )
+
+    return {
+        "tipo_documento_ia": tipo_documento_ia,
+        "sujeto_esperado": sujeto_esperado,
+        "empresa_esperada": empresa_esperada,
+        "cedula_aprobada": cedula_aprobada,
+        "padron_aprobado": padron_aprobado,
+        "anexos_vigentes": anexos_vigentes,
+        "override_faena": override_faena,
+        "equivalencias": equivalencias_list,
+    }
+
+
 def _fecha_extraida(campos: dict, clave: str = "fecha_vencimiento") -> date | None:
     """Interpreta una fecha ISO de `campos_extraidos`; None si no es usable."""
     valor = (campos or {}).get(clave)
-    if not valor:
-        return None
-    try:
-        return date.fromisoformat(str(valor)[:10])
-    except ValueError:
-        logger.warning("fecha_vencimiento no interpretable: %r", valor)
-        return None
+    if valor:
+        try:
+            return date.fromisoformat(str(valor)[:10])
+        except ValueError:
+            logger.warning("%s no interpretable: %r", clave, valor)
+            return None
+    if clave == "fecha_vencimiento":
+        return _extraer_fecha_vencimiento(campos or {})
+    return None
 
 
 # ============================================================================
@@ -269,8 +506,15 @@ def revisar_documento(
         _marcar_procesando(db, review)
 
         try:
+            ctx_val = cargar_contexto_validacion(db, cid, doc=doc)
             contenido = get_storage().read(archivo.blob_path)
-            r = get_reviewer().revisar(contenido, archivo.filename, doc, contexto)
+            r = get_reviewer().revisar(
+                contenido,
+                archivo.filename,
+                doc,
+                contexto,
+                contexto_validacion=ctx_val,
+            )
         except Exception as e:  # noqa: BLE001
             logger.exception("revisión %s falló al leer o analizar el blob", rid)
             _fallar(db, rid, f"{type(e).__name__}: {e}")
@@ -278,20 +522,32 @@ def revisar_documento(
 
         try:
             hallazgos = [
-                {"tipo": h.tipo, "codigo": h.codigo, "mensaje": h.mensaje}
+                {
+                    "tipo": h.tipo,
+                    "codigo": h.codigo,
+                    "mensaje": h.mensaje,
+                    "campo": h.campo,
+                    "valor_detectado": h.valor_detectado,
+                    "valor_esperado": h.valor_esperado,
+                }
                 for h in r.hallazgos
             ]
             errores = [h for h in hallazgos if h["tipo"] == "error"]
 
-            campos = {**base, **(r.campos_extraidos or {})}
+            campos = {**base, **(r.campos_extraidos or {}), "_tipo_documento_ia": r.tipo_documento_ia}
+            es_examen_medico = str(r.tipo_documento_ia or "").startswith("examen")
             review.resultado = r.resultado
             review.confianza = round(float(r.confianza), 3)
+            review.validation_status = r.status_v2
+            review.rules_result = r.rules
+            review.summary_result = r.summary
+            review.motivo = r.motivo
             review.status = "done"
             review.error = None
             _reescribir_hallazgos(db, review, hallazgos)
             archivo.ia_review_id = review.id
 
-            if errores or review.resultado == "con_errores":
+            if errores or r.status_v2 == "RECHAZADO" or review.resultado == "con_errores":
                 doc.estado = "falta"
 
                 # El archivo se conserva para trazabilidad y descarga; el documento queda en falta
@@ -303,9 +559,14 @@ def revisar_documento(
                     ]
                 )
                 titulo = f"Documento rechazado por IA: {doc.titulo}"
-                mensajes = [h["mensaje"] for h in errores] or [
-                    "Documento no corresponde al solicitado o contiene errores graves."
-                ]
+                mensajes = (
+                    ["Examen médico rechazado o no apto (detalle clínico reservado para roles autorizados)."]
+                    if es_examen_medico
+                    else (
+                        [h["mensaje"] for h in errores]
+                        or [r.motivo or "Documento no corresponde al solicitado o contiene errores graves."]
+                    )
+                )
                 sujeto_email = (doc.sujeto.email
                                 if doc.sujeto_id and doc.sujeto else None)
                 rechazado = True
@@ -323,8 +584,38 @@ def revisar_documento(
                     )
                 )
                 accion = (
-                    f"documento rechazado y desvinculado; alerta {severidad} "
-                    f"generada ({', '.join(h['codigo'] for h in errores)})"
+                    "documento médico rechazado (detalle clínico reservado)"
+                    if es_examen_medico
+                    else (
+                        f"documento rechazado y desvinculado; alerta {severidad} "
+                        f"generada ({', '.join(h['codigo'] for h in errores)})"
+                    )
+                )
+            elif r.status_v2 == "REQUIERE_REVISION":
+                doc.estado = "falta"
+                severidad = "advertencia"
+                desc_rev = (
+                    "Examen médico requiere revisión humana (detalle clínico reservado para roles autorizados)."
+                    if es_examen_medico
+                    else (r.motivo or "Validación marcó reglas para revisión manual.")
+                )
+                db.add(
+                    Alerta(
+                        company_id=cid,
+                        severidad=severidad,
+                        estado="nueva",
+                        origen="ia",
+                        titulo=f"Documento requiere revisión humana: {doc.titulo}",
+                        descripcion=desc_rev,
+                        documento_id=doc.id,
+                        sujeto_id=doc.sujeto_id,
+                        contrato_id=doc.contrato_id,
+                    )
+                )
+                accion = (
+                    "documento médico marcado para revisión humana (detalle clínico reservado)"
+                    if es_examen_medico
+                    else f"documento marcado para revisión humana ({r.motivo})"
                 )
             else:
                 doc.estado = "ok"
@@ -341,6 +632,40 @@ def revisar_documento(
                     )
                 else:
                     origen_fecha = "vencimiento informado previamente"
+
+                # Fuente de verdad por titular: Cédula (trabajador) / Padrón (equipo) aprobados
+                if doc.sujeto_id and doc.sujeto is not None:
+                    if r.tipo_documento_ia == "cedula":
+                        nom_c = (
+                            f"{campos.get('Nombres', '')} {campos.get('Apellidos', '')}".strip()
+                            or campos.get("nombre_completo")
+                            or campos.get("nombre")
+                            or doc.sujeto.nombre
+                        )
+                        doc.sujeto.datos_verificados = {
+                            "tipo": "cedula",
+                            "rut": campos.get("RUN") or campos.get("rut") or doc.sujeto.rut,
+                            "nombre_completo": nom_c,
+                            "nombres": campos.get("Nombres"),
+                            "apellidos": campos.get("Apellidos"),
+                            "fecha_nacimiento": campos.get("FechaNacimiento"),
+                            "nacionalidad": campos.get("Nacionalidad"),
+                            "numero_documento": campos.get("NumeroDocumento"),
+                            "fecha_vencimiento": _iso_o_none(doc.vence),
+                            "review_id": str(review.id),
+                        }
+                    elif r.tipo_documento_ia == "padron":
+                        doc.sujeto.datos_verificados = {
+                            "tipo": "padron",
+                            "patente": campos.get("Patente") or campos.get("patente") or doc.sujeto.patente,
+                            "vin": campos.get("VIN") or campos.get("vin") or campos.get("chasis"),
+                            "motor": campos.get("Motor") or campos.get("motor"),
+                            "marca": campos.get("Marca") or campos.get("marca") or doc.sujeto.marca,
+                            "modelo": campos.get("Modelo") or campos.get("modelo") or doc.sujeto.modelo,
+                            "anio": campos.get("Anio") or campos.get("anio") or doc.sujeto.anio,
+                            "review_id": str(review.id),
+                        }
+
                 etiqueta = "ok" if r.resultado == "validado" else "ok con observaciones"
                 accion = (
                     f"documento marcado {etiqueta}; "

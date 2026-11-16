@@ -77,7 +77,9 @@ def get_company_id(
     x_company_id: str | None = Header(default=None, alias="X-Company-Id"),
 ) -> uuid.UUID:
     """company_id efectivo. Para el admin proviene del header X-Company-Id o fallback a su empresa/empresa demo."""
-    if user.role in ("company", "contract_admin", "visor") and user.company_id:
+    if user.role != "admin":
+        if not user.company_id:
+            raise err(403, "SIN_EMPRESA", "Usuario sin empresa asignada")
         return user.company_id
     if x_company_id:
         try:

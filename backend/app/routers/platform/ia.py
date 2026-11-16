@@ -56,11 +56,15 @@ from ...deps import (
 )
 from ...models import (
     Alerta,
+    Company,
     Contrato,
     ContratoRequisito,
     Documento,
     DocumentoArchivo,
     DocumentoChunk,
+    EquivalenciaValidacion,
+    Faena,
+    FaenaReglaValidacion,
     IaHallazgo,
     IaReview,
     Sujeto,
@@ -71,9 +75,18 @@ from ...services.platform import actividad
 from ...services.platform.jobs import enqueue
 from ...services.platform.storage import get_storage, make_tmp_path
 
-# Importar el mÃ³dulo de tareas registra TAREAS: sin Ã©l `enqueue` no resolverÃ­a
-# 'revisar_documento' ni las extracciones y solo dejarÃ­a un error en el log.
-from ...services.platform.tasks import contexto_de_documento
+# Importar el módulo de tareas registra TAREAS: sin él `enqueue` no resolvería
+# 'revisar_documento' ni las extracciones y solo dejaría un error en el log.
+from ...services.platform.tasks import cargar_contexto_validacion, contexto_de_documento
+from ...services.platform.validador_documental import (
+    CONTROLES_TRANSVERSALES,
+    FAMILIAS_VALIDACION,
+    PAUTAS_MAESTRAS,
+    TIPOS_DOCUMENTO_VALIDOS,
+    evaluar_validacion_documental,
+    resolver_pauta_efectiva,
+    sanitizar_privacidad_medica,
+)
 
 logger = logging.getLogger("acredittia.ia")
 
@@ -161,17 +174,79 @@ def _hallazgo_out(h: IaHallazgo) -> dict:
     }
 
 
-def review_out(r: IaReview, hallazgos: list[IaHallazgo] | None = None) -> dict:
-    """Serializador de un job de IA (Â§12). Lo reutilizan otros routers."""
+def _contrato_validacion_de_review(r: IaReview, filas: list[IaHallazgo]) -> dict:
+    """Construye el contrato estándar {documentData, rules, summary, status, motivo}."""
+    doc_data = _publicos(r.campos_extraidos)
+    rules = list(getattr(r, "rules_result", None) or [])
+    summary = dict(getattr(r, "summary_result", None) or {})
+    val_status = getattr(r, "validation_status", None)
+    motivo = getattr(r, "motivo", None)
+
+    if not rules and r.status == "done":
+        # Compatibilidad con revisiones sembradas o previas a v2
+        rules = [
+            {
+                "codigo": h.codigo,
+                "campo": h.campo or h.codigo,
+                "resultado": "RECH" if h.tipo == "error" else "OBS" if h.tipo == "warning" else "OK",
+                "bloqueante": h.tipo == "error",
+                "observacion": h.mensaje or "",
+            }
+            for h in filas
+        ]
+        summary = {
+            "OK": sum(1 for x in rules if x["resultado"] == "OK"),
+            "OBS": sum(1 for x in rules if x["resultado"] == "OBS"),
+            "RECH": sum(1 for x in rules if x["resultado"] == "RECH"),
+            "N/A": sum(1 for x in rules if x["resultado"] == "N/A"),
+            "REV": sum(1 for x in rules if x["resultado"] == "REV"),
+            "total": len(rules),
+        }
+
+    if not val_status and r.status == "done":
+        val_status = (
+            "RECHAZADO"
+            if r.resultado == "con_errores"
+            else "APROBADO"
+        )
+    if not motivo and r.status == "done":
+        motivo = (
+            "; ".join(h.mensaje for h in filas if h.tipo in ("error", "warning"))
+            or "Todas las validaciones pasaron exitosamente"
+        )
+
+    return {
+        "documentData": doc_data,
+        "rules": rules,
+        "summary": summary or {"OK": 0, "OBS": 0, "RECH": 0, "N/A": 0, "REV": 0, "total": 0},
+        "status": val_status or ("RECHAZADO" if r.resultado == "con_errores" else "APROBADO"),
+        "motivo": motivo or "",
+    }
+
+
+def review_out(
+    r: IaReview,
+    hallazgos: list[IaHallazgo] | None = None,
+    user_role: str | None = None,
+) -> dict:
+    """Serializador de un job de IA (§12) con contrato v2 y privacidad médica (H8)."""
     campos = r.campos_extraidos or {}
     filas = hallazgos if hallazgos is not None else list(r.hallazgos)
-    return {
+    doc_data = _publicos(campos)
+    validacion = _contrato_validacion_de_review(r, filas)
+    salida = {
         "job_id": str(r.id),
         "status": r.status,
         "context": r.context,
         "resultado": r.resultado,
         "confianza": float(r.confianza) if r.confianza is not None else None,
-        "campos_extraidos": _publicos(campos),
+        "campos_extraidos": doc_data,
+        "documentData": validacion["documentData"],
+        "rules": validacion["rules"],
+        "summary": validacion["summary"],
+        "validation_status": validacion["status"] if r.status == "done" else None,
+        "motivo": validacion["motivo"] if r.status == "done" else None,
+        "validation": validacion if r.status == "done" else None,
         "hallazgos": [_hallazgo_out(h) for h in filas],
         "archivo_id": str(r.archivo_id) if r.archivo_id else None,
         "documento_id": campos.get("documento_id"),
@@ -179,11 +254,14 @@ def review_out(r: IaReview, hallazgos: list[IaHallazgo] | None = None) -> dict:
         "started_at": _iso(r.started_at),
         "finished_at": _iso(r.finished_at),
         "error": r.error,
-        # QuÃ© se hizo con el documento a partir del veredicto. Lo escribe la
-        # tarea; sin Ã©l el usuario ve el resultado de la IA pero no el efecto.
+        # Qué se hizo con el documento a partir del veredicto. Lo escribe la
+        # tarea; sin él el usuario ve el resultado de la IA pero no el efecto.
         "accion_aplicada": campos.get("_accion_aplicada"),
         "created_at": _iso(r.created_at),
     }
+    return sanitizar_privacidad_medica(
+        salida, user_role=user_role, tipo_documento_ia=campos.get("_tipo_documento_ia")
+    )
 
 
 def _archivos_de(
@@ -337,7 +415,28 @@ def detalle_revision(
     scope = contrato_scope(user)
     if scope and not _visible_para_scope(db, cid, r, scope):
         raise err(404, "NO_ENCONTRADO", "El job de IA no existe")
-    return review_out(r)
+    return review_out(r, user_role=user.role)
+
+
+@router.get("/revisiones/{job_id}/validacion")
+def detalle_validacion_estandar(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Contrato estándar único {documentData, rules, summary, status, motivo}."""
+    r = _get_review(db, cid, job_id)
+    scope = contrato_scope(user)
+    if scope and not _visible_para_scope(db, cid, r, scope):
+        raise err(404, "NO_ENCONTRADO", "El job de IA no existe")
+    if r.status != "done":
+        raise err(409, "REVISION_EN_CURSO", f"La revisión está en estado '{r.status}'")
+    validacion = _contrato_validacion_de_review(r, list(r.hallazgos))
+    campos = r.campos_extraidos or {}
+    return sanitizar_privacidad_medica(
+        validacion, user_role=user.role, tipo_documento_ia=campos.get("_tipo_documento_ia")
+    )
 
 
 def _visible_para_scope(
@@ -424,7 +523,314 @@ def listar_revisiones(
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
     q = aplicar_orden(q, IaReview, p.sort, ORDEN_REVISIONES, "-created_at")
     filas = list(db.scalars(q.offset(p.offset).limit(p.page_size)))
-    return sobre([review_out(r) for r in filas], total, p)
+    return sobre([review_out(r, user_role=user.role) for r in filas], total, p)
+
+
+# =============================================================================
+# Motor Común v2: Validación directa, Pautas de 3 Niveles y Equivalencias
+# =============================================================================
+class ValidarDocumentoIn(BaseModel):
+    tipo_documento_ia: str
+    documentData: dict = {}
+    rules: list[dict] | dict | None = None
+    portal_verificacion: dict | None = None
+    sujeto_id: uuid.UUID | None = None
+    contrato_id: uuid.UUID | None = None
+    faena_id: uuid.UUID | None = None
+    worker_rut: str | None = None
+    worker_name: str | None = None
+    fecha_evaluacion: str | None = None
+
+
+class PautaOverrideIn(BaseModel):
+    faena_id: uuid.UUID | None = None
+    contrato_id: uuid.UUID | None = None
+    reglas_activas: dict[str, bool] = {}
+    bloqueantes_override: dict[str, bool] = {}
+    parametros: dict = {}
+
+
+class EquivalenciaIn(BaseModel):
+    faena_id: uuid.UUID | None = None
+    familia: Literal["EXAMENES", "CURSOS"]
+    nombre_detectado: str
+    nombre_canonico: str
+    codigo_catalogo: str | None = None
+    confianza: float = 1.0
+    confirmado: bool = True
+
+
+@router.post("/validar-documento")
+def validar_documento_endpoint(
+    body: ValidarDocumentoIn,
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Ejecuta el motor común v2 con contexto de BD y retorna el contrato único."""
+    from datetime import date as _date
+
+    if body.tipo_documento_ia not in TIPOS_DOCUMENTO_VALIDOS:
+        raise err(400, "TIPO_DOCUMENTO_INVALIDO", f"Tipo de documento no reconocido: {body.tipo_documento_ia}")
+
+    suj = None
+    if body.sujeto_id:
+        suj = db.get(Sujeto, body.sujeto_id)
+        if not suj or suj.company_id != cid:
+            raise err(404, "NO_ENCONTRADO", "El sujeto no existe")
+        if suj.contrato_id:
+            ct_suj = db.get(Contrato, suj.contrato_id)
+            require_contrato(suj.contrato_id, user, contrato=ct_suj)
+        elif contrato_scope(user) is not None:
+            raise err(404, "NO_ENCONTRADO", "El sujeto no existe")
+        if body.contrato_id and suj.contrato_id and suj.contrato_id != body.contrato_id:
+            raise err(400, "CONTRATO_INCONSISTENTE", "El sujeto no pertenece al contrato indicado")
+    if body.contrato_id:
+        ct = db.get(Contrato, body.contrato_id)
+        if not ct or ct.company_id != cid:
+            raise err(404, "NO_ENCONTRADO", "El contrato no existe")
+        require_contrato(body.contrato_id, user, contrato=ct)
+    if body.faena_id:
+        if not db.get(Faena, body.faena_id):
+            raise err(404, "NO_ENCONTRADO", "La faena no existe")
+
+    ctx = cargar_contexto_validacion(
+        db,
+        cid,
+        sujeto=suj,
+        contrato_id=body.contrato_id,
+        faena_id=body.faena_id,
+        tipo_documento_ia=body.tipo_documento_ia,
+    )
+    if suj is None and (body.worker_rut or body.worker_name):
+        suj_esp = dict(ctx.get("sujeto_esperado") or {})
+        if body.worker_rut:
+            suj_esp["rut"] = body.worker_rut
+        if body.worker_name:
+            suj_esp["nombre"] = body.worker_name
+        ctx["sujeto_esperado"] = suj_esp
+
+    fecha_ev = None
+    if body.fecha_evaluacion:
+        try:
+            fecha_ev = _date.fromisoformat(body.fecha_evaluacion[:10])
+        except ValueError:
+            raise err(400, "FECHA_INVALIDA", "fecha_evaluacion debe ser YYYY-MM-DD")
+
+    resultado = evaluar_validacion_documental(
+        tipo_documento_ia=body.tipo_documento_ia,
+        document_data=body.documentData,
+        reglas_ia=body.rules,
+        sujeto_esperado=ctx.get("sujeto_esperado"),
+        empresa_esperada=ctx.get("empresa_esperada"),
+        cedula_aprobada=ctx.get("cedula_aprobada"),
+        padron_aprobado=ctx.get("padron_aprobado"),
+        anexos_vigentes=ctx.get("anexos_vigentes"),
+        override_faena=ctx.get("override_faena"),
+        equivalencias=ctx.get("equivalencias"),
+        portal_verificacion=body.portal_verificacion,
+        fecha_evaluacion=fecha_ev,
+    )
+    return sanitizar_privacidad_medica(
+        resultado, user_role=user.role, tipo_documento_ia=body.tipo_documento_ia
+    )
+
+
+@router.get("/pautas")
+def listar_pautas_validacion(
+    faena_id: uuid.UUID | None = Query(None),
+    contrato_id: uuid.UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Lista familias (Nivel 1), pautas maestras (Nivel 2) y overrides (Nivel 3)."""
+    if contrato_id:
+        ct = db.get(Contrato, contrato_id)
+        if not ct or ct.company_id != cid:
+            raise err(404, "NO_ENCONTRADO", "El contrato no existe")
+        require_contrato(contrato_id, user, contrato=ct)
+    q = select(FaenaReglaValidacion).where(FaenaReglaValidacion.company_id == cid)
+    scope = contrato_scope(user)
+    if scope and not contrato_id:
+        q = q.where(
+            or_(
+                FaenaReglaValidacion.contrato_id == scope,
+                FaenaReglaValidacion.contrato_id.is_(None),
+            )
+        )
+    if faena_id:
+        q = q.where(FaenaReglaValidacion.faena_id == faena_id)
+    if contrato_id:
+        q = q.where(FaenaReglaValidacion.contrato_id == contrato_id)
+    overrides = list(db.scalars(q))
+    return {
+        "familias": list(FAMILIAS_VALIDACION),
+        "transversales": [
+            {"codigo": r.codigo, "campo": r.campo, "bloqueante": r.bloqueante, "descripcion": r.descripcion}
+            for r in CONTROLES_TRANSVERSALES
+        ],
+        "pautas_maestras": {
+            k: [
+                {"codigo": r.codigo, "campo": r.campo, "bloqueante": r.bloqueante, "descripcion": r.descripcion}
+                for r in v
+            ]
+            for k, v in PAUTAS_MAESTRAS.items()
+        },
+        "overrides": [
+            {
+                "id": str(o.id),
+                "faena_id": str(o.faena_id) if o.faena_id else None,
+                "contrato_id": str(o.contrato_id) if o.contrato_id else None,
+                "tipo_documento_ia": o.tipo_documento_ia,
+                "reglas_activas": o.reglas_activas,
+                "bloqueantes_override": o.bloqueantes_override,
+                "parametros": o.parametros,
+            }
+            for o in overrides
+        ],
+    }
+
+
+@router.put("/pautas/{tipo_documento_ia}")
+def guardar_pauta_override(
+    tipo_documento_ia: str,
+    body: PautaOverrideIn,
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(require_company),
+):
+    """Crea o actualiza un override Nivel 3 por faena/contrato."""
+    if tipo_documento_ia not in TIPOS_DOCUMENTO_VALIDOS:
+        raise err(400, "TIPO_DOCUMENTO_INVALIDO", f"Tipo de documento no reconocido: {tipo_documento_ia}")
+    if body.contrato_id:
+        ct = db.get(Contrato, body.contrato_id)
+        if not ct or ct.company_id != cid:
+            raise err(404, "NO_ENCONTRADO", "El contrato no existe")
+    if body.faena_id and not db.get(Faena, body.faena_id):
+        raise err(404, "NO_ENCONTRADO", "La faena no existe")
+
+    q = select(FaenaReglaValidacion).where(
+        FaenaReglaValidacion.company_id == cid,
+        FaenaReglaValidacion.tipo_documento_ia == tipo_documento_ia,
+        FaenaReglaValidacion.faena_id == body.faena_id,
+        FaenaReglaValidacion.contrato_id == body.contrato_id,
+    )
+    ov = db.scalar(q)
+    if ov is None:
+        ov = FaenaReglaValidacion(
+            company_id=cid,
+            faena_id=body.faena_id,
+            contrato_id=body.contrato_id,
+            tipo_documento_ia=tipo_documento_ia,
+            reglas_activas=body.reglas_activas,
+            bloqueantes_override=body.bloqueantes_override,
+            parametros=body.parametros,
+        )
+        db.add(ov)
+    else:
+        ov.reglas_activas = body.reglas_activas
+        ov.bloqueantes_override = body.bloqueantes_override
+        ov.parametros = body.parametros
+    db.commit()
+    db.refresh(ov)
+    reglas, params, activas = resolver_pauta_efectiva(
+        tipo_documento_ia,
+        {
+            "reglas_activas": ov.reglas_activas,
+            "bloqueantes_override": ov.bloqueantes_override,
+            "parametros": ov.parametros,
+        },
+    )
+    return {
+        "id": str(ov.id),
+        "tipo_documento_ia": ov.tipo_documento_ia,
+        "parametros": params,
+        "reglas_activas": activas,
+        "reglas": [{"codigo": r.codigo, "campo": r.campo, "bloqueante": r.bloqueante} for r in reglas],
+    }
+
+
+@router.get("/equivalencias")
+def listar_equivalencias(
+    familia: str | None = Query(None),
+    faena_id: uuid.UUID | None = Query(None),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    q = select(EquivalenciaValidacion).where(EquivalenciaValidacion.company_id == cid)
+    if familia:
+        q = q.where(EquivalenciaValidacion.familia == familia)
+    if faena_id:
+        q = q.where(EquivalenciaValidacion.faena_id == faena_id)
+    filas = list(db.scalars(q))
+    return {
+        "items": [
+            {
+                "id": str(e.id),
+                "faena_id": str(e.faena_id) if e.faena_id else None,
+                "familia": e.familia,
+                "nombre_detectado": e.nombre_detectado,
+                "nombre_canonico": e.nombre_canonico,
+                "codigo_catalogo": e.codigo_catalogo,
+                "confianza": float(e.confianza),
+                "confirmado": e.confirmado,
+            }
+            for e in filas
+        ]
+    }
+
+
+@router.post("/equivalencias", status_code=201)
+def crear_equivalencia(
+    body: EquivalenciaIn,
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(require_company),
+):
+    if body.faena_id and not db.get(Faena, body.faena_id):
+        raise err(404, "NO_ENCONTRADO", "La faena no existe")
+    conf = max(0.0, min(1.0, float(body.confianza)))
+    det = body.nombre_detectado.strip()
+    can = body.nombre_canonico.strip()
+    eq = db.scalar(
+        select(EquivalenciaValidacion).where(
+            EquivalenciaValidacion.company_id == cid,
+            EquivalenciaValidacion.faena_id == body.faena_id,
+            EquivalenciaValidacion.familia == body.familia,
+            EquivalenciaValidacion.nombre_detectado == det,
+        )
+    )
+    if eq is None:
+        eq = EquivalenciaValidacion(
+            company_id=cid,
+            faena_id=body.faena_id,
+            familia=body.familia,
+            nombre_detectado=det,
+            nombre_canonico=can,
+            codigo_catalogo=body.codigo_catalogo,
+            confianza=conf,
+            confirmado=body.confirmado,
+        )
+        db.add(eq)
+    else:
+        eq.nombre_canonico = can
+        eq.codigo_catalogo = body.codigo_catalogo
+        eq.confianza = conf
+        eq.confirmado = body.confirmado
+    db.commit()
+    db.refresh(eq)
+    return {
+        "id": str(eq.id),
+        "faena_id": str(eq.faena_id) if eq.faena_id else None,
+        "familia": eq.familia,
+        "nombre_detectado": eq.nombre_detectado,
+        "nombre_canonico": eq.nombre_canonico,
+        "codigo_catalogo": eq.codigo_catalogo,
+        "confianza": float(eq.confianza),
+        "confirmado": eq.confirmado,
+    }
 
 
 # =============================================================================
@@ -678,7 +1084,7 @@ def upload_url_temporal(
 
 
 class ChatMessageIn(BaseModel):
-    role: str
+    role: Literal["user", "assistant"]
     content: str
 
 
@@ -976,6 +1382,15 @@ def get_chat_historial(
 ):
     """Recupera el historial de chat para un contexto específico."""
     from sqlalchemy import select
+
+    if contexto.startswith("contrato_"):
+        try:
+            ct_id = uuid.UUID(contexto.split("_", 1)[1])
+            ct = db.get(Contrato, ct_id)
+            if ct and ct.company_id == cid:
+                require_contrato(ct_id, user, contrato=ct)
+        except ValueError:
+            pass
 
     historial = (
         db.execute(

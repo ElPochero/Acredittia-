@@ -92,6 +92,8 @@ from ...services.platform.storage import get_storage, make_blob_path
 
 from ...services.platform.tasks import contexto_de_documento
 
+from ...services.platform.validador_documental import ROLES_SALUD_AUTORIZADOS, inferir_clasificacion_documento
+
 from ...services.platform.vencimientos import recalcular_sujeto
 
 
@@ -1196,6 +1198,18 @@ def confirmar_archivo(doc_id: uuid.UUID, body: ConfirmarArchivoIn,
 
 
 
+def _exigir_acceso_medico(d: Documento, user: User, accion: str) -> None:
+    fam, _ = inferir_clasificacion_documento(
+        d.titulo,
+        contexto=contexto_de_documento(d),
+        ejemplo_clave=d.template.ejemplo_clave if d.template else None,
+        familia_override=getattr(d.template, "familia_validacion", None) if d.template else None,
+        tipo_override=getattr(d.template, "tipo_documento_ia", None) if d.template else None,
+    )
+    if fam == "TRABAJADORES_EXAMENES" and user.role not in ROLES_SALUD_AUTORIZADOS:
+        raise err(403, "PRIVACIDAD_MEDICA", f"No tiene permisos para {accion} informes médicos detallados")
+
+
 @router.get("/{doc_id}/archivos/{archivo_id}/download-url")
 
 def download_url(doc_id: uuid.UUID, archivo_id: uuid.UUID,
@@ -1219,6 +1233,8 @@ def download_url(doc_id: uuid.UUID, archivo_id: uuid.UUID,
     """
 
     d = _get_doc(db, cid, doc_id, user)
+
+    _exigir_acceso_medico(d, user, "descargar")
 
     a = _get_archivo(db, cid, d, archivo_id)
 
@@ -1255,6 +1271,8 @@ def borrar_archivo(doc_id: uuid.UUID, archivo_id: uuid.UUID,
     """Borra el archivo y su blob. Sin archivos, el documento vuelve a `falta`."""
 
     d = _get_doc(db, cid, doc_id, user)
+
+    _exigir_acceso_medico(d, user, "descargar")
 
     a = _get_archivo(db, cid, d, archivo_id)
 
