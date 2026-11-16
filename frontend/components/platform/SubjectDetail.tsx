@@ -19,12 +19,13 @@ import type {
   Revision,
 
   SujetoDetalle,
-
+  EventoCalendario,
 } from "@/lib/platform/tipos";
 
 import { Barra, Chip, Modal, Spinner } from "@/components/shared/ui";
 import { AutoExportModal } from "./AutoExportModal";
 import { ExportarDocumentosModal } from "./ExportarDocumentosModal";
+import { AgendarExamenModal } from "./AgendarExamenModal";
 
 
 
@@ -461,7 +462,6 @@ function FilaDoc({
       />
 
     </div>
-
   );
 
 }
@@ -505,6 +505,8 @@ export default function SubjectDetail({
   const [ejemplo, setEjemplo] = useState<Ejemplo | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [autoExportModalOpen, setAutoExportModalOpen] = useState(false);
+  const [eventoActivo, setEventoActivo] = useState<EventoCalendario | null>(null);
+  const [showAgendarModal, setShowAgendarModal] = useState(false);
 
   const cambiarEstadoPlataforma = async (
     d: Documento,
@@ -640,17 +642,19 @@ export default function SubjectDetail({
 
 
   const cargar = useCallback(() => {
-
     const pedir =
-
       tipo === "personal" ? Api.personal.detalle : Api.equipos.detalle;
 
     pedir(id)
-
       .then(setData)
-
       .catch((e) => setError(Api.mensajeError(e)));
 
+    if (tipo === "personal") {
+      Api.calendario
+        .activoDeSujeto(id)
+        .then((res) => setEventoActivo(res?.activo || null))
+        .catch(() => setEventoActivo(null));
+    }
   }, [tipo, id]);
 
   useEffect(cargar, [cargar]);
@@ -1012,14 +1016,38 @@ export default function SubjectDetail({
         </div>
 
         <div className="flex flex-col items-end justify-center mr-2">
-
           <div className="text-[1.8rem] font-black text-emerald-500 leading-none">{data.stats.cumplimiento_pct}%</div>
-
           <div className="text-[0.65rem] text-slate-400 font-bold mt-1 tracking-wide">{data.documentos.filter(d=>d.estado_calc==='ok').length + data.documentos_emsipor.filter(d=>d.estado_calc==='ok').length} de {data.documentos.length + data.documentos_emsipor.length} al día</div>
-
+          {esTrabajador && (
+            <button
+              type="button"
+              onClick={() => setShowAgendarModal(true)}
+              className="mt-2.5 px-3 py-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              📅 Agendar examen/curso
+            </button>
+          )}
         </div>
-
       </div>
+
+      {esTrabajador && eventoActivo && (
+        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs text-amber-900">
+            <span className="text-base">📅</span>
+            <div>
+              <span className="font-bold">Agendamiento activo:</span> {eventoActivo.titulo} · {eventoActivo.fecha?.replace("T", " a las ")}
+              {eventoActivo.centro_atencion ? ` en ${eventoActivo.centro_atencion}` : ""}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAgendarModal(true)}
+            className="px-2.5 py-1 bg-white border border-amber-300 hover:bg-amber-100/60 text-amber-900 rounded text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+          >
+            Ver / Editar cita
+          </button>
+        </div>
+      )}
 
 
 
@@ -1790,8 +1818,17 @@ export default function SubjectDetail({
         />
       )}
 
-    </div>
+      {data && esTrabajador && (
+        <AgendarExamenModal
+          sujeto={data}
+          contratoId={contratoIdContext || data.contrato?.id}
+          abierto={showAgendarModal}
+          onCerrar={() => setShowAgendarModal(false)}
+          onSaved={cargar}
+        />
+      )}
 
+    </div>
   );
 
 }
