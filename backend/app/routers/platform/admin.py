@@ -35,9 +35,9 @@ import mimetypes
 from ...models import (
     Alerta, Company, CompanyFaenaPlataforma, Contrato, ContratoPlantillaOverride,
     ContratoPlataforma, ContratoRequisito, CumplimientoSnapshot, DocEjemplo,
-    Documento, DocumentoArchivo, EventoCalendario, Faena, FaenaPlataforma,
-    IaHallazgo, IaReview, LicenciaInterna, PlataformaCredencial,
-    RequisitoTemplate, Sujeto, User,
+    Documento, DocumentoArchivo, EquivalenciaValidacion, EventoCalendario, Faena,
+    FaenaPlataforma, FaenaReglaValidacion, IaHallazgo, IaReview, LicenciaInterna,
+    PlataformaCredencial, RequisitoTemplate, Sujeto, User,
 )
 from ...services.platform import actividad
 from ...services.platform.checklist import (calc_estado_doc, calc_estado_sujeto,
@@ -764,6 +764,10 @@ def _borrar_datos_empresa(db: Session, cid: uuid.UUID) -> dict:
            ContratoRequisito.company_id == cid)
     borrar("plantilla_overrides", ContratoPlantillaOverride,
            ContratoPlantillaOverride.company_id == cid)
+    borrar("faena_reglas_validacion", FaenaReglaValidacion,
+           FaenaReglaValidacion.company_id == cid)
+    borrar("equivalencias_validacion", EquivalenciaValidacion,
+           EquivalenciaValidacion.company_id == cid)
     borrar("company_faena_plataformas", CompanyFaenaPlataforma,
            CompanyFaenaPlataforma.company_id == cid)
     borrar("snapshots", CumplimientoSnapshot, CumplimientoSnapshot.company_id == cid)

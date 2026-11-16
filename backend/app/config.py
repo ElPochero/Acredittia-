@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
     schema_dir: str = "/schema"
     schema_version_esperada: int = (
-        19  # scripts 01..19 aplicados (19 agendamientos sujeto y contrato)
+        20  # scripts 01..20 aplicados (20 motor validacion documental IA v2)
     )
     db_apply_schema_on_start: bool = False  # en Azure lo hace el job de migración
     db_rls_enabled: bool = True  # fija app.company_id/is_admin/user_id por request

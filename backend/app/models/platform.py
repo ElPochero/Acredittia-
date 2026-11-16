@@ -364,6 +364,9 @@ class RequisitoTemplate(Base):
     plataforma: Mapped[str | None] = mapped_column(Text)
     aplica_a: Mapped[str | None] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    familia_validacion: Mapped[str | None] = mapped_column(Text)
+    tipo_documento_ia: Mapped[str | None] = mapped_column(Text)
+    pauta_reglas: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
@@ -435,6 +438,7 @@ class Sujeto(Base):
     anio: Mapped[int | None] = mapped_column(Integer)
     telefono: Mapped[str | None] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
+    datos_verificados: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )
@@ -540,6 +544,10 @@ class IaReview(Base):
     resultado: Mapped[str | None] = mapped_column(pg_enum("ia_resultado"))
     confianza: Mapped[float | None] = mapped_column(Numeric(4, 3))
     campos_extraidos: Mapped[dict] = mapped_column(JSONB, default=dict)
+    validation_status: Mapped[str | None] = mapped_column(Text)
+    rules_result: Mapped[list] = mapped_column(JSONB, default=list)
+    summary_result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    motivo: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1205,6 +1213,48 @@ class ContratoUsuarioRol(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     rol_contrato: Mapped[str] = mapped_column(Text, primary_key=True, default="rrhh")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+
+
+class FaenaReglaValidacion(Base):
+    """Nivel 3: overrides de pautas de validación documental por faena/contrato."""
+
+    __tablename__ = "faena_reglas_validacion"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_uuid
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    faena_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("faenas.id", ondelete="CASCADE"))
+    contrato_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contratos.id", ondelete="CASCADE"))
+    tipo_documento_ia: Mapped[str] = mapped_column(Text)
+    reglas_activas: Mapped[dict] = mapped_column(JSONB, default=dict)
+    bloqueantes_override: Mapped[dict] = mapped_column(JSONB, default=dict)
+    parametros: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+
+
+class EquivalenciaValidacion(Base):
+    """Nivel 3: tabla de equivalencias de cursos y exámenes por faena/empresa."""
+
+    __tablename__ = "equivalencias_validacion"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_uuid
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    faena_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("faenas.id", ondelete="CASCADE"))
+    familia: Mapped[str] = mapped_column(Text)
+    nombre_detectado: Mapped[str] = mapped_column(Text)
+    nombre_canonico: Mapped[str] = mapped_column(Text)
+    codigo_catalogo: Mapped[str | None] = mapped_column(Text)
+    confianza: Mapped[float] = mapped_column(Numeric(4, 3), default=1.0)
+    confirmado: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

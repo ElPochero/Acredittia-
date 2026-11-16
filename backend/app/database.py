@@ -82,8 +82,9 @@ SCHEMA_SCRIPTS = [
     "17_gemini_embeddings.sql",
     "18_contratos_mandante.sql",
     "19_eventos_calendario_sujeto_contrato.sql",
+    "20_motor_validacion_ia_v2.sql",
 ]
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 MIGRATION_LOCK_ID = 918273  # clave del pg_advisory_lock de migración
 
 
@@ -255,17 +256,21 @@ def _indice_existe(conn, tabla: str, indice: str) -> bool:
 
 
 def schema_version() -> int:
-    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = cascadas integridad · 15 = unidad de negocio · 16 = alertas IA por contrato · 17 = embeddings Gemini 768 dims · 18 = contratos mandante · 19 = eventos calendario sujeto contrato."""
+    """0 = vacía · 3 = baseline sin RLS · 4 = con RLS · 6 = v1.1 aplicada · 7 = archivo_ejemplo · 9 = certificación laboral · 10 = sujetos.telefono/email · 11 = RAG pgvector · 12 = vínculo 'faena' · 13 = rol 'visor' · 14 = cascadas integridad · 15 = unidad de negocio · 16 = alertas IA por contrato · 17 = embeddings Gemini 768 dims · 18 = contratos mandante · 19 = eventos calendario sujeto contrato · 20 = motor validacion IA v2."""
     with engine.connect() as c:
         if not _tabla_existe(c, "companies"):
             return 0
         if _tabla_existe(c, "app_schema_migrations"):
             v = c.execute(text("SELECT max(version) FROM app_schema_migrations")).scalar()
             if v is not None:
+                if int(v) >= 20 and not _tabla_existe(c, "faena_reglas_validacion"):
+                    return 19
                 if int(v) >= 19 and not _columna_existe(c, "eventos_calendario", "sujeto_id"):
                     return 18
                 return 17 if int(v) >= 18 and not (_columna_existe(c, "users", "auth_version") and _tabla_existe(c, "contrato_requisitos_laborales") and _columna_existe(c, "documentos", "estado_plataforma") and _enum_tiene(c, "user_role", "adc")) else int(v)
         if _tabla_existe(c, "documento_chunk"):
+            if _tabla_existe(c, "faena_reglas_validacion"):
+                return 20
             if _columna_existe(c, "eventos_calendario", "sujeto_id"):
                 return 19
             if _columna_existe(c, "contratos", "mandante") and _columna_existe(c, "users", "auth_version") and _tabla_existe(c, "contrato_requisitos_laborales") and _columna_existe(c, "documentos", "estado_plataforma") and _enum_tiene(c, "user_role", "adc"):
@@ -376,6 +381,17 @@ def apply_schema(schema_dir: str | None = None) -> int:
                   ADD COLUMN IF NOT EXISTS enviar_notificacion BOOLEAN NOT NULL DEFAULT FALSE;
                 CREATE INDEX IF NOT EXISTS ix_eventos_calendario_sujeto ON eventos_calendario (sujeto_id);
                 CREATE INDEX IF NOT EXISTS ix_eventos_calendario_contrato ON eventos_calendario (contrato_id);
+                ALTER TABLE requisito_templates
+                  ADD COLUMN IF NOT EXISTS familia_validacion TEXT,
+                  ADD COLUMN IF NOT EXISTS tipo_documento_ia TEXT,
+                  ADD COLUMN IF NOT EXISTS pauta_reglas JSONB NOT NULL DEFAULT '[]'::jsonb;
+                ALTER TABLE sujetos
+                  ADD COLUMN IF NOT EXISTS datos_verificados JSONB NOT NULL DEFAULT '{}'::jsonb;
+                ALTER TABLE ia_reviews
+                  ADD COLUMN IF NOT EXISTS validation_status TEXT,
+                  ADD COLUMN IF NOT EXISTS rules_result JSONB NOT NULL DEFAULT '[]'::jsonb,
+                  ADD COLUMN IF NOT EXISTS summary_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+                  ADD COLUMN IF NOT EXISTS motivo TEXT;
             """)
         finally:
             raw.close()
@@ -407,8 +423,9 @@ def apply_schema(schema_dir: str | None = None) -> int:
                 14: SCHEMA_SCRIPTS[13:],
                 15: SCHEMA_SCRIPTS[14:],
                 16: SCHEMA_SCRIPTS[15:],
-                17: ["09_certificacion_laboral.sql", "13_rol_visor.sql", "16_alertas_ia.sql", "18_contratos_mandante.sql", "19_eventos_calendario_sujeto_contrato.sql"],
-                18: ["19_eventos_calendario_sujeto_contrato.sql"],
+                17: ["09_certificacion_laboral.sql", "13_rol_visor.sql", "16_alertas_ia.sql", "18_contratos_mandante.sql", "19_eventos_calendario_sujeto_contrato.sql", "20_motor_validacion_ia_v2.sql"],
+                18: ["19_eventos_calendario_sujeto_contrato.sql", "20_motor_validacion_ia_v2.sql"],
+                19: ["20_motor_validacion_ia_v2.sql"],
             }
             pendientes = scripts_por_version.get(actual, [])
             cur.execute("CREATE TABLE IF NOT EXISTS app_schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")

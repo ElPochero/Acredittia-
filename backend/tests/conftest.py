@@ -87,6 +87,7 @@ SCRIPTS = [
     "17_gemini_embeddings.sql",
     "18_contratos_mandante.sql",
     "19_eventos_calendario_sujeto_contrato.sql",
+    "20_motor_validacion_ia_v2.sql",
 ]
 
 _TMP = os.path.join(tempfile.gettempdir(), f"acredittia_pruebas_{os.getpid()}")
@@ -219,7 +220,7 @@ os.environ.update(
         "IA_BACKEND": "simulada",
         "PUBLIC_BASE_URL": "http://test",
         "SCHEMA_DIR": SQL_DIR,
-        "SCHEMA_VERSION_ESPERADA": "19",
+        "SCHEMA_VERSION_ESPERADA": "20",
         "CORS_ORIGINS": "http://test",
     }
 )
