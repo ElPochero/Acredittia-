@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -1828,21 +1829,23 @@ def obtener_mis_pendientes_rrhh(
 
 
 # ============================================================================
-# Sincronización Buk con Fallback Manual Resiliente (Día 5, CA 13, Sección 8)
+# Sincronización Buk / Talana con Fallback Manual Resiliente (Día 5, CA 13, Sección 8)
 # ============================================================================
 
 @router.post("/contratos/{contrato_id}/periodos/{periodo_id}/sincronizar-buk")
+@router.post("/contratos/{contrato_id}/periodos/{periodo_id}/sincronizar-rrhh")
 def sincronizar_buk_endpoint(
     contrato_id: uuid.UUID,
     periodo_id: uuid.UUID,
+    proveedor: Literal["buk", "talana"] = Query("buk"),
     simular_exito: bool = Query(False),
     cid: uuid.UUID = Depends(get_company_id),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
     """
-    Sincroniza nómina y documentos del período desde Buk con fallback manual resiliente (CA 13, Sección 8).
-    El rol 'rrhh' sí puede sincronizar con Buk para actualizar su nómina mensual y documentos.
+    Sincroniza nómina y documentos del período desde Buk o Talana con fallback manual resiliente (CA 13, Sección 8).
+    El rol 'rrhh' sí puede sincronizar con Buk/Talana para actualizar su nómina mensual y documentos.
     """
     c = _get_contrato(db, cid, contrato_id)
     p = _get_periodo(db, cid, periodo_id)
@@ -1852,5 +1855,5 @@ def sincronizar_buk_endpoint(
         raise err(400, "PERIODO_CERRADO", "El período está cerrado y no admite sincronizaciones")
 
     from ...services.platform.buk_sync import sincronizar_buk_periodo
-    res = sincronizar_buk_periodo(db, c, p, user, simular_exito=simular_exito)
+    res = sincronizar_buk_periodo(db, c, p, user, simular_exito=simular_exito, proveedor=proveedor)
     return res

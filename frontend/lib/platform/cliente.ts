@@ -72,6 +72,7 @@ import type {
   Rol, Usuario, UsuarioEmpresa, Exportacion, Periodo, UploadUrl,  PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento, ContratoCertificacionLaboral, ContratoRequisitoLaboral, NominaPeriodoRespuesta, TrazabilidadEvento, PeriodoDocumentoVersionItem, MisPendientesRrhhRespuesta,
 
   EstadoPeriodoDoc, MatrizCumplimientoData, MatrizSujeto, MatrizRequisito,
+  HojaCalculoRespuesta, HojaCalculoTab, EventoCalendario,
 
   CumplimientoDashboardData, LimContrato, ArbolExportacion, EstructuraExport,
 
@@ -633,7 +634,8 @@ export const contratos = {
 
   reporteEstado: (id: string) => api<any>(`/contratos/${id}/reporte-estado`),
 
-
+  hojaCalculo: (contratoId: string, tab: HojaCalculoTab = "personal") =>
+    api<HojaCalculoRespuesta>(`/contratos/${contratoId}/hoja-calculo`, { query: { tab } }),
 
   crear: (body: ContratoIn) => api<ContratoCreado>("/contratos", { body }),
 
@@ -1572,43 +1574,39 @@ export const actividad = {
 // ============================================================================
 
 export const calendario = {
-
   /** `desde` y `hasta` son obligatorios; el rango máximo es de 366 días. */
-
   eventos: (desde: string, hasta: string, categoria?: CategoriaEvento, contrato_id?: string) =>
-
     api<Eventos>("/calendario/eventos", { query: { desde, hasta, categoria, contrato_id } }),
 
-
+  activoDeSujeto: (sujetoId: string) =>
+    api<{ activo: EventoCalendario | null }>(`/calendario/sujetos/${sujetoId}/activo`),
 
   crear: (body: {
-
-    titulo: string; fecha: string; categoria?: Exclude<CategoriaEvento, "vencimiento">;
-
+    titulo: string;
+    fecha: string;
+    categoria?: Exclude<CategoriaEvento, "vencimiento">;
     descripcion?: string | null;
-
+    sujeto_id?: string | null;
+    contrato_id?: string | null;
+    centro_atencion?: string | null;
+    enviar_notificacion?: boolean;
   }) => api<Eventos["items"][number]>("/calendario/eventos", { body }),
 
-
-
   editar: (id: string, cambios: {
-
-    titulo?: string; fecha?: string;
-
+    titulo?: string;
+    fecha?: string;
     categoria?: Exclude<CategoriaEvento, "vencimiento">;
-
-    descripcion?: string | null; completado?: boolean;
-
+    descripcion?: string | null;
+    completado?: boolean;
+    sujeto_id?: string | null;
+    contrato_id?: string | null;
+    centro_atencion?: string | null;
+    enviar_notificacion?: boolean;
   }) => patch<Eventos["items"][number]>(`/calendario/eventos/${id}`, cambios),
 
-
-
   eliminar: (id: string) =>
-
     api<{ ok: boolean; id: string; titulo: string }>(`/calendario/eventos/${id}`,
-
       { method: "DELETE" }),
-
 };
 
 
@@ -2078,7 +2076,16 @@ export const certificacion = {
     return await api<MisPendientesRrhhRespuesta>("/certificacion-laboral/mis-pendientes");
   },
 
-  sincronizarBuk: async (contratoId: string, periodoId: string, simularExito?: boolean) => {
+  sincronizarBuk: async (
+    contratoId: string,
+    periodoId: string,
+    simularExito = false,
+    proveedor: "buk" | "talana" = "buk"
+  ) => {
+    const params = new URLSearchParams();
+    if (simularExito) params.set("simular_exito", "true");
+    if (proveedor) params.set("proveedor", proveedor);
+    const qs = params.toString() ? `?${params.toString()}` : "";
     return await api<{
       ok: boolean;
       modo: "buk_api" | "manual_fallback";
@@ -2087,9 +2094,7 @@ export const certificacion = {
       documentos_sincronizados: number;
       logs: string[];
     }>(
-      `/contratos/${contratoId}/periodos/${periodoId}/sincronizar-buk${
-        simularExito ? "?simular_exito=true" : ""
-      }`,
+      `/contratos/${contratoId}/periodos/${periodoId}/sincronizar-buk${qs}`,
       { method: "POST" }
     );
   },

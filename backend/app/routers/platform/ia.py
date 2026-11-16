@@ -1074,19 +1074,19 @@ DEMO_EQUIPOS = [
 ]
 
 DEMO_REQUISITOS = [
-    {"nombre": "Certificado F30-1 de Cumplimiento de Obligaciones Laborales", "categoria": "empresa", "obligatorio": True},
-    {"nombre": "Certificado de Adhesión a Mutualidad (Ley 16.744)", "categoria": "empresa", "obligatorio": True},
-    {"nombre": "Cédula de Identidad", "categoria": "personal", "obligatorio": True},
-    {"nombre": "Contrato de Trabajo", "categoria": "personal", "obligatorio": True},
-    {"nombre": "Examen Pre-ocupacional", "categoria": "personal", "obligatorio": True},
-    {"nombre": "Permiso de Circulación", "categoria": "equipo", "obligatorio": True},
-    {"nombre": "Revisión Técnica", "categoria": "equipo", "obligatorio": True},
-    {"nombre": "SOAP", "categoria": "equipo", "obligatorio": True}
+    {"nombre": "Certificado F30-1 de Cumplimiento de Obligaciones Laborales", "categoria": "empresa", "obligatorio": True, "periodicidad": "mensual"},
+    {"nombre": "Certificado de Adhesión a Mutualidad (Ley 16.744)", "categoria": "empresa", "obligatorio": True, "periodicidad": "anual"},
+    {"nombre": "Cédula de Identidad", "categoria": "personal", "obligatorio": True, "periodicidad": None},
+    {"nombre": "Contrato de Trabajo", "categoria": "personal", "obligatorio": True, "periodicidad": None},
+    {"nombre": "Examen Pre-ocupacional", "categoria": "personal", "obligatorio": True, "periodicidad": "anual"},
+    {"nombre": "Permiso de Circulación", "categoria": "equipo", "obligatorio": True, "periodicidad": "anual"},
+    {"nombre": "Revisión Técnica", "categoria": "equipo", "obligatorio": True, "periodicidad": "semestral"},
+    {"nombre": "SOAP", "categoria": "equipo", "obligatorio": True, "periodicidad": "anual"}
 ]
 
 
 class ExtraerListadoIn(BaseModel):
-    tipo: Literal["personal", "equipo", "requisitos"]
+    tipo: Literal["personal", "equipo", "requisitos", "requisitos_plataforma"]
     texto: str | None = None
     file_b64: str | None = None
     file_name: str | None = None
@@ -1101,7 +1101,7 @@ def _parse_filas_a_items(rows: list[list[str]], tipo: str) -> list[dict]:
 
     h = [str(x or "").lower().strip() for x in rows[0]]
     tiene_encabezado = any(
-        re.search(r"nombre|rut|cargo|patente|tipo|correo|email|tel|fono|requisito|documento", x)
+        re.search(r"nombre|rut|cargo|patente|tipo|correo|email|tel|fono|requisito|documento|periodicidad|vigencia", x)
         for x in h
     )
     body = rows[1:] if tiene_encabezado else rows
@@ -1158,10 +1158,11 @@ def _parse_filas_a_items(rows: list[list[str]], tipo: str) -> list[dict]:
                 "modelo": "",
                 "anio": anio,
             })
-    elif tipo == "requisitos":
+    elif tipo in ("requisitos", "requisitos_plataforma"):
         cNom = find_col(r"requisito|documento|nombre|descrip", 0)
         cCat = find_col(r"categor|ambito|ámbito|tipo", 1)
         cObl = find_col(r"oblig|opcion", 2)
+        cPer = find_col(r"periodicidad|vigencia|frecuencia|periodo|plazo", 3)
         for r in body:
             nom = (r[cNom] if 0 <= cNom < len(r) else "").strip()
             if not nom or len(nom) < 3:
@@ -1177,10 +1178,16 @@ def _parse_filas_a_items(rows: list[list[str]], tipo: str) -> list[dict]:
                 obl_str = r[cObl].lower().strip()
                 if obl_str in ("no", "opcional", "0", "false"):
                     obl = False
+            per = None
+            if 0 <= cPer < len(r):
+                per_raw = (r[cPer] or "").strip()
+                if per_raw and per_raw.lower() not in ("none", "null", "-", "n/a"):
+                    per = per_raw
             items.append({
                 "nombre": nom,
                 "categoria": cat,
                 "obligatorio": obl,
+                "periodicidad": per,
             })
     return items
 
@@ -1212,11 +1219,11 @@ async def _extraer_con_gemini_multimodal(b64_data: str, mime_type: str, tipo: st
             "'patente' (string), 'tipo_equipo' (string), 'marca' (string), 'modelo' (string), 'anio' (integer or null).\n"
             "Ejemplo: {\"items\": [{\"patente\": \"ABCD-12\", \"tipo_equipo\": \"Camioneta\", \"marca\": \"Toyota\", \"modelo\": \"Hilux\", \"anio\": 2022}]}"
         )
-    else:  # requisitos
+    else:  # requisitos o requisitos_plataforma
         sys_prompt += (
             "Extrae la lista de requisitos o documentos exigidos con las claves: "
-            "'nombre' (string), 'categoria' ('empresa'|'personal'|'equipo'), 'obligatorio' (boolean).\n"
-            "Ejemplo: {\"items\": [{\"nombre\": \"Cédula de Identidad\", \"categoria\": \"personal\", \"obligatorio\": true}]}"
+            "'nombre' (string), 'categoria' ('empresa'|'personal'|'equipo'), 'obligatorio' (boolean), 'periodicidad' (string or null).\n"
+            "Ejemplo: {\"items\": [{\"nombre\": \"Cédula de Identidad\", \"categoria\": \"personal\", \"obligatorio\": true, \"periodicidad\": \"anual\"}]}"
         )
 
     payload = {
@@ -1238,6 +1245,21 @@ async def _extraer_con_gemini_multimodal(b64_data: str, mime_type: str, tipo: st
         async with httpx.AsyncClient() as client:
             r = await client.post(url, headers=headers, json=payload, timeout=40.0)
             r.raise_for_status()
+            data = r.json()["choices"][0]["message"].get("content") or "{}"
+            parsed = json.loads(data)
+            raw_items = parsed.get("items", [])
+            if tipo in ("requisitos", "requisitos_plataforma"):
+                clean_items = []
+                for it in raw_items:
+                    if isinstance(it, dict) and it.get("nombre"):
+                        clean_items.append({
+                            "nombre": str(it["nombre"]).strip(),
+                            "categoria": str(it.get("categoria", "empresa")).lower() if it.get("categoria") in ("empresa", "personal", "equipo") else "empresa",
+                            "obligatorio": bool(it.get("obligatorio", True)),
+                            "periodicidad": str(it["periodicidad"]).strip() if it.get("periodicidad") else None,
+                        })
+                return clean_items
+            return raw_items
             data = r.json()["choices"][0]["message"].get("content") or "{}"
             parsed = json.loads(data)
             return parsed.get("items", [])

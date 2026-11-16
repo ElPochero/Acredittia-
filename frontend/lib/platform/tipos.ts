@@ -971,10 +971,15 @@ export type ContratoIn = {
   } | null;
 
   plantilla_contrato_id?: string | null;
-
 };
 
+export type HojaCalculoTab = "empresa" | "personal" | "equipos" | "licencia";
 
+export type HojaCalculoRespuesta = {
+  columnas: string[];
+  filas: string[][];
+  tsv: string;
+};
 
 export type ContratoPatch = {
 
@@ -2097,59 +2102,36 @@ export type Persona = {
 // ============================================================================
 
 export type EventoCalendario = {
-
   id: string | null;
-
   categoria: CategoriaEvento;
-
   titulo: string;
-
   fecha: string;
-
   descripcion: string | null;
-
   completado: boolean;
-
   documento_id: string | null;
-
   estado_calc: EstadoCalc | null;
-
   dias: number;
-
+  centro_atencion?: string | null;
+  enviar_notificacion?: boolean;
+  sujeto_id?: string | null;
+  contrato_id?: string | null;
   sujeto: {
-
     id: string;
-
     nombre: string;
-
     tipo: TipoSujeto;
-
     rut?: string | null;
-
     patente?: string | null;
-
     cargo?: string | null;
-
     estado?: string | null;
-
   } | null;
-
   contrato: {
-
     id: string;
-
     nombre: string;
-
     codigo?: string | null;
-
     faena: string | null;
-
   } | null;
-
   editable: boolean;
-
   created_at: string | null;
-
 };
 
 
