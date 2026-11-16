@@ -71,9 +71,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const setAppRoute = (route: string) => {
-      setActiveRoute(route);
-      if (typeof window !== "undefined" && window.location.pathname !== route) {
-        window.history.pushState({}, "", route);
+      let targetRoute = route;
+      const u = currentUser();
+      if (u?.role === "rrhh") {
+        if (!targetRoute.startsWith("/certificacion-laboral") && targetRoute !== "/alertas") {
+          targetRoute = "/certificacion-laboral";
+        }
+      }
+      setActiveRoute(targetRoute);
+      if (typeof window !== "undefined" && window.location.pathname !== targetRoute) {
+        window.history.pushState({}, "", targetRoute);
       }
     };
     (window as any).setAppRoute = setAppRoute;
