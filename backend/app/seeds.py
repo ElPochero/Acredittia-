@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 from .models import (
     Actividad, Alerta, Cargo, CargoRequisito, Company, CompanyFaenaPlataforma,
     Contrato, ContratoPlataforma, ContratoRequisito, ContratoPlantillaOverride,
-    CumplimientoSnapshot, DocEjemplo, Documento, DocumentoArchivo, EventoCalendario,
-    Factura, Faena, FaenaPlataforma, IaHallazgo, IaReview, Integracion,
-    LicenciaInterna, NotificacionPreferencia, PasswordResetToken, Plan,
-    PlataformaCredencial, ProveedorCatalogo, RefreshToken, Reporte,
-    ReporteProgramado, RequisitoTemplate, RequisitoTerreno, Sujeto, Suscripcion,
-    SyncLog, User, PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento
+    CumplimientoSnapshot, DocEjemplo, Documento, DocumentoArchivo,
+    EquivalenciaValidacion, EventoCalendario, Factura, Faena, FaenaPlataforma,
+    FaenaReglaValidacion, IaHallazgo, IaReview, Integracion, LicenciaInterna,
+    NotificacionPreferencia, PasswordResetToken, Plan, PlataformaCredencial,
+    ProveedorCatalogo, RefreshToken, Reporte, ReporteProgramado,
+    RequisitoTemplate, RequisitoTerreno, Sujeto, Suscripcion, SyncLog, User,
+    PeriodoLaboral, PeriodoDocumentoRequerido, PeriodoDocumento, AuditoriaDocumento
 )
 from .security import hash_password
 
@@ -139,6 +140,41 @@ EJEMPLOS = [
 ]
 
 
+# Mapeo Nivel 1 (familia) y Nivel 2 (tipo_documento_ia) por título de plantilla
+CLASIFICACION_VALIDACION_TEMPLATE = {
+    "Cédula de Identidad": ("TRABAJADORES_DOCUMENTOS", "cedula"),
+    "Contrato de Trabajo": ("TRABAJADORES_DOCUMENTOS", "contrato"),
+    "Anexo Contrato": ("TRABAJADORES_DOCUMENTOS", "anexo"),
+    "Anexo Faena": ("TRABAJADORES_DOCUMENTOS", "anexo"),
+    "Anexo Mina": ("TRABAJADORES_DOCUMENTOS", "anexo"),
+    "Finiquito Anterior": ("TRABAJADORES_DOCUMENTOS", "finiquito"),
+    "Reglamento Interno": ("TRABAJADORES_DOCUMENTOS", "rioshs"),
+    "Licencia Municipal de Conducir": ("TRABAJADORES_DOCUMENTOS", "licencia"),
+    "Hoja de Vida del Conductor": ("TRABAJADORES_DOCUMENTOS", "hvc"),
+    "Certificado de Salud y Examen de Altura": ("TRABAJADORES_EXAMENES", "examen_altura"),
+    "Psicosensométrico Riguroso": ("TRABAJADORES_EXAMENES", "examen_psico"),
+    "Consentimiento Alcohol y Drogas": ("TRABAJADORES_EXAMENES", "examen_alcohol_drogas"),
+    "Inducción Hombre Nuevo": ("TRABAJADORES_CURSOS", "curso_induccion"),
+    "ODI Curso COVID": ("TRABAJADORES_DOCUMENTOS", "odi"),
+    "IRL Mina y Chancado": ("TRABAJADORES_DOCUMENTOS", "odi"),
+    "Manejo Defensivo": ("TRABAJADORES_CURSOS", "curso_manejo_defensivo"),
+    "Curso Manejo Defensivo y Alta Montaña": ("TRABAJADORES_CURSOS", "curso_manejo_defensivo"),
+    "Permiso de Circulación": ("EQUIPOS_DOCUMENTOS", "circulacion"),
+    "SOAP": ("EQUIPOS_DOCUMENTOS", "soap"),
+    "Revisión Técnica": ("EQUIPOS_DOCUMENTOS", "revtec"),
+    "GPS": ("EQUIPOS_CERTIFICADOS", "cert_gps"),
+    "Certificado Incorporación Multiflota GPS MLP": ("EQUIPOS_CERTIFICADOS", "cert_gps"),
+    "Inspección Visual": ("EQUIPOS_CERTIFICADOS", "checklist"),
+    "Certificado de Mantenciones": ("EQUIPOS_CERTIFICADOS", "mantencion"),
+    "Certificado de Operatividad": ("EQUIPOS_CERTIFICADOS", "mantencion"),
+    "Contrato de Servicio": ("EMPRESA", "empresa_doc"),
+    "Certificado Ley 16.744": ("EMPRESA", "mutual"),
+    "Programa de Trabajo SSO": ("EMPRESA", "empresa_doc"),
+    "Matriz de Riesgo": ("EMPRESA", "empresa_doc"),
+    "Procedimiento de Emergencia": ("EMPRESA", "empresa_doc"),
+}
+
+
 def run(db: Session) -> None:
     today = date.today()
 
@@ -170,10 +206,21 @@ def run(db: Session) -> None:
                 titulo, oblig, ejemplo, tipo, vig = fila[:5]
                 plataforma = fila[5] if len(fila) > 5 else None
                 contador += 1
+                familia_def = (
+                    "EMPRESA"
+                    if ambito == "empresa"
+                    else "EQUIPOS_DOCUMENTOS"
+                    if ambito == "equipo"
+                    else "TRABAJADORES_DOCUMENTOS"
+                )
+                familia_val, tipo_doc_ia = CLASIFICACION_VALIDACION_TEMPLATE.get(
+                    titulo, (familia_def, None)
+                )
                 db.add(RequisitoTemplate(
                     ambito=ambito, titulo=titulo, codigo=f"REQ-{contador:03d}",
                     tipo=tipo, obligatorio=oblig, ejemplo_clave=ejemplo,
                     vigencia_meses=vig, plataforma=plataforma,
+                    familia_validacion=familia_val, tipo_documento_ia=tipo_doc_ia,
                 ))
 
         agregar("empresa", REQ_EMPRESA)
@@ -441,6 +488,73 @@ def run(db: Session) -> None:
                                          ambito="personal", requisito_template_ids=list(tmpl_sample)))
         db.flush()
 
+    # Nivel 3: Overrides de reglas de validación y equivalencias por faena
+    if faena_pelambres and not db.scalar(select(FaenaReglaValidacion.id).where(FaenaReglaValidacion.company_id == demo_company.id)):
+        db.add_all([
+            FaenaReglaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                tipo_documento_ia="hvc",
+                reglas_activas={"HVC05": True},
+                bloqueantes_override={"HVC05": True},
+                parametros={"antiguedad_max_dias_hvc": 30, "sin_infracciones_gravisimas_meses": 12},
+            ),
+            FaenaReglaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                tipo_documento_ia="examen_altura_geo",
+                reglas_activas={"EXA07": True},
+                bloqueantes_override={"EXA07": True},
+                parametros={"altitud_geografica_msnm": 4500},
+            ),
+            FaenaReglaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                tipo_documento_ia="curso_manejo_defensivo",
+                reglas_activas={"CUR04": True, "CUR06": True},
+                bloqueantes_override={"CUR04": True, "CUR06": True},
+                parametros={"horas_minimas_curso": 8, "requiere_parte_practica": True},
+            ),
+            FaenaReglaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                tipo_documento_ia="licencia",
+                parametros={"clases_licencia_cargo": {"tracto-camion": ["A5"], "conductor": ["A4", "A5", "B"]}},
+            ),
+            FaenaReglaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                tipo_documento_ia="seguro_rc",
+                parametros={"monto_minimo_rc": 2000000, "moneda": "USD"},
+            ),
+        ])
+        db.flush()
+
+    if faena_pelambres and not db.scalar(select(EquivalenciaValidacion.id).where(EquivalenciaValidacion.company_id == demo_company.id)):
+        db.add_all([
+            EquivalenciaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                familia="CURSOS",
+                nombre_detectado="Manejo a la defensiva",
+                nombre_canonico="Conducción defensiva",
+                codigo_catalogo="CUR-MD",
+                confianza=0.980,
+                confirmado=True,
+            ),
+            EquivalenciaValidacion(
+                company_id=demo_company.id,
+                faena_id=faena_pelambres.id,
+                familia="EXAMENES",
+                nombre_detectado="Batería de altura",
+                nombre_canonico="Examen de altura física sobre 1,8 m",
+                codigo_catalogo="EXA-AF",
+                confianza=0.950,
+                confirmado=True,
+            ),
+        ])
+        db.flush()
+
     # 13. Sujetos (Personal y Equipos)
     personal_list = [
         ("Carlos Andrés Ramírez Morales", "15.842.109-K", "Conductor de Alta Montaña", True, "ok", ct_088),
@@ -619,32 +733,131 @@ def run(db: Session) -> None:
 
     # 16. Revisiones de Inteligencia Artificial (IA)
     if created_docs and not db.scalar(select(IaReview.id).limit(1)):
+        from .services.platform.validador_documental import (
+            estado_v2_a_resultado_legado,
+            evaluar_validacion_documental,
+            rules_a_hallazgos_legado,
+        )
+
         sample_doc = created_docs[0]
         arch_sample = db.scalar(select(DocumentoArchivo).where(DocumentoArchivo.documento_id == sample_doc.id))
-
-        review1 = IaReview(company_id=demo_company.id, archivo_id=arch_sample.id if arch_sample else None,
-                           context="cedula", status="done", resultado="validado", confianza=0.985,
-                           campos_extraidos={"rut": "15.842.109-K", "nombre": "Carlos Ramírez", "vencimiento": "2027-09-15"},
-                           started_at=datetime.utcnow() - timedelta(minutes=10),
-                           finished_at=datetime.utcnow() - timedelta(minutes=9))
+        ced_data = {
+            "RUN": "15.842.109-K",
+            "Nombres": "CARLOS ANDRES",
+            "Apellidos": "RAMIREZ MORALES",
+            "TipoCedula": "nueva",
+            "FechaEmision": "2024-03-10",
+            "FechaVencimiento": (today + timedelta(days=365)).isoformat(),
+            "FirmaPresente": True,
+            "HuellaPresente": True,
+            "FotoAnversoPresente": True,
+            "MinifotoAnversoPresente": True,
+        }
+        val_ced = evaluar_validacion_documental(
+            tipo_documento_ia="cedula",
+            document_data=ced_data,
+            sujeto_esperado={"nombre": "Carlos Andrés Ramírez Morales", "rut": "15.842.109-K"},
+        )
+        review1 = IaReview(
+            company_id=demo_company.id,
+            archivo_id=arch_sample.id if arch_sample else None,
+            context="cedula",
+            status="done",
+            resultado=estado_v2_a_resultado_legado(val_ced["status"], val_ced["summary"]),
+            confianza=0.985,
+            campos_extraidos=val_ced["documentData"],
+            validation_status=val_ced["status"],
+            rules_result=val_ced["rules"],
+            summary_result=val_ced["summary"],
+            motivo=val_ced["motivo"],
+            started_at=datetime.utcnow() - timedelta(minutes=10),
+            finished_at=datetime.utcnow() - timedelta(minutes=9),
+        )
         db.add(review1)
         db.flush()
+        if arch_sample:
+            arch_sample.ia_review_id = review1.id
 
-        db.add(IaHallazgo(review_id=review1.id, tipo="info", codigo="RUT_MATCH",
-                          mensaje="RUT coincide 100% con registro del trabajador",
-                          campo="rut", valor_detectado="15.842.109-K", valor_esperado="15.842.109-K"))
+        for h in rules_a_hallazgos_legado(val_ced["rules"], val_ced["documentData"]):
+            db.add(
+                IaHallazgo(
+                    review_id=review1.id,
+                    tipo=h["tipo"],
+                    codigo=h["codigo"],
+                    mensaje=h["mensaje"],
+                    campo=h.get("campo"),
+                )
+            )
 
-        review2 = IaReview(company_id=demo_company.id, context="personal", status="done",
-                           resultado="con_observaciones", confianza=0.865,
-                           campos_extraidos={"resultado_examen": "APTO CON RESTRICCION", "vigencia": "12 meses"},
-                           started_at=datetime.utcnow() - timedelta(hours=2),
-                           finished_at=datetime.utcnow() - timedelta(hours=2, minutes=-1))
+        # Fuente de verdad en el sujeto Carlos Ramírez
+        if sj_carlos is not None:
+            sj_carlos.datos_verificados = {
+                "tipo": "cedula",
+                "rut": "15.842.109-K",
+                "nombre_completo": "CARLOS ANDRES RAMIREZ MORALES",
+                "nombres": "CARLOS ANDRES",
+                "apellidos": "RAMIREZ MORALES",
+                "review_id": str(review1.id),
+            }
+
+        exa_doc = created_docs[2] if len(created_docs) > 2 else None
+        arch_exa = (
+            db.scalar(select(DocumentoArchivo).where(DocumentoArchivo.documento_id == exa_doc.id))
+            if exa_doc
+            else None
+        )
+        exa_data = {
+            "Folio": "0007253407",
+            "NombreEmisor": "Asociación Chilena de Seguridad",
+            "RUTEmpresa": demo_company.rut,
+            "NombreEmpresa": demo_company.nombre,
+            "RUTPaciente": "15.842.109-K",
+            "NombrePaciente": "CARLOS ANDRES RAMIREZ MORALES",
+            "CargoPaciente": "Conductor de Alta Montaña",
+            "NombreRiesgoEvaluado": "Trabajo en altura física sobre 1,8 m",
+            "Conclusion": "OK",
+            "GlosaConclusion": "No evidencia alteración de salud para ejecutar la tarea",
+            "FechaAtencion": (today - timedelta(days=185)).isoformat(),
+            "FechaEmisionInforme": (today - timedelta(days=180)).isoformat(),
+            "FechaVigenciaInforme": (today + timedelta(days=180)).isoformat(),
+        }
+        val_exa = evaluar_validacion_documental(
+            tipo_documento_ia="examen_altura",
+            document_data=exa_data,
+            sujeto_esperado={"nombre": "Carlos Andrés Ramírez Morales", "rut": "15.842.109-K"},
+            empresa_esperada={"nombre": demo_company.nombre, "rut": demo_company.rut},
+            cedula_aprobada=sj_carlos.datos_verificados if sj_carlos else None,
+        )
+        review2 = IaReview(
+            company_id=demo_company.id,
+            archivo_id=arch_exa.id if arch_exa else None,
+            context="personal",
+            status="done",
+            resultado=estado_v2_a_resultado_legado(val_exa["status"], val_exa["summary"]),
+            confianza=0.962,
+            campos_extraidos=val_exa["documentData"],
+            validation_status=val_exa["status"],
+            rules_result=val_exa["rules"],
+            summary_result=val_exa["summary"],
+            motivo=val_exa["motivo"],
+            started_at=datetime.utcnow() - timedelta(hours=2),
+            finished_at=datetime.utcnow() - timedelta(hours=2, minutes=-1),
+        )
         db.add(review2)
         db.flush()
+        if arch_exa:
+            arch_exa.ia_review_id = review2.id
 
-        db.add(IaHallazgo(review_id=review2.id, tipo="warning", codigo="VIGENCIA_CORTA",
-                          mensaje="El certificado vence en menos de 30 días",
-                          campo="vigencia", valor_detectado="12 días restantes", valor_esperado=">30 días"))
+        for h in rules_a_hallazgos_legado(val_exa["rules"], val_exa["documentData"]):
+            db.add(
+                IaHallazgo(
+                    review_id=review2.id,
+                    tipo=h["tipo"],
+                    codigo=h["codigo"],
+                    mensaje=h["mensaje"],
+                    campo=h.get("campo"),
+                )
+            )
         db.flush()
 
     # 17. Alertas Operacionales

@@ -526,6 +526,35 @@ export type Hallazgo = {
 
 
 
+export type ResultadoReglaIa = "OK" | "OBS" | "RECH" | "N/A" | "REV";
+
+export type EstadoValidacionIa = "APROBADO" | "RECHAZADO" | "REQUIERE_REVISION";
+
+export type ReglaValidacionIa = {
+  codigo: string;
+  campo: string;
+  resultado: ResultadoReglaIa;
+  bloqueante: boolean;
+  observacion: string;
+};
+
+export type ResumenValidacionIa = {
+  OK: number;
+  OBS: number;
+  RECH: number;
+  "N/A": number;
+  REV: number;
+  total: number;
+};
+
+export type ContratoValidacionIa = {
+  documentData: Record<string, unknown>;
+  rules: ReglaValidacionIa[];
+  summary: ResumenValidacionIa;
+  status: EstadoValidacionIa;
+  motivo: string;
+};
+
 export type Revision = {
 
   job_id: string;
@@ -539,6 +568,18 @@ export type Revision = {
   confianza: number | null;
 
   campos_extraidos: Record<string, unknown>;
+
+  documentData?: Record<string, unknown>;
+
+  rules?: ReglaValidacionIa[];
+
+  summary?: ResumenValidacionIa;
+
+  validation_status?: EstadoValidacionIa | null;
+
+  motivo?: string | null;
+
+  validation?: ContratoValidacionIa | null;
 
   hallazgos: Hallazgo[];
 

@@ -22,6 +22,7 @@ import { TabResumen } from "@/components/platform/contratos/TabResumen";
 import { TabChatContrato } from "@/components/platform/contratos/TabChatContrato";
 import { TabAgentesContrato } from "@/components/platform/contratos/TabAgentesContrato";
 import TabAlertasIAContrato from "@/components/platform/contratos/TabAlertasIAContrato";
+import ValidationResultPanel from "@/components/platform/ValidationResultPanel";
 
 import { Tab, TABS, slugTab, tabDesdeSlug } from "@/components/platform/contratos/ContratoTabs";
 
@@ -164,14 +165,19 @@ export default function ContratoDetalle() {
       cargarDocs();
       cargar();
       
-      if (result.resultado === "con_errores") {
+      if (result.validation_status === "RECHAZADO" || result.resultado === "con_errores") {
         toast.error("El documento fue rechazado", {
-          description: result.hallazgos?.[0]?.mensaje || "El archivo contiene errores y ha sido descartado.",
+          description: result.motivo || result.hallazgos?.[0]?.mensaje || "El archivo contiene errores y ha sido descartado.",
           duration: 8000,
+        });
+      } else if (result.validation_status === "REQUIERE_REVISION") {
+        toast.warning("El documento requiere revisión humana", {
+          description: result.motivo || "Revisa las reglas marcadas en revisión.",
+          duration: 7000,
         });
       } else if (result.resultado === "con_observaciones") {
         toast.warning("El documento tiene observaciones", {
-          description: result.hallazgos?.[0]?.mensaje || "Se han detectado advertencias menores.",
+          description: result.motivo || result.hallazgos?.[0]?.mensaje || "Se han detectado advertencias menores.",
           duration: 6000,
         });
       } else if (result.resultado === "validado") {
@@ -478,7 +484,7 @@ export default function ContratoDetalle() {
         />
       ))}
 
-      <Modal abierto={!!review} titulo="Revisión IA" onCerrar={() => setReview(null)} ancho="max-w-xl">
+      <Modal abierto={!!review} titulo="Revisión IA" onCerrar={() => setReview(null)} ancho="max-w-2xl">
         <input
           ref={reintentoRef}
           type="file"
@@ -493,51 +499,27 @@ export default function ContratoDetalle() {
           }}
         />
         {review && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <Chip estado={review.status === "failed" ? "failed"
-                : review.resultado === "validado" ? "ok"
-                : review.resultado === "con_errores" ? "venc" : "porvenc"}
-                texto={review.resultado ?? review.status} />
-              {review.confianza != null && (
-                <span className="text-sm text-slate-500">Confianza: {(review.confianza * 100).toFixed(0)}%</span>
-              )}
-            </div>
+          <div className="space-y-4">
+            {review.status === "failed" ? (
+              <div className="space-y-2">
+                <Chip estado="failed" texto="La revisión falló" />
+                {review.error && (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 border border-red-200 font-medium">
+                    Detalle del error: {review.error}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <ValidationResultPanel review={review} />
+            )}
             {review.accion_aplicada && (
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                 Acción aplicada: {review.accion_aplicada}
               </p>
             )}
-            {review.error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 border border-red-200 font-medium">
-                Detalle del error: {review.error}
-              </p>
-            )}
-            {review.resultado === "con_errores" && (
-              <div className="rounded-lg bg-red-50 border border-red-300 px-3.5 py-3">
-                <p className="m-0 text-sm font-bold text-red-700">⛔ Documento rechazado</p>
-                <p className="mt-1 mb-0 text-[0.8rem] text-red-700">
-                  Corrige los errores señalados y vuelve a subir el archivo; la IA lo revisará de nuevo.
-                </p>
-                {review.hallazgos.some((h) => h.tipo === "error") && (
-                  <ul className="mt-2 mb-0 pl-4 list-disc space-y-1 text-[0.8rem] text-red-700">
-                    {review.hallazgos.filter((h) => h.tipo === "error").map((h, i) => (
-                      <li key={i}>{h.mensaje}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            <ul className="space-y-2 text-sm">
-              {review.hallazgos.map((h, i) => (
-                <li key={i} className="rounded-lg bg-slate-50 px-3 py-2">
-                  {h.tipo === "error" ? "⛔" : h.tipo === "warning" ? "⚠️" : "✅"} {h.mensaje}
-                </li>
-              ))}
-            </ul>
             <div className="flex gap-2">
               <button className="btn-outline flex-1 justify-center" onClick={() => setReview(null)}>Entendido</button>
-              {review.resultado === "con_errores" && review.documento_id && (
+              {(review.resultado === "con_errores" || review.validation_status === "RECHAZADO") && review.documento_id && (
                 <button className="btn-primary flex-1 justify-center" onClick={() => reintentoRef.current?.click()}>
                   Subir documento corregido
                 </button>

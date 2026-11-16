@@ -26,6 +26,7 @@ import { Barra, Chip, Modal, Spinner } from "@/components/shared/ui";
 import { AutoExportModal } from "./AutoExportModal";
 import { ExportarDocumentosModal } from "./ExportarDocumentosModal";
 import { AgendarExamenModal } from "./AgendarExamenModal";
+import ValidationResultPanel from "./ValidationResultPanel";
 
 
 
@@ -87,6 +88,8 @@ function FilaDoc({
 
   onCambiarEstadoPlataforma,
 
+  onVerRevision,
+
 }: {
 
   doc: Documento;
@@ -122,6 +125,8 @@ function FilaDoc({
   onDesvincular: (d: Documento) => void;
 
   onCambiarEstadoPlataforma?: (d: Documento, estado: "sin_subir" | "subido") => void;
+
+  onVerRevision?: (d: Documento, reviewId: string) => void;
 
 }) {
 
@@ -266,6 +271,24 @@ function FilaDoc({
                     Ver documento
 
                   </button>
+
+                  {doc.archivos[0].ia_review_id && onVerRevision && (
+
+                    <button
+
+                      type="button"
+
+                      onClick={() => onVerRevision(doc, doc.archivos![0].ia_review_id!)}
+
+                      className="h-[26px] px-2.5 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-md text-[0.65rem] font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1"
+
+                    >
+
+                      🤖 Revisión IA
+
+                    </button>
+
+                  )}
 
                   <button 
 
@@ -853,6 +876,16 @@ export default function SubjectDetail({
 
 
 
+  const verRevisionExistente = async (doc: Documento, reviewId: string) => {
+    setError("");
+    try {
+      const r = await Api.ia.revision(reviewId);
+      setReview({ doc: doc.titulo, r });
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    }
+  };
+
   if (error && !data) return <p className="p-6 text-red-600">{error}</p>;
 
   if (!data) return <Spinner />;
@@ -896,6 +929,8 @@ export default function SubjectDetail({
         onDesvincular={onDesvincular}
 
         onCambiarEstadoPlataforma={cambiarEstadoPlataforma}
+
+        onVerRevision={verRevisionExistente}
 
       />
 
@@ -1562,117 +1597,53 @@ export default function SubjectDetail({
 
         onCerrar={() => setReview(null)}
 
+        ancho="max-w-2xl"
+
       >
 
         {review && (
 
-          <div className="space-y-3">
+          <div className="space-y-4">
 
-            <div className="flex flex-wrap items-center gap-3">
+            {review.r.status === "failed" ? (
 
-              {review.r.status === "failed" ? (
+              <div className="space-y-2">
 
                 <Chip estado="failed" texto="La revisión falló" />
 
-              ) : (
+                {review.r.error && (
 
-                <Chip
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
 
-                  estado={
+                    {review.r.error}
 
-                    review.r.resultado === "validado"
+                  </p>
 
-                      ? "ok"
+                )}
 
-                      : review.r.resultado === "con_errores"
+              </div>
 
-                        ? "venc"
+            ) : (
 
-                        : "porvenc"
+              <ValidationResultPanel
 
-                  }
+                review={review.r}
 
-                  texto={
+                rutEnviado={data?.rut || data?.patente || null}
 
-                    review.r.resultado === "validado"
+              />
 
-                      ? "Validado"
-
-                      : review.r.resultado === "con_errores"
-
-                        ? "Con errores"
-
-                        : "Con observaciones"
-
-                  }
-
-                />
-
-              )}
-
-              {review.r.confianza != null && (
-
-                <span className="text-sm text-slate-500">
-
-                  Confianza: {(review.r.confianza * 100).toFixed(0)}%
-
-                </span>
-
-              )}
-
-            </div>
+            )}
 
             {review.r.accion_aplicada && (
 
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
 
                 Acción aplicada: {review.r.accion_aplicada}
 
               </p>
 
             )}
-
-            {review.r.error && (
-
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-
-                {review.r.error}
-
-              </p>
-
-            )}
-
-            <ul className="space-y-2">
-
-              {review.r.hallazgos.map((h, i) => (
-
-                <li
-
-                  key={i}
-
-                  className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
-
-                >
-
-                  <span>{ICONO_HALLAZGO[h.tipo]}</span>
-
-                  <div>
-
-                    <div className="font-mono text-xs text-slate-400">
-
-                      {h.codigo}
-
-                    </div>
-
-                    {h.mensaje}
-
-                  </div>
-
-                </li>
-
-              ))}
-
-            </ul>
 
             <button
 
