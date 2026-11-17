@@ -1130,8 +1130,86 @@ def _titulos_tabulares(contenido: bytes, filename: str) -> list[str]:
             .strip()
         )
 
+    ENCABEZADOS = (
+        "requisito",
+        "requisitos",
+        "documento",
+        "documentos",
+        "titulo",
+        "titulos",
+        "nombre",
+        "nombres",
+        "descripcion",
+        "descripciones",
+        "detalle",
+        "detalles",
+    )
+
+    def _extraer_hoja(filas_hoja: list[list[str]]) -> tuple[bool, list[str]]:
+        filas_limpias = [f for f in filas_hoja if any(f)]
+        if not filas_limpias:
+            return False, []
+        ncols = max(len(f) for f in filas_limpias)
+        primera = [normalizar(f[0]) if len(f) > 0 else "" for f in filas_limpias[:1]]
+        resto = (
+            filas_limpias[1:]
+            if primera
+            and primera[0]
+            in ENCABEZADOS
+            + (
+                "id",
+                "codigo",
+                "código",
+                "ambito",
+                "ámbito",
+                "tipo",
+                "obligatorio",
+                "vigencia",
+            )
+            else filas_limpias
+        )
+        headers = [
+            normalizar(f[i]) if len(f) > i else ""
+            for i in range(ncols)
+            for f in filas_limpias[:1]
+        ]
+        col: int | None = None
+        for i, h in enumerate(headers):
+            if h in ENCABEZADOS:
+                col = i
+                break
+        if col is None:
+            for i, h in enumerate(headers):
+                if any(e in h.split() for e in ENCABEZADOS):
+                    col = i
+                    break
+        tuvo_encabezado = col is not None
+        if col is None:
+            # Sin encabezado claro: la columna con texto promedio más largo,
+            # ignorando las que parecen códigos (cortas y sin espacios).
+            mejor_len = -1.0
+            col = 0
+            for i in range(ncols):
+                vals = [f[i] for f in resto if len(f) > i and f[i]]
+                con_espacio = [v for v in vals if " " in v]
+                base = con_espacio if len(con_espacio) * 2 >= len(vals) else vals
+                prom = sum(len(v) for v in base) / len(base) if base else 0
+                if prom > mejor_len:
+                    col, mejor_len = i, prom
+        titulos = [f[col] for f in resto if len(f) > col and f[col].strip()]
+
+        # Se descarta la primera fila si parece encabezado y las líneas de relleno.
+        limpios = [t for t in titulos if 4 <= len(t) <= 160]
+        primera_norm = normalizar(limpios[0]) if limpios else ""
+        if primera_norm and (
+            primera_norm
+            in ENCABEZADOS + ("id", "codigo", "ambito", "tipo", "obligatorio", "vigencia")
+            or any(e in primera_norm.split() for e in ENCABEZADOS)
+        ):
+            limpios = limpios[1:]
+        return tuvo_encabezado, limpios
+
     ext = os.path.splitext(filename or "")[1].lower()
-    filas: list[list[str]] = []
     if ext == ".csv":
         import csv
 
@@ -1148,9 +1226,9 @@ def _titulos_tabulares(contenido: bytes, filename: str) -> list[str]:
             dialecto = csv.Sniffer().sniff(texto[:4096], delimiters=";,\t")
         except csv.Error:
             dialecto = csv.excel
-        for fila in csv.reader(io.StringIO(texto), dialecto):
-            filas.append([(c or "").strip() for c in fila])
-    elif ext in (".xlsx", ".xls"):
+        filas_csv = [[(c or "").strip() for c in fila] for fila in csv.reader(io.StringIO(texto), dialecto)]
+        return _extraer_hoja(filas_csv)[1][:200]
+    if ext in (".xlsx", ".xls"):
         try:
             from openpyxl import load_workbook  # import perezoso: opcional
         except ImportError:
@@ -1161,86 +1239,24 @@ def _titulos_tabulares(contenido: bytes, filename: str) -> list[str]:
         except Exception:  # .xls antiguo, cifrado, corrupto
             logger.info("planilla ilegible por openpyxl; conjunto simulado")
             return []
-        for fila in wb.worksheets[0].iter_rows(values_only=True):
-            filas.append([str(c).strip() if c is not None else "" for c in fila])
-        wb.close()
-    else:
-        return []
-
-    filas = [f for f in filas if any(f)]
-    if not filas:
-        return []
-    ncols = max(len(f) for f in filas)
-    ENCABEZADOS = (
-        "requisito",
-        "requisitos",
-        "documento",
-        "documentos",
-        "titulo",
-        "titulos",
-        "nombre",
-        "nombres",
-        "descripcion",
-        "descripciones",
-        "detalle",
-        "detalles",
-    )
-    col = 0
-    primera = [normalizar(f[0]) if len(f) > 0 else "" for f in filas[:1]]
-    resto = (
-        filas[1:]
-        if primera
-        and primera[0]
-        in ENCABEZADOS
-        + (
-            "id",
-            "codigo",
-            "código",
-            "ambito",
-            "ámbito",
-            "tipo",
-            "obligatorio",
-            "vigencia",
-        )
-        else filas
-    )
-    headers = [
-        normalizar(f[i]) if len(f) > i else "" for i in range(ncols) for f in filas[:1]
-    ]
-    col: int | None = None
-    for i, h in enumerate(headers):
-        if h in ENCABEZADOS:
-            col = i
-            break
-    if col is None:
-        for i, h in enumerate(headers):
-            if any(e in h.split() for e in ENCABEZADOS):
-                col = i
-                break
-    if col is None:
-        # Sin encabezado claro: la columna con texto promedio más largo,
-        # ignorando las que parecen códigos (cortas y sin espacios).
-        mejor_len = -1.0
-        col = 0
-        for i in range(ncols):
-            vals = [f[i] for f in resto if len(f) > i and f[i]]
-            con_espacio = [v for v in vals if " " in v]
-            base = con_espacio if len(con_espacio) * 2 >= len(vals) else vals
-            prom = sum(len(v) for v in base) / len(base) if base else 0
-            if prom > mejor_len:
-                col, mejor_len = i, prom
-    titulos = [f[col] for f in resto if len(f) > col and f[col].strip()]
-
-    # Se descarta la primera fila si parece encabezado y las líneas de relleno.
-    limpios = [t for t in titulos if 4 <= len(t) <= 160]
-    primera_norm = normalizar(limpios[0]) if limpios else ""
-    if primera_norm and (
-        primera_norm
-        in ENCABEZADOS + ("id", "codigo", "ambito", "tipo", "obligatorio", "vigencia")
-        or any(e in primera_norm.split() for e in ENCABEZADOS)
-    ):
-        limpios = limpios[1:]
-    return limpios[:200]
+        hojas_con_encabezado: list[str] = []
+        primera_hoja: list[str] = []
+        try:
+            for idx, ws in enumerate(wb.worksheets):
+                filas_hoja = [
+                    [str(c).strip() if c is not None else "" for c in fila]
+                    for fila in ws.iter_rows(values_only=True)
+                ]
+                tuvo_hdr, limpios = _extraer_hoja(filas_hoja)
+                if idx == 0:
+                    primera_hoja = limpios
+                if tuvo_hdr:
+                    hojas_con_encabezado.extend(limpios)
+        finally:
+            wb.close()
+        resultado = hojas_con_encabezado if hojas_con_encabezado else primera_hoja
+        return resultado[:200]
+    return []
 
 
 @tarea("extraer_carpeta_arranque")

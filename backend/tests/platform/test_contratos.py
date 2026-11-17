@@ -1185,3 +1185,62 @@ def test_alertas_ia_nuevos_endpoints_config_y_areas(app_cliente, empresa_a, cont
     assert envio_res["ok"] is True
     assert "envios_por_area" in envio_res
     assert len(envio_res["envios_por_area"]) >= 6
+
+
+def test_compartir_contrato_invita_y_notifica(
+    app_cliente, empresa_a, contrato_a, monkeypatch
+):
+    """POST /contratos/{id}/compartir crea o asigna usuario y encola correo sin errores."""
+    from app.services.platform import jobs
+
+    enviados = []
+    monkeypatch.setattr(jobs, "enqueue", lambda nombre, **kw: enviados.append((nombre, kw)))
+
+    r = app_cliente.post(
+        f"{API}/contratos/{contrato_a['id']}/compartir",
+        headers=empresa_a["headers"],
+        json={"email": "nuevo.rrhh@empresa.cl", "nombre": "Nuevo RRHH", "role": "rrhh"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["rol_contrato"] == "rrhh"
+    assert len(enviados) == 1
+    assert enviados[0][0] == "enviar_email"
+    assert enviados[0][1]["to_email"] == "nuevo.rrhh@empresa.cl"
+
+    # Re-asignar usuario existente usa el canal de notificación sin KeyError/TypeError.
+    r2 = app_cliente.post(
+        f"{API}/contratos/{contrato_a['id']}/compartir",
+        headers=empresa_a["headers"],
+        json={"email": "nuevo.rrhh@empresa.cl", "role": "adc"},
+    )
+    assert r2.status_code == 200, r2.text
+    assert len(enviados) == 2
+
+
+def test_titulos_tabulares_xlsx_multihoja():
+    """Planillas multihoja omiten la portada Campo/Valor y combinan hojas con encabezado."""
+    import io
+    from openpyxl import Workbook
+    from app.services.platform.tasks import _titulos_tabulares
+
+    wb = Workbook()
+    ws0 = wb.active
+    ws0.title = "Resumen_Contrato"
+    ws0.append(["Campo", "Valor"])
+    ws0.append(["Mandante", "Minera Los Andes S.A."])
+
+    ws1 = wb.create_sheet("Requisitos_Empresa")
+    ws1.append(["Código", "Documento", "Obligatorio"])
+    ws1.append(["EMP-01", "Certificado F30 DT", "Sí"])
+
+    ws2 = wb.create_sheet("Requisitos_Equipos")
+    ws2.append(["Código", "Documento", "Obligatorio"])
+    ws2.append(["EQP-01", "Seguro Obligatorio SOAP", "Sí"])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    res = _titulos_tabulares(buf.getvalue(), "matriz_multihoja.xlsx")
+    assert res == ["Certificado F30 DT", "Seguro Obligatorio SOAP"]
+
+

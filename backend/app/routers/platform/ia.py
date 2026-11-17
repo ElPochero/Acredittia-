@@ -108,7 +108,7 @@ ESTADOS: tuple[str, ...] = ("queued", "processing", "done", "failed")
 ORDEN_REVISIONES = {"created_at", "started_at", "finished_at", "status", "confianza"}
 
 NOTA_EXTRACCION = (
-    "La extracciÃ³n no crea entidades: confirme el formulario en "
+    "La extracción no crea entidades: confirme el formulario en "
     "el endpoint del recurso indicando ia_review_id."
 )
 
@@ -373,7 +373,7 @@ def encolar_revision(
         cid,
         "alerta_ia",
         "alertas_ia",
-        f"RevisiÃ³n IA solicitada para '{doc.titulo}' (archivo '{archivo.filename}')",
+        f"Revisión IA solicitada para '{doc.titulo}' (archivo '{archivo.filename}')",
         user_id=user.id,
         entidad_tipo="documento",
         entidad_id=doc.id,
@@ -864,7 +864,7 @@ def extraer_sujeto(
         cid,
         "alerta_ia",
         "alertas_ia",
-        f"ExtracciÃ³n de {body.tipo} solicitada sobre '{body.filename}'",
+        f"Extracción de {body.tipo} solicitada sobre '{body.filename}'",
         user_id=user.id,
         entidad_tipo="ia_review",
         entidad_id=review.id,
@@ -910,7 +910,7 @@ def encolar_extraccion_contrato(
         cid,
         "alerta_ia",
         "contrato",
-        f"Contrato '{filename}' enviado a extracciÃ³n IA",
+        f"Contrato '{filename}' enviado a extracción IA",
         user_id=user.id,
         entidad_tipo="ia_review",
         entidad_id=review.id,
@@ -978,7 +978,7 @@ def encolar_extraccion_arranque(
         cid,
         "alerta_ia",
         "requisitos",
-        f"Carpeta de Arranque '{filename}' enviada a extracciÃ³n "
+        f"Carpeta de Arranque '{filename}' enviada a extracción "
         f"para el contrato '{c.nombre}'",
         user_id=user.id,
         entidad_tipo="ia_review",
@@ -1004,7 +1004,7 @@ def encolar_extraccion_arranque(
         "context": "carpeta_arranque",
         "contrato_id": str(c.id),
         "nota": (
-            "La extracciÃ³n propone requisitos; confÃ­rmelos con "
+            "La extracción propone requisitos; confírmelos con "
             "POST /contratos/{id}/requisitos?bulk=true"
         ),
     }
@@ -1068,7 +1068,7 @@ def upload_url_temporal(
         raise err(
             400,
             "ARCHIVO_DEMASIADO_GRANDE",
-            f"El tamaÃ±o mÃ¡ximo es {settings.max_upload_mb} MB",
+            f"El tamaño máximo es {settings.max_upload_mb} MB",
         )
 
     blob_path = make_tmp_path(cid, body.proposito, body.filename)

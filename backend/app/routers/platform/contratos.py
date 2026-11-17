@@ -4020,16 +4020,44 @@ def compartir_contrato_endpoint(
         ))
 
     try:
-        from ...services.platform.email import despachar_alerta_email
-        despachar_alerta_email(
-            db=db,
-            destinatarios=[u.email],
-            asunto=f"Invitación a colaborar en {c.nombre} (ACREDITTIA)",
-            cuerpo=f"Hola {u.nombre},\n\nHas sido asignado al contrato '{c.nombre}' con el rol '{body.role}'.\nAccede a la plataforma para gestionar tus actividades.",
-            severidad="informativa"
-        )
+        from ...models import Company
+        from ...services.platform.email import _html_alerta, enviar_invitacion
+        from ...services.platform.jobs import enqueue
+
+        emp = db.get(Company, cid)
+        empresa_nombre = emp.nombre if emp else ""
+        enlace = f"{settings.app_url.rstrip('/')}/contratos/{c.id}"
+        if temp_pass:
+            enviar_invitacion(
+                to_email=u.email,
+                nombre=u.nombre,
+                clave=temp_pass,
+                rol=body.role,
+                contrato_nombre=c.nombre,
+                enlace=enlace,
+                empresa=empresa_nombre,
+            )
+        else:
+            asunto = f"Asignación al contrato {c.nombre} (ACREDITTIA)"
+            desc = (
+                f"Hola {u.nombre}, has sido asignado al contrato '{c.nombre}' "
+                f"con el rol '{body.role}'. Accede en {enlace}"
+            )
+            enqueue(
+                "enviar_email",
+                to_email=u.email,
+                subject=asunto,
+                html_body=_html_alerta(
+                    titulo=asunto,
+                    descripcion=desc,
+                    severidad="info",
+                    nombre_empresa=empresa_nombre,
+                    contrato_nombre=c.nombre,
+                ),
+                text_body=desc,
+            )
     except Exception as e:
-        log.warning(f"No se pudo despachar email de invitación: {e}")
+        logger.warning(f"No se pudo despachar email de invitación: {e}")
 
     db.commit()
     db.refresh(u)

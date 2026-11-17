@@ -1008,9 +1008,17 @@ export default function SubjectDetail({
 
               )}
 
-              <span className="text-slate-300">•</span>
+              {esTrabajador && (
 
-              <span>{data.cargo || 'Sin cargo'}</span>
+                <>
+
+                  <span className="text-slate-300">•</span>
+
+                  <span>{data.cargo || 'Sin cargo'}</span>
+
+                </>
+
+              )}
 
               {esTrabajador && (data.licencia_interna || data.cargo?.toLowerCase().includes('conductor')) && (
 
@@ -1144,15 +1152,25 @@ export default function SubjectDetail({
 
           <p className="text-[0.65rem] text-slate-400 ml-10 mb-3">Documentos exigidos por el estándar de esta faena</p>
 
-          
-
-          <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-lg px-3 py-2.5 flex items-center gap-2 ml-10">
-
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400 shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-
-            <span className="text-[0.7rem] font-medium text-emerald-100">Este trabajador está completamente al día. No requiere acción.</span>
-
-          </div>
+          {(() => {
+            const totalDiag = data.documentos.length + data.documentos_emsipor.length;
+            const okDiag =
+              data.documentos.filter((d) => d.estado_calc === "ok").length +
+              data.documentos_emsipor.filter((d) => d.estado_calc === "ok").length;
+            const sujetoLbl = esTrabajador ? "Este trabajador" : "Este equipo";
+            const alDia = totalDiag > 0 ? okDiag === totalDiag : data.stats.cumplimiento_pct >= 100;
+            return alDia ? (
+              <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-lg px-3 py-2.5 flex items-center gap-2 ml-10">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400 shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <span className="text-[0.7rem] font-medium text-emerald-100">{sujetoLbl} está completamente al día. No requiere acción.</span>
+              </div>
+            ) : (
+              <div className="bg-amber-950/40 border border-amber-500/30 rounded-lg px-3 py-2.5 flex items-center gap-2 ml-10">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400 shrink-0"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <span className="text-[0.7rem] font-medium text-amber-100">{sujetoLbl} tiene {totalDiag - okDiag} de {totalDiag} documento(s) pendientes o por regularizar.</span>
+              </div>
+            );
+          })()}
 
         </div>
 

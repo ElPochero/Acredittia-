@@ -146,3 +146,24 @@ def test_resumen_agrupa_por_contrato_y_muestra_conteos():
     assert "Contrato Mina" in html
     assert "1 vencido" in html
     assert "1 por vencer" in html
+
+
+def test_construir_correo_invitacion_sin_error_por_mandante(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        svc,
+        "_contexto",
+        lambda _db, _c: {
+            "empresa": BASE["empresa"],
+            "contrato": BASE["contrato"],
+            "faena": BASE["faena"],
+            "mandante": BASE["mandante"],
+        },
+    )
+    asunto, html, texto = svc.construir_correo(
+        None, "invitacion", SimpleNamespace(id=1), para="user@empresa.cl", nombre="Ana",
+    )
+    assert BASE["contrato"] in asunto
+    assert "user@empresa.cl" in html
+    assert "Ana" in texto

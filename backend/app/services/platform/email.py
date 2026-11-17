@@ -861,8 +861,13 @@ def construir_correo(db, plantilla: str, c: Contrato, *,
     if plantilla == "invitacion":
         ctx = _contexto(db, c)
         return correo_invitacion(
-            **ctx, nombre=nombre, correo=para or "invitado@empresa.cl",
-            clave="Acr7k2qp!", rol=rol or "Colaborador del contrato",
+            empresa=ctx["empresa"],
+            contrato=ctx["contrato"],
+            faena=ctx["faena"],
+            nombre=nombre,
+            correo=para or "invitado@empresa.cl",
+            clave="Acr7k2qp!",
+            rol=rol or "Colaborador del contrato",
             enlace=_url("/login"),
         )
     raise ValueError(f"Plantilla desconocida: {plantilla}")

@@ -331,14 +331,35 @@ def test_ca9_ca10_ca11_ca12_circuito_revision_versionado_cierre(client, user_tok
     assert r_obs.status_code == 200
     assert r_obs.json()["estado"] == "observado"
 
+    # Matriz documental debe serializar observaciones, version y abierto_por_adc sin 500
+    resp_matriz = client.get(
+        f"/api/v1/periodos/{periodo_id}/matriz",
+        headers={"Authorization": f"Bearer {user_token}"}
+    )
+    assert resp_matriz.status_code == 200, resp_matriz.text
+    celda_obs = next(
+        c for c in resp_matriz.json()["celdas"].values() if c["id"] == doc_id
+    )
+    assert "ilegible en página 3" in (celda_obs["observaciones"] or "")
+    assert celda_obs["abierto_por_adc"] is True
+
     # 4. Bandeja 'Mis pendientes' de RR.HH. muestra la observación (CA 9)
     resp_pend = client.get(
         "/api/v1/certificacion-laboral/mis-pendientes",
         headers={"Authorization": f"Bearer {user_token}"}
     )
     assert resp_pend.status_code == 200
-    obs_list = resp_pend.json()["observados_rechazados"]
-    assert any(item["documento_id"] == doc_id for item in obs_list)
+    pend_data = resp_pend.json()
+    obs_list = pend_data["observados_rechazados"]
+    obs_item = next((item for item in obs_list if item["documento_id"] == doc_id), None)
+    assert obs_item is not None
+    assert obs_item.get("requisito_nombre")
+    assert obs_item.get("observaciones")
+    for p_item in pend_data["pendientes_carga"]:
+        assert p_item.get("documento_id") == p_item["id"]
+        assert p_item.get("requisito_nombre")
+    for per_item in pend_data["periodos_proximos"]:
+        assert per_item.get("estado")
 
     # 5. RR.HH. sube corrección (v2): DEBE crear versión 2 y preservar historial v1 (CA 9)
     resp_v2 = client.post(
@@ -363,13 +384,14 @@ def test_ca9_ca10_ca11_ca12_circuito_revision_versionado_cierre(client, user_tok
     )
     assert resp_cerrar_fail.status_code == 400
 
-    # 7. Dictaminar todos los requisitos del período a 'aprobado'
-    for d in docs:
-        client.post(
+    # 7. Dictaminar todos los requisitos del período a 'aprobado' (incluso sin comentario)
+    for idx_d, d in enumerate(docs):
+        r_apr = client.post(
             f"/api/v1/periodos/{periodo_id}/documentos/{d['id']}/revisar",
-            json={"accion": "aprobar", "comentario": "Conforme a normativa"},
+            json={"accion": "aprobar", "comentario": None if idx_d == 0 else "Conforme a normativa"},
             headers={"Authorization": f"Bearer {user_token}"}
         )
+        assert r_apr.status_code == 200, r_apr.text
 
     # 8. Cerrar período al 100% (CA 12)
     resp_cerrar = client.post(
