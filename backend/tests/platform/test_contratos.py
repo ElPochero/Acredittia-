@@ -1217,3 +1217,30 @@ def test_compartir_contrato_invita_y_notifica(
     assert r2.status_code == 200, r2.text
     assert len(enviados) == 2
 
+
+def test_titulos_tabulares_xlsx_multihoja():
+    """Planillas multihoja omiten la portada Campo/Valor y combinan hojas con encabezado."""
+    import io
+    from openpyxl import Workbook
+    from app.services.platform.tasks import _titulos_tabulares
+
+    wb = Workbook()
+    ws0 = wb.active
+    ws0.title = "Resumen_Contrato"
+    ws0.append(["Campo", "Valor"])
+    ws0.append(["Mandante", "Minera Los Andes S.A."])
+
+    ws1 = wb.create_sheet("Requisitos_Empresa")
+    ws1.append(["Código", "Documento", "Obligatorio"])
+    ws1.append(["EMP-01", "Certificado F30 DT", "Sí"])
+
+    ws2 = wb.create_sheet("Requisitos_Equipos")
+    ws2.append(["Código", "Documento", "Obligatorio"])
+    ws2.append(["EQP-01", "Seguro Obligatorio SOAP", "Sí"])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    res = _titulos_tabulares(buf.getvalue(), "matriz_multihoja.xlsx")
+    assert res == ["Certificado F30 DT", "Seguro Obligatorio SOAP"]
+
+
