@@ -1776,6 +1776,7 @@ def obtener_mis_pendientes_rrhh(
                         "doc_id": str(d.id),
                         "documento_id": str(d.id),
                         "nombre": d.nombre or "Documento",
+                        "requisito_nombre": d.nombre or "Documento",
                         "ambito": d.ambito or "contrato",
                         "contrato_id": str(c.id),
                         "contrato_nombre": c.nombre,
@@ -1785,10 +1786,12 @@ def obtener_mis_pendientes_rrhh(
                         "estado": d.estado,
                         "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
                         "dias_restantes": dias_restantes,
+                        "observaciones": obs,
                         "ultima_observacion": obs,
                         "version": ver_num,
+                        "fecha_revision": ult_ver.created_at.isoformat() if ult_ver and ult_ver.created_at else None,
                         "archivo_url": d.archivo_url,
-                        "sujeto_nombre": sujeto.nombre if sujeto else None,
+                        "sujeto_nombre": sujeto.nombre if sujeto else (d.ambito or "Empresa").capitalize(),
                         "sujeto_rut": sujeto.rut if sujeto else None
                     })
                 # 2. Pendientes de carga
@@ -1796,7 +1799,9 @@ def obtener_mis_pendientes_rrhh(
                     pendientes_carga.append({
                         "id": str(d.id),
                         "doc_id": str(d.id),
+                        "documento_id": str(d.id),
                         "nombre": d.nombre or "Documento",
+                        "requisito_nombre": d.nombre or "Documento",
                         "ambito": d.ambito or "contrato",
                         "contrato_id": str(c.id),
                         "contrato_nombre": c.nombre,
@@ -1808,7 +1813,7 @@ def obtener_mis_pendientes_rrhh(
                         "dias_restantes": dias_restantes,
                         "version": 1,
                         "archivo_url": d.archivo_url,
-                        "sujeto_nombre": sujeto.nombre if sujeto else None,
+                        "sujeto_nombre": sujeto.nombre if sujeto else (d.ambito or "Empresa").capitalize(),
                         "sujeto_rut": sujeto.rut if sujeto else None
                     })
 
@@ -1821,6 +1826,7 @@ def obtener_mis_pendientes_rrhh(
                 "contrato_nombre": c.nombre,
                 "fecha_limite": p.fecha_limite.isoformat() if p.fecha_limite else None,
                 "dias_restantes": dias_restantes,
+                "estado": p.estado,
                 "porcentaje_cumplimiento": float(p.porcentaje_cumplimiento or 0.0),
                 "pendientes_count": p_pend,
                 "por_revisar_count": p_rev

@@ -474,7 +474,8 @@ export default function MisPendientesRrhhView({ onTotalActualizado }: MisPendien
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {periodosFiltrados.map((p) => {
-                const urgente = p.dias_restantes <= 3;
+                const tieneDias = p.dias_restantes !== null && p.dias_restantes !== undefined;
+                const urgente = tieneDias && p.dias_restantes <= 3;
                 return (
                   <div
                     key={p.periodo_id}
@@ -500,21 +501,25 @@ export default function MisPendientesRrhhView({ onTotalActualizado }: MisPendien
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Tiempo restante:</span>
-                        <span
-                          className={`font-bold ${
-                            p.dias_restantes <= 0
-                              ? "text-rose-600"
-                              : p.dias_restantes <= 3
-                              ? "text-amber-700"
-                              : "text-blue-700"
-                          }`}
-                        >
-                          {p.dias_restantes < 0
-                            ? `⚠️ Venció hace ${Math.abs(p.dias_restantes)} días`
-                            : p.dias_restantes === 0
-                            ? "⚠️ Vence hoy"
-                            : `⏳ Quedan ${p.dias_restantes} días`}
-                        </span>
+                        {tieneDias ? (
+                          <span
+                            className={`font-bold ${
+                              p.dias_restantes <= 0
+                                ? "text-rose-600"
+                                : p.dias_restantes <= 3
+                                ? "text-amber-700"
+                                : "text-blue-700"
+                            }`}
+                          >
+                            {p.dias_restantes < 0
+                              ? `⚠️ Venció hace ${Math.abs(p.dias_restantes)} días`
+                              : p.dias_restantes === 0
+                              ? "⚠️ Vence hoy"
+                              : `⏳ Quedan ${p.dias_restantes} días`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-medium">Sin fecha límite</span>
+                        )}
                       </div>
                     </div>
 

@@ -349,8 +349,17 @@ def test_ca9_ca10_ca11_ca12_circuito_revision_versionado_cierre(client, user_tok
         headers={"Authorization": f"Bearer {user_token}"}
     )
     assert resp_pend.status_code == 200
-    obs_list = resp_pend.json()["observados_rechazados"]
-    assert any(item["documento_id"] == doc_id for item in obs_list)
+    pend_data = resp_pend.json()
+    obs_list = pend_data["observados_rechazados"]
+    obs_item = next((item for item in obs_list if item["documento_id"] == doc_id), None)
+    assert obs_item is not None
+    assert obs_item.get("requisito_nombre")
+    assert obs_item.get("observaciones")
+    for p_item in pend_data["pendientes_carga"]:
+        assert p_item.get("documento_id") == p_item["id"]
+        assert p_item.get("requisito_nombre")
+    for per_item in pend_data["periodos_proximos"]:
+        assert per_item.get("estado")
 
     # 5. RR.HH. sube corrección (v2): DEBE crear versión 2 y preservar historial v1 (CA 9)
     resp_v2 = client.post(
