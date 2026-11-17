@@ -46,6 +46,7 @@ def embed_texts(texts: list[str], *, timeout_s: float = 60.0) -> list[list[float
                     "model": settings.gemini_embedding_model,
                     "input": recortados,
                     "encoding_format": "float",
+                    "dimensions": settings.gemini_embedding_dims,
                 },
             )
             r.raise_for_status()

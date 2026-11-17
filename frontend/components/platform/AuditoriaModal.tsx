@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { PeriodoDocumento, AuditoriaDocumento, PeriodoDocumentoVersionItem } from "@/lib/platform/tipos";
+import type { PeriodoDocumento, AuditoriaDocumento, PeriodoDocumentoVersionItem, Revision } from "@/lib/platform/tipos";
 import { Modal, Chip } from "@/components/shared/ui";
 import * as Api from "@/lib/platform/cliente";
+import ValidationResultPanel from "./ValidationResultPanel";
 
 interface AuditoriaModalProps {
   abierto: boolean;
@@ -17,6 +18,7 @@ interface AuditoriaModalProps {
   onAuditar?: (accion: "aprobar" | "observar" | "rechazar" | "no_aplica", observacion?: string) => Promise<void>;
   historial?: AuditoriaDocumento[];
   periodoCerrado?: boolean;
+  revisionIa?: Revision | null;
 }
 
 export default function AuditoriaModal({
@@ -31,6 +33,7 @@ export default function AuditoriaModal({
   onAuditar,
   historial = [],
   periodoCerrado = false,
+  revisionIa = null,
 }: AuditoriaModalProps) {
   const [observacion, setObservacion] = useState("");
   const [accionSeleccionada, setAccionSeleccionada] = useState<"observar" | "rechazar" | null>(null);
@@ -201,6 +204,15 @@ export default function AuditoriaModal({
         {errorMsg && (
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-700">
             ⚠️ {errorMsg}
+          </div>
+        )}
+
+        {revisionIa && (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h5 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <span>🤖</span> Validación Documental por IA (v2)
+            </h5>
+            <ValidationResultPanel review={revisionIa} rutEnviado={rutTrabajador} />
           </div>
         )}
 

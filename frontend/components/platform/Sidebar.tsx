@@ -107,7 +107,7 @@ export default function Sidebar({
     <>
       <aside className={`side ${isOpen ? "mob-open" : ""}`}>
         {/* Logo */}
-        <div className="slogo" onClick={(e) => handleNav(e, "/dashboard")} style={{ cursor: "pointer" }}>
+        <div className="slogo" onClick={(e) => handleNav(e, esRrhh ? "/certificacion-laboral" : "/dashboard")} style={{ cursor: "pointer" }}>
           <svg
             className="mark"
             viewBox="0 0 100 92"

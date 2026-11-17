@@ -70,7 +70,8 @@ export default function ContratoCertificacionDetallePage() {
   const [cargandoAccionObs, setCargandoAccionObs] = useState(false);
   const [errorObs, setErrorObs] = useState<string | null>(null);
 
-  // Estados para Buk Sync (Día 5, CA 13)
+  // Estados para Buk / Talana Sync (Día 5, CA 13)
+  const [proveedorRrhh, setProveedorRrhh] = useState<"buk" | "talana">("buk");
   const [sincronizandoBuk, setSincronizandoBuk] = useState(false);
   const [modalBukAbierto, setModalBukAbierto] = useState(false);
   const [resultadoBuk, setResultadoBuk] = useState<{
@@ -82,11 +83,19 @@ export default function ContratoCertificacionDetallePage() {
     logs: string[];
   } | null>(null);
 
-  const handleSincronizarBuk = async (simularExito: boolean = false) => {
+  const handleSincronizarBuk = async (
+    simularExito: boolean = false,
+    proveedor: "buk" | "talana" = proveedorRrhh
+  ) => {
     if (!periodoActivo) return;
     setSincronizandoBuk(true);
     try {
-      const res = await Api.certificacion.sincronizarBuk(contratoId, periodoActivo.id, simularExito);
+      const res = await Api.certificacion.sincronizarBuk(
+        contratoId,
+        periodoActivo.id,
+        simularExito,
+        proveedor
+      );
       setResultadoBuk(res);
       setModalBukAbierto(true);
       await recargarDetallesPeriodo();
@@ -94,7 +103,7 @@ export default function ContratoCertificacionDetallePage() {
         cargarTrazabilidad();
       }
     } catch (err: any) {
-      alert(err?.message || "Error al sincronizar con Buk");
+      alert(err?.message || `Error al sincronizar con ${proveedor === "buk" ? "Buk" : "Talana"}`);
     } finally {
       setSincronizandoBuk(false);
     }
@@ -745,22 +754,22 @@ export default function ContratoCertificacionDetallePage() {
           {/* Pestaña: Documentos requeridos */}
           {tabActiva === "documentos" && (
             <div className="space-y-4">
-              {/* Panel de Sincronización Buk (.dpanel.hr-cl / #clhr-log, plataforma.html L13974–L14003) */}
-              <div className="dpanel hr-cl rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-blue-50/50 p-5 shadow-sm">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              {/* Panel de Sincronización Buk / Talana (.dpanel.hr-cl / #clhr-log, plataforma.html L13974–L14003) */}
+              <div className="dpanel hr-cl rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-blue-50/50 p-5 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <span className="text-3xl">🔗</span>
                     <div>
                       <div className="flex items-center gap-2">
                         <h4 className="text-sm font-bold text-slate-900">
-                          Sincronización Automática con Buk (Nómina & Documentos)
+                          Sincronización Automática de Nómina & Documentos Laborales
                         </h4>
                         <span className="rounded-md bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
                           Conector Resiliente
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Importa liquidaciones, libros y contratos directamente desde Buk hacia este período.
+                        Importa liquidaciones, libros y contratos directamente desde tu software de RR.HH. (Buk o Talana).
                         Si la API no responde, el sistema conmuta a <strong>fallback manual</strong> sin bloqueos (CA 13).
                       </p>
                     </div>
@@ -770,19 +779,102 @@ export default function ContratoCertificacionDetallePage() {
                     <button
                       type="button"
                       disabled={sincronizandoBuk || periodoCerrado}
-                      onClick={() => handleSincronizarBuk(false)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50"
+                      onClick={() => handleSincronizarBuk(false, proveedorRrhh)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50 cursor-pointer"
                     >
-                      <span>{sincronizandoBuk ? "⏳ Sincronizando..." : "🔄 Sincronizar con Buk"}</span>
+                      <span>{sincronizandoBuk ? "⏳ Sincronizando..." : `🔄 Sincronizar con ${proveedorRrhh === "buk" ? "Buk" : "Talana"}`}</span>
                     </button>
                     <button
                       type="button"
                       disabled={sincronizandoBuk || periodoCerrado}
-                      onClick={() => handleSincronizarBuk(true)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition"
-                      title="Simular respuesta exitosa de Buk para validación"
+                      onClick={() => handleSincronizarBuk(true, proveedorRrhh)}
+                      className="inline-flex items-center gap-1 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 transition cursor-pointer"
+                      title="Simular respuesta exitosa para validación"
                     >
                       <span>🧪 Probar Sync</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selector Dual Buk / Talana estilo hrChooser (plataforma.html L13929-14009) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-indigo-100/80">
+                  <div
+                    onClick={() => setProveedorRrhh("buk")}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                      proveedorRrhh === "buk"
+                        ? "bg-white border-indigo-500 shadow-xs ring-1 ring-indigo-500"
+                        : "bg-white/60 border-slate-200 hover:bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center font-black text-indigo-600 text-sm">
+                        BUK
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          Buk · Recursos Humanos
+                          {proveedorRrhh === "buk" && (
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100 font-bold px-1.5 py-0.2 rounded-full">
+                              Seleccionado
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Nómina, contratos, anexos y liquidaciones
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={sincronizandoBuk || periodoCerrado}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setProveedorRrhh("buk");
+                        handleSincronizarBuk(false, "buk");
+                      }}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline"
+                    >
+                      Traer desde Buk
+                    </button>
+                  </div>
+
+                  <div
+                    onClick={() => setProveedorRrhh("talana")}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                      proveedorRrhh === "talana"
+                        ? "bg-white border-indigo-500 shadow-xs ring-1 ring-indigo-500"
+                        : "bg-white/60 border-slate-200 hover:bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center font-black text-emerald-600 text-xs">
+                        TLN
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          Talana · Recursos Humanos
+                          {proveedorRrhh === "talana" && (
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100 font-bold px-1.5 py-0.2 rounded-full">
+                              Seleccionado
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Nómina, contratos, anexos y liquidaciones
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={sincronizandoBuk || periodoCerrado}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setProveedorRrhh("talana");
+                        handleSincronizarBuk(false, "talana");
+                      }}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline"
+                    >
+                      Traer desde Talana
                     </button>
                   </div>
                 </div>

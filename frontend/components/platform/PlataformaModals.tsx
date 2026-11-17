@@ -456,7 +456,32 @@ interface PropRequisitos {
     o: boolean;
     on: boolean;
     dup: boolean;
+    periodicidad?: string | number | null;
+    vigencia_meses?: number | null;
   }>;
+}
+
+function parseVigenciaMeses(periodicidad?: string | number | null, vigencia?: number | null): number | null {
+  if (typeof vigencia === "number" && !isNaN(vigencia) && vigencia > 0) return vigencia;
+  if (!periodicidad) return null;
+  if (typeof periodicidad === "number" && !isNaN(periodicidad) && periodicidad > 0) return periodicidad;
+  const p = String(periodicidad).toLowerCase().trim();
+  if (/mensual|30\s*d[ií]as/i.test(p)) return 1;
+  if (/bimestral|60\s*d[ií]as/i.test(p)) return 2;
+  if (/trimestral|90\s*d[ií]as/i.test(p)) return 3;
+  if (/cuatrimestral|120\s*d[ií]as/i.test(p)) return 4;
+  if (/semestral|6\s*meses|180\s*d[ií]as/i.test(p)) return 6;
+  if (/anual|1\s*a[nñ]o|12\s*meses|365\s*d[ií]as/i.test(p)) return 12;
+  if (/2\s*a[nñ]os|24\s*meses/i.test(p)) return 24;
+  if (/3\s*a[nñ]os|36\s*meses/i.test(p)) return 36;
+  if (/4\s*a[nñ]os|48\s*meses/i.test(p)) return 48;
+  if (/5\s*a[nñ]os|60\s*meses/i.test(p)) return 60;
+  const match = p.match(/\d+/);
+  if (match) {
+    const num = parseInt(match[0], 10);
+    if (!isNaN(num) && num > 0) return num;
+  }
+  return null;
 }
 
 export function DetallePlataformaModal({
@@ -607,11 +632,14 @@ export function DetallePlataformaModal({
       const propItems = itemsDetectados.map((it: any) => {
         const nombreItem = String(it.nombre || it.titulo || "").trim();
         const dup = titulosExistentes.has(nombreItem.toLowerCase());
+        const vigencia = parseVigenciaMeses(it.periodicidad, it.vigencia_meses);
         return {
           t: nombreItem,
           o: it.obligatorio !== false,
           on: !dup,
           dup,
+          periodicidad: it.periodicidad || null,
+          vigencia_meses: vigencia,
         };
       });
 
@@ -680,11 +708,14 @@ export function DetallePlataformaModal({
         const propItems = itemsDetectados.map((it: any) => {
           const nombreItem = String(it.nombre || it.titulo || "").trim();
           const dup = titulosExistentes.has(nombreItem.toLowerCase());
+          const vigencia = parseVigenciaMeses(it.periodicidad, it.vigencia_meses);
           return {
             t: nombreItem,
             o: it.obligatorio !== false,
             on: !dup,
             dup,
+            periodicidad: it.periodicidad || null,
+            vigencia_meses: vigencia,
           };
         });
 
@@ -733,6 +764,7 @@ export function DetallePlataformaModal({
         ambito: propRequisitos.cat,
         titulo: it.t.trim(),
         obligatorio: it.o,
+        vigencia_meses: parseVigenciaMeses(it.periodicidad, it.vigencia_meses),
       }));
 
       await Api.contratos.crearRequisitoPlataforma(

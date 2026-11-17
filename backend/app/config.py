@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
     schema_dir: str = "/schema"
     schema_version_esperada: int = (
-        18  # scripts 01..18 aplicados (18 mandante libre por contrato)
+        20  # scripts 01..20 aplicados (20 motor validacion documental IA v2)
     )
     db_apply_schema_on_start: bool = False  # en Azure lo hace el job de migración
     db_rls_enabled: bool = True  # fija app.company_id/is_admin/user_id por request
@@ -56,13 +56,13 @@ class Settings(BaseSettings):
     # --- Revisión IA: simulada | gemini ------------------------------------
     ia_backend: str = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     # Verificador post-generación del chat (Critic/Guardrail de razonabilidad).
-    gemini_verifier_model: str = "gemini-1.5-flash"
+    gemini_verifier_model: str = "gemini-3.5-flash-lite"
     ia_verifier_enabled: bool = True
     ia_verifier_timeout_s: float = 6.0
     # Embeddings para RAG vía Google Gemini (OpenAI-compatible endpoint).
-    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-001"
     gemini_embedding_dims: int = 768
 
     # --- Notificaciones ----------------------------------------------------

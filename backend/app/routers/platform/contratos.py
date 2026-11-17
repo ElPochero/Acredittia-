@@ -41,6 +41,7 @@ import uuid
 import unicodedata
 
 from datetime import date, datetime, timezone
+from typing import Literal
 
 
 
@@ -68,7 +69,7 @@ from ...models import (
 
     Actividad, Alerta, Contrato, ContratoPlantillaOverride, ContratoRequisito, Documento, DocumentoArchivo, Faena, IaReview,
 
-    Sujeto, User,
+    LicenciaInterna, Sujeto, User,
 
 )
 
@@ -4045,3 +4046,233 @@ def compartir_contrato_endpoint(
     if temp_pass:
         res["_dev_clave"] = temp_pass
     return res
+
+
+def _gs_doc_cell(d: Documento | None) -> str:
+    if not d:
+        return ""
+    ds = d.estado_calc
+    vence = d.vence.isoformat() if d.vence else ""
+    if ds == "ok":
+        return "✓ Vigente"
+    elif ds == "porvenc":
+        return f"Por vencer {vence}".strip()
+    elif ds == "venc":
+        return f"Vencido {vence}".strip()
+    return "Falta"
+
+
+@router.get("/{contrato_id}/hoja-calculo")
+def hoja_calculo(
+    contrato_id: uuid.UUID,
+    tab: Literal["empresa", "personal", "equipos", "licencia"] = Query("personal"),
+    db: Session = Depends(get_db),
+    cid: uuid.UUID = Depends(get_company_id),
+    user: User = Depends(get_current_user),
+):
+    """Genera la matriz de la Hoja de Cálculo interactiva (estilo Google Sheets).
+    Soporta pestañas: 'empresa', 'personal', 'equipos', 'licencia' (§2.1 / plataforma.html:11775-11815).
+    """
+    from .documentos import resolver_mapa_plataformas, resolver_plataforma_doc
+    from ...services.platform.checklist import stats_sujeto
+
+    c = _get_contrato(db, cid, contrato_id, user)
+    faena_nombre = ""
+    if c.faena_id:
+        faena = db.get(Faena, c.faena_id)
+        if faena:
+            faena_nombre = faena.nombre
+
+    hoy = date.today()
+
+    if tab == "empresa":
+        cols = ["Requisito", "Obligatorio", "Plataforma", "Estado", "Vencimiento", "Días para vencer"]
+        docs = list(db.scalars(
+            select(Documento).where(
+                Documento.company_id == cid,
+                Documento.contrato_id == c.id,
+                Documento.sujeto_id.is_(None),
+            ).order_by(Documento.titulo)
+        ))
+        mapa = resolver_mapa_plataformas(db, cid, c.id)
+        rows = []
+        for d in docs:
+            p_nom, _ = resolver_plataforma_doc(d, mapa)
+            ds = d.estado_calc
+            estado_str = "Vigente" if ds == "ok" else ("Por vencer" if ds == "porvenc" else ("Vencido" if ds == "venc" else "Falta"))
+            vence_str = d.vence.isoformat() if d.vence else ""
+            dias_str = str((d.vence - hoy).days) if d.vence else ""
+            rows.append([
+                d.titulo,
+                "Sí" if d.obligatorio else "No",
+                p_nom or "",
+                estado_str,
+                vence_str,
+                dias_str,
+            ])
+
+    elif tab in ("personal", "equipos"):
+        subtipo = "trabajador" if tab == "personal" else "equipo"
+        orden = Sujeto.nombre if tab == "personal" else Sujeto.patente
+        sujetos = list(db.scalars(
+            select(Sujeto).where(
+                Sujeto.company_id == cid,
+                Sujeto.contrato_id == c.id,
+                Sujeto.tipo == subtipo,
+                Sujeto.estado != "baja",
+            ).order_by(orden, Sujeto.id)
+        ))
+        s_ids = [s.id for s in sujetos]
+        docs_por_sujeto: dict[uuid.UUID, list[Documento]] = {}
+        if s_ids:
+            for d in db.scalars(
+                select(Documento).where(
+                    Documento.company_id == cid,
+                    Documento.sujeto_id.in_(s_ids),
+                ).order_by(Documento.created_at)
+            ):
+                docs_por_sujeto.setdefault(d.sujeto_id, []).append(d)
+
+        titulos_requisitos = []
+        for s in sujetos:
+            s_docs = [d for d in docs_por_sujeto.get(s.id, []) if not d.es_emsipor]
+            for d in s_docs:
+                if d.titulo not in titulos_requisitos:
+                    titulos_requisitos.append(d.titulo)
+
+        if tab == "personal":
+            cols_head = ["Nombre", "RUT", "Cargo", "Faena", "Estado", "% cumplimiento", "Docs vigentes", "Vencidos"]
+        else:
+            cols_head = ["Patente", "Tipo", "Marca/Modelo", "Faena", "Estado", "% cumplimiento", "Docs vigentes", "Vencidos"]
+        cols = cols_head + titulos_requisitos
+
+        rows = []
+        for s in sujetos:
+            s_docs = [d for d in docs_por_sujeto.get(s.id, []) if not d.es_emsipor]
+            st = stats_sujeto(s_docs)
+            if s.estado in ("baja", "inactivo"):
+                estado = "Bloqueado"
+            elif st["vencidos"] > 0:
+                estado = "Vencido"
+            elif st["docs_total"] > 0 and (st["ok"] + st["por_vencer"]) == st["docs_total"]:
+                estado = "Acreditado"
+            else:
+                estado = "En proceso"
+
+            by_titulo = {d.titulo: d for d in s_docs}
+            if tab == "personal":
+                lead = [
+                    s.nombre,
+                    s.rut or "",
+                    s.cargo or "",
+                    faena_nombre,
+                    estado,
+                    f"{st['cumplimiento_pct']}%",
+                    str(st["ok"]),
+                    str(st["vencidos"]),
+                ]
+            else:
+                marca_modelo = f"{s.marca or ''} {s.modelo or ''}".strip()
+                lead = [
+                    s.patente or "",
+                    s.tipo_equipo or "",
+                    marca_modelo,
+                    faena_nombre,
+                    estado,
+                    f"{st['cumplimiento_pct']}%",
+                    str(st["ok"]),
+                    str(st["vencidos"]),
+                ]
+            req_cells = [_gs_doc_cell(by_titulo.get(req)) for req in titulos_requisitos]
+            rows.append(lead + req_cells)
+
+    else:  # tab == "licencia"
+        cols_head = ["Conductor", "RUT", "Cargo", "N° licencia", "Estado LIM", "Vence LIM", "Estado EMSIPOR"]
+        conductores = list(db.scalars(
+            select(Sujeto).where(
+                Sujeto.company_id == cid,
+                Sujeto.contrato_id == c.id,
+                Sujeto.tipo == "trabajador",
+                Sujeto.es_conductor == True,
+                Sujeto.estado != "baja",
+            ).order_by(Sujeto.nombre, Sujeto.id)
+        ))
+        c_ids = [c_s.id for c_s in conductores]
+        docs_por_sujeto: dict[uuid.UUID, list[Documento]] = {}
+        licencias: dict[uuid.UUID, LicenciaInterna] = {}
+        if c_ids:
+            for d in db.scalars(
+                select(Documento).where(
+                    Documento.company_id == cid,
+                    Documento.sujeto_id.in_(c_ids),
+                ).order_by(Documento.created_at)
+            ):
+                docs_por_sujeto.setdefault(d.sujeto_id, []).append(d)
+
+            for li in db.scalars(
+                select(LicenciaInterna).where(
+                    LicenciaInterna.company_id == cid,
+                    LicenciaInterna.sujeto_id.in_(c_ids),
+                )
+            ):
+                licencias[li.sujeto_id] = li
+
+        titulos_emsipor = []
+        for s in conductores:
+            ems_docs = [d for d in docs_por_sujeto.get(s.id, []) if d.es_emsipor]
+            for d in ems_docs:
+                if d.titulo not in titulos_emsipor:
+                    titulos_emsipor.append(d.titulo)
+
+        cols = cols_head + titulos_emsipor
+        rows = []
+        for s in conductores:
+            li = licencias.get(s.id)
+            num_lic = (li.numero or "") if li else ""
+            est_lim = (li.estado or "pendiente") if li else "pendiente"
+            if est_lim in ("vigente", "aprobado"):
+                lim_str = "Vigente"
+            elif est_lim in ("por_vencer", "porvenc"):
+                lim_str = "Por vencer"
+            else:
+                lim_str = "Pendiente"
+            vence_lim = li.vence.isoformat() if (li and li.vence) else ""
+
+            ems_docs = [d for d in docs_por_sujeto.get(s.id, []) if d.es_emsipor]
+            ems_oblig = [d for d in ems_docs if d.obligatorio]
+            lim_ok = sum(1 for d in ems_oblig if d.estado_calc in ("ok", "porvenc"))
+            lim_tot = len(ems_oblig)
+            lim_venc = sum(1 for d in ems_oblig if d.estado_calc == "venc")
+            if lim_tot > 0 and lim_ok == lim_tot and li and li.estado in ("aprobado", "vigente"):
+                ems_estado_str = "Acreditado"
+            elif lim_venc > 0:
+                ems_estado_str = "Vencido"
+            elif lim_ok == 0 and lim_tot > 0:
+                ems_estado_str = "Bloqueado"
+            else:
+                ems_estado_str = "En proceso"
+
+            by_ems = {d.titulo: d for d in ems_docs}
+            lead = [
+                s.nombre,
+                s.rut or "",
+                s.cargo or "",
+                num_lic,
+                lim_str,
+                vence_lim,
+                ems_estado_str,
+            ]
+            req_cells = [_gs_doc_cell(by_ems.get(req)) for req in titulos_emsipor]
+            rows.append(lead + req_cells)
+
+    tsv_lines = []
+    for r in [cols] + rows:
+        clean_cells = [str(c if c is not None else "").replace("\t", " ").replace("\r", "").replace("\n", " ") for c in r]
+        tsv_lines.append("\t".join(clean_cells))
+    tsv_string = "\n".join(tsv_lines)
+
+    return {
+        "columnas": cols,
+        "filas": rows,
+        "tsv": tsv_string,
+    }

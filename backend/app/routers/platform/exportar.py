@@ -33,6 +33,11 @@ from ...deps import (contrato_scope, err, get_company_id, get_current_user,
                     get_db, require_contrato)
 from ...models import Contrato, Documento, DocumentoArchivo, Sujeto, User
 from ...services.platform.storage import get_storage
+from ...services.platform.tasks import contexto_de_documento
+from ...services.platform.validador_documental import (
+    ROLES_SALUD_AUTORIZADOS,
+    inferir_clasificacion_documento,
+)
 
 logger = logging.getLogger("acredittia.exportar")
 
@@ -177,9 +182,21 @@ def _carpetas(rutas: list[str]) -> set[str]:
     return carpetas
 
 
+def _es_examen_medico_doc(d: Documento) -> bool:
+    fam, _ = inferir_clasificacion_documento(
+        d.titulo,
+        contexto=contexto_de_documento(d),
+        ejemplo_clave=d.template.ejemplo_clave if d.template else None,
+        familia_override=getattr(d.template, "familia_validacion", None) if d.template else None,
+        tipo_override=getattr(d.template, "tipo_documento_ia", None) if d.template else None,
+    )
+    return fam == "TRABAJADORES_EXAMENES"
+
+
 # ------------------------------------------------------------------- plan
 def _plan(db: Session, cid: uuid.UUID, contrato: Contrato | None,
-          incluir: list[str], modos: dict[str, str], solo_vigentes: bool
+          incluir: list[str], modos: dict[str, str], solo_vigentes: bool,
+          user: User | None = None,
           ) -> tuple[list[dict], dict]:
     """Entradas del ZIP + contadores de lo que quedó fuera.
 
@@ -188,9 +205,12 @@ def _plan(db: Session, cid: uuid.UUID, contrato: Contrato | None,
     """
     grupos: list[tuple[str, str, list[Documento]]] = []
     vencidos = 0
+    puede_ver_medicos = user is not None and user.role in ROLES_SALUD_AUTORIZADOS
 
     def agregar(clave: str, grupo: str, docs: list[Documento]) -> None:
         nonlocal vencidos
+        if not puede_ver_medicos:
+            docs = [d for d in docs if not _es_examen_medico_doc(d)]
         if solo_vigentes:
             antes = len(docs)
             docs = [d for d in docs if d.estado_calc != "venc"]
@@ -370,7 +390,7 @@ def arbol(contrato_id: uuid.UUID | None = Query(None),
     contrato = _contrato(db, cid, contrato_id, user)
     secciones = _parse_incluir(incluir)
     plan, excluidos = _plan(db, cid, contrato, secciones,
-                            _parse_estructura(estructura), solo_vigentes)
+                            _parse_estructura(estructura), solo_vigentes, user)
     rutas = [e["ruta"] for e in plan]
     return {
         "nombre_zip": _nombre_zip(contrato, plataforma),
@@ -399,7 +419,7 @@ def zip_documentos(contrato_id: uuid.UUID | None = Query(None),
     contrato = _contrato(db, cid, contrato_id, user)
     secciones = _parse_incluir(incluir)
     plan, _ = _plan(db, cid, contrato, secciones,
-                    _parse_estructura(estructura), solo_vigentes)
+                    _parse_estructura(estructura), solo_vigentes, user)
     if not plan:
         raise err(404, "SIN_DOCUMENTOS",
                   "No hay documentos con archivos para los filtros elegidos")

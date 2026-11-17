@@ -21,7 +21,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from ...config import settings
@@ -58,6 +58,10 @@ class EventoIn(BaseModel):
     categoria: str = "otro"
     fecha: date
     descripcion: str | None = None
+    sujeto_id: uuid.UUID | None = None
+    contrato_id: uuid.UUID | None = None
+    centro_atencion: str | None = None
+    enviar_notificacion: bool = False
 
 
 class EventoPatch(BaseModel):
@@ -66,6 +70,10 @@ class EventoPatch(BaseModel):
     fecha: date | None = None
     descripcion: str | None = None
     completado: bool | None = None
+    sujeto_id: uuid.UUID | None = None
+    contrato_id: uuid.UUID | None = None
+    centro_atencion: str | None = None
+    enviar_notificacion: bool | None = None
 
 
 # ------------------------------------------------------------------- helpers
@@ -87,7 +95,8 @@ def _contrato_out(c: Contrato | None, faena: Faena | None) -> dict | None:
 
 
 def _vencimientos(db: Session, cid: uuid.UUID, desde: date, hasta: date,
-                  scope: uuid.UUID | None) -> tuple[list[dict], bool]:
+                  scope: uuid.UUID | None,
+                  sujeto_id: uuid.UUID | None = None) -> tuple[list[dict], bool]:
     """Vencimientos del rango proyectados desde los documentos de la empresa.
 
     Solo se proyectan los documentos en estado `ok`: un documento en `falta`
@@ -114,6 +123,8 @@ def _vencimientos(db: Session, cid: uuid.UUID, desde: date, hasta: date,
     if scope:
         q = q.where(or_(Documento.contrato_id == scope,
                         Sujeto.contrato_id == scope))
+    if sujeto_id:
+        q = q.where(Documento.sujeto_id == sujeto_id)
     # Cota dura: el rango ya está limitado, pero una empresa grande puede tener
     # miles de documentos venciendo en un año. Se avisa con `truncado`.
     tope = settings.export_filas_max
@@ -131,6 +142,8 @@ def _vencimientos(db: Session, cid: uuid.UUID, desde: date, hasta: date,
             "documento_id": str(d.id),
             "estado_calc": d.estado_calc,
             "dias": (d.vence - hoy).days,
+            "centro_atencion": None,
+            "enviar_notificacion": False,
             "sujeto": _sujeto_out(s),
             "contrato": _contrato_out(c, f),
             # Se administra renovando el documento, no editando el calendario.
@@ -141,18 +154,33 @@ def _vencimientos(db: Session, cid: uuid.UUID, desde: date, hasta: date,
 
 
 def _manuales(db: Session, cid: uuid.UUID, desde: date, hasta: date,
-              proyectados: set[str]) -> list[dict]:
+              proyectados: set[str],
+              sujeto_id: uuid.UUID | None = None,
+              contrato_id: uuid.UUID | None = None) -> list[dict]:
     """Eventos anotados por la empresa, sin los que duplican un vencimiento."""
-    filas = db.scalars(select(EventoCalendario).where(
-        EventoCalendario.company_id == cid,
-        EventoCalendario.fecha >= desde,
-        EventoCalendario.fecha <= hasta,
-    ).order_by(EventoCalendario.fecha)).all()
-    return [_out(e) for e in filas
+    q = (select(EventoCalendario, Sujeto, Contrato, Faena)
+         .select_from(EventoCalendario)
+         .outerjoin(Sujeto, Sujeto.id == EventoCalendario.sujeto_id)
+         .outerjoin(Contrato, Contrato.id == func.coalesce(EventoCalendario.contrato_id, Sujeto.contrato_id))
+         .outerjoin(Faena, Faena.id == Contrato.faena_id)
+         .where(
+             EventoCalendario.company_id == cid,
+             EventoCalendario.fecha >= desde,
+             EventoCalendario.fecha <= hasta,
+         ))
+    if sujeto_id:
+        q = q.where(EventoCalendario.sujeto_id == sujeto_id)
+    if contrato_id:
+        q = q.where(or_(EventoCalendario.contrato_id == contrato_id,
+                        Sujeto.contrato_id == contrato_id,
+                        EventoCalendario.contrato_id.is_(None)))
+    filas = db.execute(q.order_by(EventoCalendario.fecha)).all()
+    return [_out(e, s=s, c=c, f=f) for e, s, c, f in filas
             if not (e.documento_id and str(e.documento_id) in proyectados)]
 
 
-def _out(e: EventoCalendario) -> dict:
+def _out(e: EventoCalendario, s: Sujeto | None = None,
+         c: Contrato | None = None, f: Faena | None = None) -> dict:
     """Serializador del evento manual. Mismo contrato de campos que la
     proyección de vencimientos para que el frontend pinte una sola lista."""
     return {
@@ -165,10 +193,12 @@ def _out(e: EventoCalendario) -> dict:
         "documento_id": str(e.documento_id) if e.documento_id else None,
         "estado_calc": None,
         "dias": (e.fecha - date.today()).days,
-        "sujeto": None,
-        "contrato": None,
+        "centro_atencion": e.centro_atencion,
+        "enviar_notificacion": e.enviar_notificacion,
+        "sujeto": _sujeto_out(s),
+        "contrato": _contrato_out(c, f),
         "editable": True,
-        "created_at": e.created_at.isoformat(),
+        "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
 
@@ -196,6 +226,7 @@ def _valida_categoria_manual(categoria: str) -> None:
 def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
                    categoria: str | None = Query(None),
                    contrato_id: uuid.UUID | None = Query(None),
+                   sujeto_id: uuid.UUID | None = Query(None),
                    db: Session = Depends(get_db),
                    cid: uuid.UUID = Depends(get_company_id),
                    user: User = Depends(get_current_user)):
@@ -225,10 +256,13 @@ def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
     truncado = False
     if categoria in (None, "vencimiento"):
         items, truncado = _vencimientos(db, cid, desde, hasta,
-                                        efectivo_scope)
+                                        efectivo_scope,
+                                        sujeto_id=sujeto_id)
     proyectados = {i["documento_id"] for i in items if i["documento_id"]}
     if categoria != "vencimiento":
-        manuales = _manuales(db, cid, desde, hasta, proyectados)
+        manuales = _manuales(db, cid, desde, hasta, proyectados,
+                             sujeto_id=sujeto_id,
+                             contrato_id=efectivo_scope)
         items += [m for m in manuales
                   if not categoria or m["categoria"] == categoria]
 
@@ -241,6 +275,40 @@ def listar_eventos(desde: date = Query(...), hasta: date = Query(...),
         "desde": desde.isoformat(), "hasta": hasta.isoformat(),
         "truncado": truncado,
     }
+
+
+@router.get("/sujetos/{sujeto_id}/activo")
+def evento_activo_sujeto(sujeto_id: uuid.UUID,
+                         db: Session = Depends(get_db),
+                         cid: uuid.UUID = Depends(get_company_id),
+                         user: User = Depends(get_current_user)):
+    """Devuelve el próximo evento manual pendiente (completado == False y fecha >= date.today())
+    del sujeto ordenado por fecha ascendente, o {'activo': None} si no tiene."""
+    sujeto = db.get(Sujeto, sujeto_id)
+    if not sujeto or sujeto.company_id != cid:
+        raise err(404, "SUJETO_NO_ENCONTRADO", "Sujeto no existe")
+    scope = contrato_scope(user)
+    if scope and sujeto.contrato_id and sujeto.contrato_id != scope:
+        raise err(403, "CONTRATO_AJENO", "No tiene acceso a ese contrato")
+
+    hoy = date.today()
+    q = (select(EventoCalendario, Sujeto, Contrato, Faena)
+         .select_from(EventoCalendario)
+         .outerjoin(Sujeto, Sujeto.id == EventoCalendario.sujeto_id)
+         .outerjoin(Contrato, Contrato.id == func.coalesce(EventoCalendario.contrato_id, Sujeto.contrato_id))
+         .outerjoin(Faena, Faena.id == Contrato.faena_id)
+         .where(
+             EventoCalendario.company_id == cid,
+             EventoCalendario.sujeto_id == sujeto_id,
+             EventoCalendario.completado == False,
+             EventoCalendario.fecha >= hoy,
+         )
+         .order_by(EventoCalendario.fecha.asc(), EventoCalendario.created_at.asc()))
+    fila = db.execute(q).first()
+    if not fila:
+        return {"activo": None}
+    e, s, c, f = fila
+    return {"activo": _out(e, s=s, c=c, f=f)}
 
 
 def _require_editor(user: User = Depends(get_current_user)) -> User:
@@ -266,9 +334,35 @@ def crear_evento(body: EventoIn, db: Session = Depends(get_db),
     if not titulo:
         raise err(400, "TITULO_REQUERIDO", "El título del evento es obligatorio")
 
+    sujeto = None
+    sujeto_id = body.sujeto_id
+    contrato_id = body.contrato_id
+    if sujeto_id:
+        sujeto = db.get(Sujeto, sujeto_id)
+        if not sujeto or sujeto.company_id != cid:
+            raise err(404, "SUJETO_NO_ENCONTRADO", "Sujeto no existe")
+        if not contrato_id and sujeto.contrato_id:
+            contrato_id = sujeto.contrato_id
+
+    contrato = None
+    faena = None
+    if contrato_id:
+        contrato = db.get(Contrato, contrato_id)
+        if not contrato or contrato.company_id != cid:
+            raise err(404, "CONTRATO_NO_ENCONTRADO", "Contrato no existe")
+        scope = contrato_scope(user)
+        if scope and contrato_id != scope:
+            raise err(403, "CONTRATO_AJENO", "No tiene acceso a ese contrato")
+        if contrato.faena_id:
+            faena = db.get(Faena, contrato.faena_id)
+
     e = EventoCalendario(company_id=cid, titulo=titulo,
                          categoria=body.categoria, fecha=body.fecha,
-                         descripcion=body.descripcion)
+                         descripcion=body.descripcion,
+                         sujeto_id=sujeto_id,
+                         contrato_id=contrato_id,
+                         centro_atencion=body.centro_atencion,
+                         enviar_notificacion=body.enviar_notificacion)
     db.add(e)
     db.flush()
     actividad.log(db, cid, "creacion", "calendario",
@@ -276,7 +370,7 @@ def crear_evento(body: EventoIn, db: Session = Depends(get_db),
                   f"{e.fecha.isoformat()}", user_id=user.id,
                   entidad_tipo="evento_calendario", entidad_id=e.id)
     db.commit()
-    return _out(e)
+    return _out(e, s=sujeto, c=contrato, f=faena)
 
 
 @router.patch("/{evento_id}")
@@ -290,6 +384,10 @@ def editar_evento(evento_id: uuid.UUID, body: EventoPatch,
     data = body.model_dump(exclude_unset=True)
     if not data:
         raise err(400, "SIN_CAMBIOS", "No se indicó ningún campo a actualizar")
+
+    scope = contrato_scope(user)
+    if scope and e.contrato_id and e.contrato_id != scope:
+        raise err(403, "CONTRATO_AJENO", "No tiene acceso a ese contrato")
 
     if "categoria" in data and data["categoria"] is not None:
         _valida_categoria_manual(data["categoria"])
@@ -305,6 +403,37 @@ def editar_evento(evento_id: uuid.UUID, body: EventoPatch,
         e.descripcion = data["descripcion"]
     if "completado" in data and data["completado"] is not None:
         e.completado = data["completado"]
+    if "centro_atencion" in data:
+        e.centro_atencion = data["centro_atencion"]
+    if "enviar_notificacion" in data and data["enviar_notificacion"] is not None:
+        e.enviar_notificacion = data["enviar_notificacion"]
+
+    if "sujeto_id" in data:
+        sujeto_id = data["sujeto_id"]
+        if sujeto_id is not None:
+            sujeto = db.get(Sujeto, sujeto_id)
+            if not sujeto or sujeto.company_id != cid:
+                raise err(404, "SUJETO_NO_ENCONTRADO", "Sujeto no existe")
+            e.sujeto_id = sujeto_id
+            if "contrato_id" not in data and not e.contrato_id and sujeto.contrato_id:
+                e.contrato_id = sujeto.contrato_id
+        else:
+            e.sujeto_id = None
+
+    if "contrato_id" in data:
+        contrato_id = data["contrato_id"]
+        if contrato_id is not None:
+            contrato = db.get(Contrato, contrato_id)
+            if not contrato or contrato.company_id != cid:
+                raise err(404, "CONTRATO_NO_ENCONTRADO", "Contrato no existe")
+            if scope and contrato_id != scope:
+                raise err(403, "CONTRATO_AJENO", "No tiene acceso a ese contrato")
+            e.contrato_id = contrato_id
+        else:
+            if scope:
+                raise err(403, "CONTRATO_AJENO", "No puede desasociar contrato como contract_admin")
+            e.contrato_id = None
+
     e.updated_at = datetime.now(timezone.utc)
 
     actividad.log(db, cid, "actualizacion", "calendario",
@@ -312,7 +441,12 @@ def editar_evento(evento_id: uuid.UUID, body: EventoPatch,
                   user_id=user.id, entidad_tipo="evento_calendario",
                   entidad_id=e.id)
     db.commit()
-    return _out(e)
+
+    s = db.get(Sujeto, e.sujeto_id) if e.sujeto_id else None
+    eff_c_id = e.contrato_id or (s.contrato_id if s else None)
+    c = db.get(Contrato, eff_c_id) if eff_c_id else None
+    f = db.get(Faena, c.faena_id) if (c and c.faena_id) else None
+    return _out(e, s=s, c=c, f=f)
 
 
 @router.delete("/{evento_id}")

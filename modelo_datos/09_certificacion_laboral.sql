@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS periodos_laborales (
     CONSTRAINT uq_periodos_laborales_contrato_mes UNIQUE (contrato_id, mes_anio)
 );
 
+ALTER TABLE periodos_laborales ADD COLUMN IF NOT EXISTS mes_anio VARCHAR(7);
+ALTER TABLE periodos_laborales ADD COLUMN IF NOT EXISTS fecha_limite DATE;
+ALTER TABLE periodos_laborales ADD COLUMN IF NOT EXISTS nomina_snapshot JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE periodos_laborales ADD COLUMN IF NOT EXISTS cerrado_por UUID REFERENCES users(id) ON DELETE SET NULL;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_periodos_laborales_contrato_mes') THEN
+        ALTER TABLE periodos_laborales ADD CONSTRAINT uq_periodos_laborales_contrato_mes UNIQUE (contrato_id, mes_anio);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS ix_periodos_cerrado_por ON periodos_laborales (cerrado_por);
 
 CREATE TABLE IF NOT EXISTS contrato_requisitos_laborales (
@@ -65,6 +75,9 @@ CREATE TABLE IF NOT EXISTS periodo_documentos_requeridos (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
 );
 
+ALTER TABLE periodo_documentos_requeridos ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL;
+ALTER TABLE periodo_documentos_requeridos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL;
+
 CREATE TABLE IF NOT EXISTS periodo_documentos (
     id UUID PRIMARY KEY,
     periodo_id UUID NOT NULL REFERENCES periodos_laborales(id),
@@ -80,6 +93,12 @@ CREATE TABLE IF NOT EXISTS periodo_documentos (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
+
+ALTER TABLE periodo_documentos ALTER COLUMN sujeto_id DROP NOT NULL;
+ALTER TABLE periodo_documentos ALTER COLUMN requisito_template_id DROP NOT NULL;
+ALTER TABLE periodo_documentos ADD COLUMN IF NOT EXISTS contrato_requisito_id UUID REFERENCES contrato_requisitos_laborales(id) ON DELETE CASCADE;
+ALTER TABLE periodo_documentos ADD COLUMN IF NOT EXISTS nombre TEXT;
+ALTER TABLE periodo_documentos ADD COLUMN IF NOT EXISTS ambito VARCHAR(20) DEFAULT 'trabajador';
 
 CREATE INDEX IF NOT EXISTS ix_periodo_doc_contrato_req ON periodo_documentos (contrato_requisito_id);
 

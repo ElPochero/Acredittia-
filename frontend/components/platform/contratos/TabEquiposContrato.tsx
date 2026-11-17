@@ -6,6 +6,7 @@ import { Contrato, PlataformaContrato, Sujeto, EquipoIn } from "@/lib/platform/t
 import { Paginador, Modal } from "@/components/shared/ui";
 import { toast } from "sonner";
 import SubjectDetail from "@/components/platform/SubjectDetail";
+import { GoogleSheetsModal } from "./GoogleSheetsModal";
 
 interface TabEquiposContratoProps {
   contrato: Contrato;
@@ -15,6 +16,7 @@ interface TabEquiposContratoProps {
 export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContratoProps) {
   const [equipos, setEquipos] = useState<Api.Pagina<Sujeto> | null>(null);
   const [selectedEquipoId, setSelectedEquipoId] = useState<string | null>(null);
+  const [showGSheets, setShowGSheets] = useState(false);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
   const [showAddEquipo, setShowAddEquipo] = useState(false);
@@ -173,6 +175,12 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
             <p className="text-[0.78rem] text-slate-500 m-0 mt-0.5">Consulta y gestiona todos los equipos y vehículos asociados a este contrato.</p>
           </div>
           <div className="flex gap-2 items-center flex-wrap justify-end">
+            <button
+              onClick={() => setShowGSheets(true)}
+              className="px-3 py-1.5 bg-white border border-slate-300 text-emerald-700 rounded text-[0.78rem] font-medium hover:bg-slate-50 transition-colors shadow-sm flex items-center gap-1.5"
+            >
+              📊 Hoja de cálculo
+            </button>
             <button onClick={abrirAddEquipo} className="px-3 py-1.5 bg-blue-600 text-white rounded text-[0.78rem] font-medium hover:bg-blue-700 transition-colors shadow-sm">
               + Agregar equipo
             </button>
@@ -481,6 +489,15 @@ export function TabEquiposContrato({ contrato, plataformas }: TabEquiposContrato
           </div>
         </div>
       </Modal>
+
+      <GoogleSheetsModal
+        abierto={showGSheets}
+        onCerrar={() => setShowGSheets(false)}
+        contratoId={contrato.id}
+        contratoNombre={contrato.nombre}
+        contratoCodigo={contrato.codigo}
+        tabInicial="equipos"
+      />
     </div>
   );
 }

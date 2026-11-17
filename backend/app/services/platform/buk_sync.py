@@ -12,6 +12,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,31 +39,35 @@ def sincronizar_buk_periodo(
     contrato: Contrato,
     periodo: PeriodoLaboral,
     user: User,
-    simular_exito: bool = False
+    simular_exito: bool = False,
+    proveedor: Literal["buk", "talana"] = "buk"
 ) -> dict:
     """
-    Ejecuta la sincronización de nómina y documentos del período desde Buk.
-    Si la API de Buk no está configurada o hay error, aplica fallback manual
+    Ejecuta la sincronización de nómina y documentos del período desde Buk o Talana.
+    Si la API del proveedor no está configurada o hay error, aplica fallback manual
     registrando el evento en trazabilidad (CA 13).
     """
-    # 1. Comprobar credenciales de Buk en integraciones o variables de entorno
-    buk_int = None
+    prov_nombre = "Talana" if proveedor == "talana" else "Buk"
+    prov_key = f"{proveedor.upper()}_API_KEY"
+
+    # 1. Comprobar credenciales del proveedor en integraciones o variables de entorno
+    int_obj = None
     try:
         from sqlalchemy import cast, Text
-        buk_int = db.execute(
+        int_obj = db.execute(
             select(Integracion).where(
                 Integracion.company_id == contrato.company_id,
-                cast(Integracion.tipo, Text) == "buk",
+                cast(Integracion.tipo, Text) == proveedor,
                 Integracion.estado == "activa"
             )
         ).scalars().first()
     except Exception as e:
-        logger.warning(f"Error comprobando integracion Buk: {e}")
+        logger.warning(f"Error comprobando integracion {prov_nombre}: {e}")
 
-    tiene_credenciales = bool(buk_int) or bool(os.getenv("BUK_API_KEY")) or simular_exito
+    tiene_credenciales = bool(int_obj) or bool(os.getenv(prov_key)) or simular_exito
 
     if not tiene_credenciales:
-        logger.info(f"Buk no configurado para contrato {contrato.id}. Activando fallback manual.")
+        logger.info(f"{prov_nombre} no configurado para contrato {contrato.id}. Activando fallback manual.")
         # Registrar intento en trazabilidad si existe al menos un documento del período
         doc_muestra = db.execute(
             select(PeriodoDocumento).where(PeriodoDocumento.periodo_id == periodo.id)
@@ -73,7 +78,7 @@ def sincronizar_buk_periodo(
                 periodo_documento_id=doc_muestra.id,
                 auditor_id=user.id,
                 accion="cargar",
-                observacion="Sincronización con Buk no configurada (modo offline). Carga manual garantizada y habilitada al 100%.",
+                observacion=f"Sincronización con {prov_nombre} no configurada (modo offline). Carga manual garantizada y habilitada al 100%.",
                 version=getattr(doc_muestra, "version", 1) or 1
             )
             db.add(audit)
@@ -81,21 +86,22 @@ def sincronizar_buk_periodo(
 
         return {
             "ok": True,
+            "proveedor": proveedor,
             "modo": "manual_fallback",
-            "mensaje": "Integración Buk no configurada o fuera de línea. Modo de fallback manual activo al 100%.",
+            "mensaje": f"Integración {prov_nombre} no configurada o fuera de línea. Modo de fallback manual activo al 100%.",
             "trabajadores_sincronizados": 0,
             "documentos_sincronizados": 0,
             "logs": [
-                "Iniciando intento de sincronización con Buk API...",
-                "Consultando credenciales activas en bóveda de integraciones...",
-                "No se encontraron credenciales de Buk activas para esta empresa/contrato.",
+                f"Iniciando intento de sincronización con {prov_nombre} API...",
+                f"Consultando credenciales activas en bóveda de integraciones para {proveedor}...",
+                f"No se encontraron credenciales de {prov_nombre} activas para esta empresa/contrato.",
                 "Activando modo de contingencia: Fallback manual 100% garantizado (Sección 8).",
                 "La carga manual por requisito y la nómina local se mantienen totalmente operativas sin bloqueos."
             ]
         }
 
-    # 2. Sincronización activa con Buk
-    logger.info(f"Sincronizando nómina y documentos de Buk para contrato {contrato.id}, período {periodo.id}")
+    # 2. Sincronización activa con el proveedor
+    logger.info(f"Sincronizando nómina y documentos de {prov_nombre} para contrato {contrato.id}, período {periodo.id}")
 
     sujetos = db.execute(
         select(Sujeto).where(
@@ -130,7 +136,7 @@ def sincronizar_buk_periodo(
         nombre_doc = (doc.nombre or "").lower().strip()
         es_compatible = any(pat in nombre_doc for pat in DOCUMENTOS_BUK_COMPATIBLES)
         if es_compatible and doc.estado in ("pendiente", "cargado"):
-            doc.archivo_url = f"https://api.buk.cl/downloads/export_{doc.id}.pdf"
+            doc.archivo_url = f"https://api.{proveedor}.cl/downloads/export_{doc.id}.pdf"
             doc.estado = "en_revision"  # CA 7: subir nunca aprueba automáticamente
             doc.fecha_carga = ahora
             doc.cargado_por = user.id
@@ -142,7 +148,7 @@ def sincronizar_buk_periodo(
                 periodo_documento_id=doc.id,
                 version=v_num,
                 archivo_url=doc.archivo_url,
-                archivo_nombre=f"Buk_Sync_{doc.nombre or 'Doc'}.pdf",
+                archivo_nombre=f"{prov_nombre}_Sync_{doc.nombre or 'Doc'}.pdf",
                 subido_por=user.id,
                 estado="en_revision",
                 abierto_por_adc=False
@@ -153,7 +159,7 @@ def sincronizar_buk_periodo(
                 periodo_documento_id=doc.id,
                 auditor_id=user.id,
                 accion="cargar",
-                observacion="Documento importado automáticamente vía sincronización con Buk API en estado 'en_revision'",
+                observacion=f"Documento importado automáticamente vía sincronización con {prov_nombre} API en estado 'en_revision'",
                 version=v_num
             )
             db.add(audit)
@@ -166,14 +172,15 @@ def sincronizar_buk_periodo(
 
     return {
         "ok": True,
-        "modo": "buk_api",
-        "mensaje": f"Sincronización con Buk exitosa: {len(sujetos)} trabajadores y {docs_importados} documentos importados.",
+        "proveedor": proveedor,
+        "modo": f"{proveedor}_api",
+        "mensaje": f"Sincronización con {prov_nombre} exitosa: {len(sujetos)} trabajadores y {docs_importados} documentos importados.",
         "fecha_sincronizacion": ahora.isoformat(),
         "trabajadores_sincronizados": len(sujetos),
         "documentos_sincronizados": docs_importados,
         "documentos_importados": docs_importados,
         "logs": [
-            "Conexión con Buk API establecida con éxito (canal seguro).",
+            f"Conexión con {prov_nombre} API establecida con éxito (canal seguro).",
             f"Nómina de contrato validada: {len(sujetos)} trabajadores sincronizados.",
             f"Documentos laborales importados: {docs_importados} archivos en estado 'en_revision'.",
             "Eventos de trazabilidad y auditoría registrados en la bitácora inmutable.",

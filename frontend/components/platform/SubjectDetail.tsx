@@ -19,12 +19,14 @@ import type {
   Revision,
 
   SujetoDetalle,
-
+  EventoCalendario,
 } from "@/lib/platform/tipos";
 
 import { Barra, Chip, Modal, Spinner } from "@/components/shared/ui";
 import { AutoExportModal } from "./AutoExportModal";
 import { ExportarDocumentosModal } from "./ExportarDocumentosModal";
+import { AgendarExamenModal } from "./AgendarExamenModal";
+import ValidationResultPanel from "./ValidationResultPanel";
 
 
 
@@ -86,6 +88,8 @@ function FilaDoc({
 
   onCambiarEstadoPlataforma,
 
+  onVerRevision,
+
 }: {
 
   doc: Documento;
@@ -121,6 +125,8 @@ function FilaDoc({
   onDesvincular: (d: Documento) => void;
 
   onCambiarEstadoPlataforma?: (d: Documento, estado: "sin_subir" | "subido") => void;
+
+  onVerRevision?: (d: Documento, reviewId: string) => void;
 
 }) {
 
@@ -265,6 +271,24 @@ function FilaDoc({
                     Ver documento
 
                   </button>
+
+                  {doc.archivos[0].ia_review_id && onVerRevision && (
+
+                    <button
+
+                      type="button"
+
+                      onClick={() => onVerRevision(doc, doc.archivos![0].ia_review_id!)}
+
+                      className="h-[26px] px-2.5 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-md text-[0.65rem] font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1"
+
+                    >
+
+                      🤖 Revisión IA
+
+                    </button>
+
+                  )}
 
                   <button 
 
@@ -461,7 +485,6 @@ function FilaDoc({
       />
 
     </div>
-
   );
 
 }
@@ -505,6 +528,8 @@ export default function SubjectDetail({
   const [ejemplo, setEjemplo] = useState<Ejemplo | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [autoExportModalOpen, setAutoExportModalOpen] = useState(false);
+  const [eventoActivo, setEventoActivo] = useState<EventoCalendario | null>(null);
+  const [showAgendarModal, setShowAgendarModal] = useState(false);
 
   const cambiarEstadoPlataforma = async (
     d: Documento,
@@ -640,17 +665,19 @@ export default function SubjectDetail({
 
 
   const cargar = useCallback(() => {
-
     const pedir =
-
       tipo === "personal" ? Api.personal.detalle : Api.equipos.detalle;
 
     pedir(id)
-
       .then(setData)
-
       .catch((e) => setError(Api.mensajeError(e)));
 
+    if (tipo === "personal") {
+      Api.calendario
+        .activoDeSujeto(id)
+        .then((res) => setEventoActivo(res?.activo || null))
+        .catch(() => setEventoActivo(null));
+    }
   }, [tipo, id]);
 
   useEffect(cargar, [cargar]);
@@ -849,6 +876,16 @@ export default function SubjectDetail({
 
 
 
+  const verRevisionExistente = async (doc: Documento, reviewId: string) => {
+    setError("");
+    try {
+      const r = await Api.ia.revision(reviewId);
+      setReview({ doc: doc.titulo, r });
+    } catch (e) {
+      setError(Api.mensajeError(e));
+    }
+  };
+
   if (error && !data) return <p className="p-6 text-red-600">{error}</p>;
 
   if (!data) return <Spinner />;
@@ -892,6 +929,8 @@ export default function SubjectDetail({
         onDesvincular={onDesvincular}
 
         onCambiarEstadoPlataforma={cambiarEstadoPlataforma}
+
+        onVerRevision={verRevisionExistente}
 
       />
 
@@ -1012,14 +1051,38 @@ export default function SubjectDetail({
         </div>
 
         <div className="flex flex-col items-end justify-center mr-2">
-
           <div className="text-[1.8rem] font-black text-emerald-500 leading-none">{data.stats.cumplimiento_pct}%</div>
-
           <div className="text-[0.65rem] text-slate-400 font-bold mt-1 tracking-wide">{data.documentos.filter(d=>d.estado_calc==='ok').length + data.documentos_emsipor.filter(d=>d.estado_calc==='ok').length} de {data.documentos.length + data.documentos_emsipor.length} al día</div>
-
+          {esTrabajador && (
+            <button
+              type="button"
+              onClick={() => setShowAgendarModal(true)}
+              className="mt-2.5 px-3 py-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              📅 Agendar examen/curso
+            </button>
+          )}
         </div>
-
       </div>
+
+      {esTrabajador && eventoActivo && (
+        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs text-amber-900">
+            <span className="text-base">📅</span>
+            <div>
+              <span className="font-bold">Agendamiento activo:</span> {eventoActivo.titulo} · {eventoActivo.fecha?.replace("T", " a las ")}
+              {eventoActivo.centro_atencion ? ` en ${eventoActivo.centro_atencion}` : ""}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAgendarModal(true)}
+            className="px-2.5 py-1 bg-white border border-amber-300 hover:bg-amber-100/60 text-amber-900 rounded text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+          >
+            Ver / Editar cita
+          </button>
+        </div>
+      )}
 
 
 
@@ -1534,117 +1597,53 @@ export default function SubjectDetail({
 
         onCerrar={() => setReview(null)}
 
+        ancho="max-w-2xl"
+
       >
 
         {review && (
 
-          <div className="space-y-3">
+          <div className="space-y-4">
 
-            <div className="flex flex-wrap items-center gap-3">
+            {review.r.status === "failed" ? (
 
-              {review.r.status === "failed" ? (
+              <div className="space-y-2">
 
                 <Chip estado="failed" texto="La revisión falló" />
 
-              ) : (
+                {review.r.error && (
 
-                <Chip
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
 
-                  estado={
+                    {review.r.error}
 
-                    review.r.resultado === "validado"
+                  </p>
 
-                      ? "ok"
+                )}
 
-                      : review.r.resultado === "con_errores"
+              </div>
 
-                        ? "venc"
+            ) : (
 
-                        : "porvenc"
+              <ValidationResultPanel
 
-                  }
+                review={review.r}
 
-                  texto={
+                rutEnviado={data?.rut || data?.patente || null}
 
-                    review.r.resultado === "validado"
+              />
 
-                      ? "Validado"
-
-                      : review.r.resultado === "con_errores"
-
-                        ? "Con errores"
-
-                        : "Con observaciones"
-
-                  }
-
-                />
-
-              )}
-
-              {review.r.confianza != null && (
-
-                <span className="text-sm text-slate-500">
-
-                  Confianza: {(review.r.confianza * 100).toFixed(0)}%
-
-                </span>
-
-              )}
-
-            </div>
+            )}
 
             {review.r.accion_aplicada && (
 
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
 
                 Acción aplicada: {review.r.accion_aplicada}
 
               </p>
 
             )}
-
-            {review.r.error && (
-
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-
-                {review.r.error}
-
-              </p>
-
-            )}
-
-            <ul className="space-y-2">
-
-              {review.r.hallazgos.map((h, i) => (
-
-                <li
-
-                  key={i}
-
-                  className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm"
-
-                >
-
-                  <span>{ICONO_HALLAZGO[h.tipo]}</span>
-
-                  <div>
-
-                    <div className="font-mono text-xs text-slate-400">
-
-                      {h.codigo}
-
-                    </div>
-
-                    {h.mensaje}
-
-                  </div>
-
-                </li>
-
-              ))}
-
-            </ul>
 
             <button
 
@@ -1790,8 +1789,17 @@ export default function SubjectDetail({
         />
       )}
 
-    </div>
+      {data && esTrabajador && (
+        <AgendarExamenModal
+          sujeto={data}
+          contratoId={contratoIdContext || data.contrato?.id}
+          abierto={showAgendarModal}
+          onCerrar={() => setShowAgendarModal(false)}
+          onSaved={cargar}
+        />
+      )}
 
+    </div>
   );
 
 }

@@ -7,6 +7,8 @@ import { Paginador, Modal } from "@/components/shared/ui";
 import { toast } from "sonner";
 import { normalizarRut, validarRut } from "@/lib/platform/rut";
 import SubjectDetail from "@/components/platform/SubjectDetail";
+import { GoogleSheetsModal } from "./GoogleSheetsModal";
+import { AgendarExamenModal } from "@/components/platform/AgendarExamenModal";
 
 interface TabPersonalContratoProps {
   contrato: Contrato;
@@ -17,6 +19,8 @@ interface TabPersonalContratoProps {
 export function TabPersonalContrato({ contrato, plataformas, onConductoresChange }: TabPersonalContratoProps) {
   const [personal, setPersonal] = useState<Api.Pagina<Sujeto> | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
+  const [showGSheets, setShowGSheets] = useState(false);
+  const [agendarTrabajador, setAgendarTrabajador] = useState<Sujeto | null>(null);
   const [page, setPage] = useState(1);
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState<'lista' | 'cuadricula' | 'hoja'>('lista');
@@ -278,15 +282,18 @@ export function TabPersonalContrato({ contrato, plataformas, onConductoresChange
                 <span className="text-sm">⊞</span> Cuadrícula
               </button>
               <button 
-                onClick={() => setVista('hoja')}
+                onClick={() => setShowGSheets(true)}
                 className={`px-3 h-full font-bold text-[0.75rem] rounded-md flex items-center justify-center gap-1.5 transition-colors ${vista === 'hoja' ? 'bg-white text-slate-800 shadow-[0_1px_2px_rgba(0,0,0,0.05)] border border-slate-200' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
               >
                 <span className="text-sm">▦</span> Hoja de cálculo
               </button>
             </div>
-            <button onClick={descargarExcel} className="h-[34px] px-3 bg-white border border-slate-200 text-emerald-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-              Ver en hoja de cálculo
+            <button
+              onClick={() => setShowGSheets(true)}
+              className="h-[34px] px-3 bg-white border border-slate-200 text-emerald-700 rounded-lg text-[0.75rem] font-bold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-1.5"
+            >
+              <span className="text-emerald-600">📊</span>
+              Hoja de cálculo
             </button>
             <button onClick={() => setShowAddWorker(true)} className="h-[34px] px-3 bg-blue-600 text-white rounded-lg text-[0.75rem] font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center justify-center gap-1.5">
               + Agregar trabajador
@@ -372,8 +379,9 @@ export function TabPersonalContrato({ contrato, plataformas, onConductoresChange
                         <td className="p-1.5 border-r border-slate-200 text-slate-700 whitespace-nowrap">{contrato.faena?.nombre}</td>
                         <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{estLbl}</td>
                         <td className="p-1.5 border-r border-slate-200 whitespace-nowrap">{acredLblDe(pctNum)} ({pctNum}%)</td>
-                        <td className="p-1.5 whitespace-nowrap">
+                        <td className="p-1.5 whitespace-nowrap flex items-center gap-2">
                           <button type="button" onClick={() => setSelectedWorkerId(s.id)} className="text-blue-600 font-bold hover:underline cursor-pointer">Ver ficha</button>
+                          <button type="button" onClick={() => setAgendarTrabajador(s)} className="text-slate-600 hover:text-blue-700 font-medium cursor-pointer" title="Agendar examen o curso">📅 Agendar</button>
                         </td>
                       </tr>
                     );
@@ -741,6 +749,25 @@ export function TabPersonalContrato({ contrato, plataformas, onConductoresChange
           </div>
         </div>
       </Modal>
+
+      <GoogleSheetsModal
+        abierto={showGSheets}
+        onCerrar={() => setShowGSheets(false)}
+        contratoId={contrato.id}
+        contratoNombre={contrato.nombre}
+        contratoCodigo={contrato.codigo}
+        tabInicial="personal"
+      />
+
+      {agendarTrabajador && (
+        <AgendarExamenModal
+          sujeto={agendarTrabajador}
+          contratoId={contrato.id}
+          abierto={!!agendarTrabajador}
+          onCerrar={() => setAgendarTrabajador(null)}
+          onSaved={() => cargar()}
+        />
+      )}
     </div>
   );
 }

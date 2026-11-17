@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Contrato, Documento } from '@/lib/platform/tipos';
 import * as Api from '@/lib/platform/cliente';
 import { Barra } from "@/components/shared/ui";
+import { GoogleSheetsModal } from "./GoogleSheetsModal";
 
 export function TabEmpresaContrato({ 
   contrato, 
@@ -16,6 +17,7 @@ export function TabEmpresaContrato({
 }) {
   const [cargando, setCargando] = useState(false);
   const [docs, setDocs] = useState<Documento[]>([]);
+  const [showGSheets, setShowGSheets] = useState(false);
 
   const cargar = async () => {
     try {
@@ -155,8 +157,11 @@ export function TabEmpresaContrato({
           <span className="text-[0.78rem] text-slate-500 font-medium">
             {docs.filter(d => d.obligatorio).length} obligatorios · {docs.filter(d => !d.obligatorio).length} opcionales
           </span>
-          <button className="h-[30px] px-3.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-[6px] text-[0.75rem] font-semibold text-emerald-700 flex items-center gap-1.5 transition-colors shadow-sm">
-            <span className="text-emerald-600">📊</span> Ver en hoja de cálculo
+          <button
+            onClick={() => setShowGSheets(true)}
+            className="h-[30px] px-3.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-[6px] text-[0.75rem] font-semibold text-emerald-700 flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <span className="text-emerald-600">📊</span> Hoja de cálculo
           </button>
         </div>
       </div>
@@ -380,6 +385,15 @@ export function TabEmpresaContrato({
           </div>
         </div>
       )}
+
+      <GoogleSheetsModal
+        abierto={showGSheets}
+        onCerrar={() => setShowGSheets(false)}
+        contratoId={contrato.id}
+        contratoNombre={contrato.nombre}
+        contratoCodigo={contrato.codigo}
+        tabInicial="empresa"
+      />
     </div>
   );
 }
