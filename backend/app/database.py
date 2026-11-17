@@ -339,6 +339,53 @@ def _preparar_script(sql: str) -> tuple[list[str], str]:
     return add_values, "\n".join(resto)
 
 
+def _ensure_fn_credencial_jwe(cur) -> None:
+    """Repara BD creadas antes de que 06_migracion_v11 añadiera fn_obtener_credencial_jwe."""
+    cur.execute(
+        "SELECT 1 FROM pg_proc WHERE proname = 'fn_obtener_credencial_jwe'"
+    )
+    if cur.fetchone() is not None:
+        return
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION fn_obtener_credencial_jwe(p_credencial_id uuid)
+        RETURNS text
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = public
+        AS $$
+        DECLARE
+            v_jwe text;
+            v_company_id uuid;
+        BEGIN
+            v_company_id := COALESCE(
+                nullif(current_setting('app.company_id', true), ''),
+                nullif(current_setting('app.current_company_id', true), '')
+            )::uuid;
+            IF v_company_id IS NULL AND NOT COALESCE(current_setting('app.is_admin', true), 'false')::boolean THEN
+                RAISE EXCEPTION 'Tenant no establecido' USING ERRCODE = '28000';
+            END IF;
+
+            IF v_company_id IS NOT NULL THEN
+                SELECT credencial_jwe INTO v_jwe
+                FROM plataforma_credenciales
+                WHERE id = p_credencial_id AND company_id = v_company_id;
+            ELSE
+                SELECT credencial_jwe INTO v_jwe
+                FROM plataforma_credenciales
+                WHERE id = p_credencial_id;
+            END IF;
+
+            RETURN v_jwe;
+        END;
+        $$;
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'acredittia_app') THEN
+                GRANT EXECUTE ON FUNCTION fn_obtener_credencial_jwe(uuid) TO acredittia_app;
+            END IF;
+        END $$;
+    """)
+
+
 def apply_schema(schema_dir: str | None = None) -> int:
     """Aplica los scripts pendientes bajo pg_advisory_lock."""
     sdir = schema_dir or settings.schema_dir
@@ -407,6 +454,7 @@ def apply_schema(schema_dir: str | None = None) -> int:
         try:
             actual = schema_version()
             if actual >= SCHEMA_VERSION:
+                _ensure_fn_credencial_jwe(cur)
                 return actual
             scripts_por_version = {
                 0: SCHEMA_SCRIPTS,

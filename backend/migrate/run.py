@@ -51,9 +51,11 @@ def main(argv: list[str] | None = None) -> int:
 
     forzar_semillas = "--semillas" in argv or "--seeds" in argv
 
-    if actual >= SCHEMA_VERSION and not forzar_semillas:
-        log.info("Esquema al día. (Usa --semillas para forzar la carga de datos demo)")
-        return 0
+    if actual >= SCHEMA_VERSION:
+        apply_schema()
+        if not forzar_semillas:
+            log.info("Esquema al día. (Usa --semillas para forzar la carga de datos demo)")
+            return 0
 
     if actual < SCHEMA_VERSION:
         log.info("Aplicando esquema de base de datos...")
