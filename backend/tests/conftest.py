@@ -66,7 +66,12 @@ import pytest
 import pgserver
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # backend
-MODELO = os.path.normpath(os.path.join(RAIZ, "..", "modelo_datos"))
+_schema_env = os.environ.get("SCHEMA_DIR", "")
+MODELO = (
+    _schema_env
+    if _schema_env and os.path.isfile(os.path.join(_schema_env, "01_esquema.sql"))
+    else os.path.normpath(os.path.join(RAIZ, "..", "modelo_datos"))
+)
 
 SCRIPTS = [
     "01_esquema.sql",
