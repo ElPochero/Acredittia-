@@ -738,7 +738,7 @@ async def chat_with_ia(historial: list[dict]) -> str:
                 logger.error(
                     f"Error llamando a Gemini Chat: {traceback.format_exc()}"
                 )
-            return '{"respuesta": "Ocurri un error procesando tu mensaje con la IA Gemini."}'
+            return '{"respuesta": "Ocurrió un error procesando tu mensaje con la IA Gemini."}'
 
 
     # Simulado
