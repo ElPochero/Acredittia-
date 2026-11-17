@@ -258,3 +258,14 @@ def test_conserva_agregados_en_analisis_o_adjunto():
     # Consulta pura: se descartan para no duplicar.
     assert ia_svc.conserva_acciones_chat("¿qué requisitos hay?") is False
     assert ia_svc.conserva_acciones_chat("") is False
+
+
+def test_candidata_con_fences_markdown_es_validada(red_falsa, cfg_gemini):
+    envuelta = f"```json\n{CAND_OK}\n```"
+    llamadas = [
+        lambda: _RespFake({"choices": [{"message": {"content": envuelta}}]}),
+        lambda: _veredicto(True),
+    ]
+    red_falsa.responder = lambda: llamadas.pop(0)()
+    out = run(ia_svc.chat_with_ia([{"role": "user", "content": "agrega el F30-1"}]))
+    assert json.loads(out) == json.loads(CAND_OK)

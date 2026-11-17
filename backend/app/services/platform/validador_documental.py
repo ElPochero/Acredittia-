@@ -504,9 +504,13 @@ def inferir_clasificacion_documento(
     ej = normalizar_texto(ejemplo_clave)
     ctx = (contexto or "").strip().lower()
 
-    if "LICENCIA" in t or "CONDUCIR" in t or ej == "LICENCIA":
+    if "LICENCIA" in t or "CONDUCIR" in t:
         return "TRABAJADORES_DOCUMENTOS", "licencia"
-    if any(k in t for k in ("CEDULA", "IDENTIDAD", "CARNET")) or ej == "CEDULA":
+    if any(k in t for k in ("CEDULA", "IDENTIDAD", "CARNET")):
+        return "TRABAJADORES_DOCUMENTOS", "cedula"
+    if ej == "LICENCIA":
+        return "TRABAJADORES_DOCUMENTOS", "licencia"
+    if ej == "CEDULA":
         return "TRABAJADORES_DOCUMENTOS", "cedula"
     if "HOJA DE VIDA" in t or "HVC" in t:
         return "TRABAJADORES_DOCUMENTOS", "hvc"

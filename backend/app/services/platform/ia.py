@@ -532,6 +532,31 @@ def _grupos_vacios() -> dict:
     return {c: [] for c in _CATEGORIAS}
 
 
+def _extraer_json_objeto(texto: str) -> dict | None:
+    """Parsea un JSON dict tolerando fences markdown o texto envolvente."""
+    import json
+    import re
+
+    if not texto or not isinstance(texto, str):
+        return None
+    limpio = re.sub(r"^```(?:json)?\s*|\s*```$", "", texto.strip())
+    try:
+        parsed = json.loads(limpio)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", limpio, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return None
+
+
 def _fallback_seguro(respuesta_candidata: str) -> str:
     """Fallback con forma de contrato y sin acciones: conserva el texto_visible
     pero vacía agregados Y eliminados (un eliminados alucinado borraría requisitos)."""
@@ -539,12 +564,9 @@ def _fallback_seguro(respuesta_candidata: str) -> str:
 
     try:
         texto = "No pude validar la respuesta de la IA, inténtalo de nuevo."
-        try:
-            parsed = json.loads(respuesta_candidata)
-            if isinstance(parsed, dict) and isinstance(parsed.get("respuesta"), str) and parsed["respuesta"].strip():
-                texto = parsed["respuesta"]
-        except Exception:
-            pass
+        parsed = _extraer_json_objeto(respuesta_candidata)
+        if parsed and isinstance(parsed.get("respuesta"), str) and parsed["respuesta"].strip():
+            texto = parsed["respuesta"]
         return json.dumps(
             {"respuesta": texto, "agregados": _grupos_vacios(), "eliminados": _grupos_vacios()},
             ensure_ascii=False,
@@ -596,15 +618,15 @@ async def _veredicto_llm(mensaje: str, candidata: str, contexto: str | None) -> 
         )
         r.raise_for_status()
         content = r.json()["choices"][0]["message"].get("content") or ""
-    limpio = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-    match = re.search(r"\{.*\}", limpio, re.DOTALL)
-    veredicto = json.loads(match.group(0) if match else limpio)
+    veredicto = _extraer_json_objeto(content)
+    if veredicto is None:
+        raise ValueError(f"veredicto sin JSON válido: {content.strip()[:120]}")
     valido = veredicto.get("valido")
     if valido is True or (isinstance(valido, str) and valido.lower() == "true"):
         return True, ""
     if valido is False or (isinstance(valido, str) and valido.lower() == "false"):
         return False, str(veredicto.get("motivo", ""))[:500]
-    raise ValueError(f"veredicto sin 'valido' booleano: {limpio[:120]}")
+    raise ValueError(f"veredicto sin 'valido' booleano: {content.strip()[:120]}")
 
 
 async def verificar_respuesta_chat(
@@ -621,25 +643,29 @@ async def verificar_respuesta_chat(
 
     if not settings.ia_verifier_enabled or not settings.gemini_api_key:
         return True, respuesta_candidata
+    normalizada = respuesta_candidata
     try:
         candidata = json.loads(respuesta_candidata)
     except Exception:
-        candidata = None
+        candidata = _extraer_json_objeto(respuesta_candidata)
+        if candidata is not None:
+            normalizada = json.dumps(candidata, ensure_ascii=False)
     if not _forma_valida(candidata):
+        logger.warning("Respuesta chat con forma inválida: %s", (respuesta_candidata or "")[:180])
         return False, _fallback_seguro(respuesta_candidata)
     if not _es_mutacion(mensaje_usuario or ""):
         # Consulta pura: el router descarta agregados/eliminados igual, así que
         # no se gasta un llamado en juzgar clasificaciones que no se usarán.
-        return True, respuesta_candidata
+        return True, normalizada
     try:
-        valido, motivo = await _veredicto_llm(mensaje_usuario, respuesta_candidata, contexto)
+        valido, motivo = await _veredicto_llm(mensaje_usuario, normalizada, contexto)
     except Exception as e:  # noqa: BLE001 - el verificador nunca rompe el chat
         logger.warning("Verificador IA no disponible, se usa candidata: %s: %s", type(e).__name__, str(e)[:120])
-        return True, respuesta_candidata
+        return True, normalizada
     if valido:
-        return True, respuesta_candidata
+        return True, normalizada
     logger.warning("Verificador IA rechazó respuesta: %s", motivo)
-    return False, _fallback_seguro(respuesta_candidata)
+    return False, _fallback_seguro(normalizada)
 
 
 def _ultimo_texto_usuario(messages: list[dict]) -> str:

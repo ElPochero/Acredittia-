@@ -871,3 +871,10 @@ def test_clasificacion_empresa_origen_llm_cur02_y_h7_containment():
     assert cods_h7["EXA09"]["resultado"] == "OBS"
     assert cods_h7["AUT01"]["resultado"] == "OBS"
 
+
+def test_cedula_con_ejemplo_licencia_no_se_confunde_con_licencia():
+    fam, tipo = inferir_clasificacion_documento(
+        "Cédula de Identidad", contexto="personal", ejemplo_clave="licencia",
+    )
+    assert (fam, tipo) == ("TRABAJADORES_DOCUMENTOS", "cedula")
+
