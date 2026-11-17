@@ -1117,7 +1117,6 @@ def revisar_documento_adc(
     nuevo_estado = "aprobado" if accion == "aprobar" else ("observado" if accion == "observar" else ("rechazado" if accion == "rechazar" else "no_aplica"))
 
     doc.estado = nuevo_estado
-    doc.observaciones = comentario or doc.observaciones
     doc.updated_at = datetime.utcnow()
 
     ver = db.execute(
@@ -1256,7 +1255,6 @@ def auditar_documento(
     nuevo_estado = "aprobado" if accion == "aprobar" else ("observado" if accion == "observar" else ("rechazado" if accion == "rechazar" else "no_aplica"))
 
     doc.estado = nuevo_estado
-    doc.observaciones = comentario or doc.observaciones
     doc.updated_at = datetime.utcnow()
 
     ver = db.execute(
@@ -1475,8 +1473,20 @@ def matriz_documental(
     total_observados = 0
     total_rechazados = 0
 
+    doc_ids = [row.PeriodoDocumento.id for row in docs]
+    ult_ver_por_doc: dict[uuid.UUID, PeriodoDocumentoVersion] = {}
+    if doc_ids:
+        for v in db.execute(
+            select(PeriodoDocumentoVersion)
+            .where(PeriodoDocumentoVersion.periodo_documento_id.in_(doc_ids))
+            .order_by(PeriodoDocumentoVersion.version.desc())
+        ).scalars():
+            if v.periodo_documento_id not in ult_ver_por_doc:
+                ult_ver_por_doc[v.periodo_documento_id] = v
+
     for row in docs:
         d = row.PeriodoDocumento
+        ver = ult_ver_por_doc.get(d.id)
         sujeto_nombre = row.sujeto_nombre or "Desconocido"
         sujeto_rut = row.sujeto_rut or ""
         sujeto_cargo = row.sujeto_cargo
@@ -1501,9 +1511,9 @@ def matriz_documental(
             "estado": d.estado,
             "fecha_carga": d.fecha_carga.isoformat() if d.fecha_carga else None,
             "cargado_por": str(d.cargado_por) if d.cargado_por else None,
-            "observaciones": d.observaciones,
-            "version": getattr(d, "version", 1) or 1,
-            "abierto_por_adc": bool(getattr(d, "abierto_por_adc", False)),
+            "observaciones": ver.observacion if ver else None,
+            "version": ver.version if ver else 1,
+            "abierto_por_adc": bool(ver.abierto_por_adc) if ver else False,
         }
         
         if d.sujeto_id not in sujetos_map:
@@ -1758,7 +1768,7 @@ def obtener_mis_pendientes_rrhh(
                         .order_by(PeriodoDocumentoVersion.version.desc())
                     ).scalars().first()
 
-                    obs = (ult_ver.observacion if ult_ver and ult_ver.observacion else d.observaciones) or "Requiere corrección de antecedentes según dictamen ADC."
+                    obs = (ult_ver.observacion if ult_ver and ult_ver.observacion else None) or "Requiere corrección de antecedentes según dictamen ADC."
                     ver_num = ult_ver.version if ult_ver else 1
 
                     observados_rechazados.append({
