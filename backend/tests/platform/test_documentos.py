@@ -477,3 +477,18 @@ def test_patch_rechaza_un_estado_derivado(app_cliente, empresa_a, documento):
                           headers=empresa_a["headers"], json={"estado": "venc"})
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "TRANSICION_INVALIDA"
+
+
+@pytest.mark.parametrize("backend", ["azure", "aws", "s3", "gcp"])
+def test_blobs_locales_rechazados_cuando_storage_es_cloud(
+    app_cliente, monkeypatch, backend
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "storage_backend", backend)
+    r_up = app_cliente.put(f"{API}/blobs/upload?blob_path=x&exp=9999999999&sig=abc", content=b"1")
+    r_dl = app_cliente.get(f"{API}/blobs/download?blob_path=x&exp=9999999999&sig=abc")
+    assert r_up.status_code == 400
+    assert r_dl.status_code == 400
+    assert r_up.json()["error"]["code"] == "BACKEND_NO_LOCAL"
+    assert r_dl.json()["error"]["code"] == "BACKEND_NO_LOCAL"

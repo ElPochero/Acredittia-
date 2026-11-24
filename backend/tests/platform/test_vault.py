@@ -435,3 +435,29 @@ def test_una_credencial_revocada_no_se_rota(app_cliente, empresa_a, credencial):
                          json={"password": "Otra-Cl4ve!"})
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "CREDENCIAL_REVOCADA"
+
+
+def test_fallo_kms_cloud_devuelve_503_y_no_persiste_secreto(
+    app_cliente, empresa_a, contrato_a, monkeypatch, motor_admin
+):
+    from app.services.platform import crypto
+
+    pid = _plataforma(app_cliente, empresa_a, contrato_a, nombre="PORTAL KMS TEST")
+
+    class _BrokenWrapper(crypto.KeyWrapper):
+        def wrap(self, cek: bytes):
+            raise RuntimeError("KMS timeout")
+
+        def unwrap(self, wrapped: bytes, kid: str) -> bytes:
+            raise RuntimeError("KMS timeout")
+
+    monkeypatch.setattr(crypto, "get_wrapper", lambda: _BrokenWrapper())
+    r = _credencial(app_cliente, empresa_a, contrato_a, pid, usuario="f_kms", password=PASSWORD)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "VAULT_NO_DISPONIBLE"
+
+    with motor_admin.connect() as conn:
+        filas = conn.execute(sa.text(
+            "SELECT count(*) FROM plataforma_credenciales WHERE usuario = 'f_kms'"
+        )).scalar()
+        assert filas == 0
