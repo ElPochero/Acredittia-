@@ -606,7 +606,7 @@ def _cifrar(*, credencial_id, company_id, contrato_id, plataforma: str,
             usuario=usuario, password=password)
     except CredencialError as e:
         detalle = str(e).lower()
-        if "key vault" in detalle or "keyvault" in detalle or "vault" in detalle:
+        if any(k in detalle for k in ("key vault", "keyvault", "vault", "kms")):
             raise err(503, "VAULT_NO_DISPONIBLE", MSG_VAULT)
         logger.error("cifrado de credencial rechazado: %s", e)
         raise err(503, "CIFRADO_NO_DISPONIBLE",

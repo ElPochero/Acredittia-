@@ -5,15 +5,17 @@ Diseño:
 * El secreto se envuelve en un **JWE compact** con `alg=RSA-OAEP-256` y
   `enc=A256GCM`. La CEK (clave de contenido, 256 bits aleatoria por credencial)
   se envuelve con la clave pública RSA; el payload se cifra con AES-GCM.
-* La clave privada vive en **Azure Key Vault** respaldado por HSM. La API solo
-  posee la pública, y el desenvolvido se delega al vault (`unwrapKey`), de modo
-  que la clave privada nunca entra en el proceso.
+* La clave privada vive en un HSM/KMS gestionado (Azure Key Vault, AWS KMS o
+  GCP Cloud KMS). La API solo envuelve la CEK y el worker la desenvuelve, de
+  modo que la clave privada nunca entra en el proceso de la API.
 * `aud = acredittia-platform-worker`: el token es inservible fuera del worker de
   integración. La API construye JWE pero **no** los descifra.
 
 Backends (JWE_BACKEND):
-  keyvault  Azure Key Vault con DefaultAzureCredential (producción)
-  local     par RSA en KEYS_DIR, generado al primer uso (solo desarrollo y tests)
+  azure / keyvault  Azure Key Vault con DefaultAzureCredential
+  aws               AWS KMS asimétrico (RSAES_OAEP_SHA_256)
+  gcp               Google Cloud KMS asimétrico (RSA_DECRYPT_OAEP_3072_SHA256)
+  local             par RSA en KEYS_DIR, generado al primer uso (solo dev/tests)
 
 El payload descifrado nunca se serializa en logs ni en excepciones: los errores
 reportan únicamente `kid` y `jti`.
@@ -73,15 +75,22 @@ class AzureKeyVaultWrapper(KeyWrapper):
         from azure.keyvault.keys.crypto import CryptographyClient
 
         self._cred = DefaultAzureCredential()
+        self._vault_url = vault_url.rstrip("/")
         self._keys = KeyClient(vault_url=vault_url, credential=self._cred)
         self._key_name = key_name
         self._CryptographyClient = CryptographyClient
         self._cache: dict[str, object] = {}
 
     def _crypto_for(self, kid: str | None = None):
-        if kid and kid in self._cache:
-            return self._cache[kid], kid
-        key = self._keys.get_key(self._key_name, version=_version_de(kid) if kid else None)
+        raw_kid = kid[7:] if (kid and kid.startswith("azkv://")) else kid
+        if raw_kid and raw_kid.startswith(("http://", "https://")):
+            if not raw_kid.startswith(self._vault_url + "/"):
+                raise CredencialError("kid de Key Vault fuera del dominio configurado")
+        if raw_kid and raw_kid in self._cache:
+            return self._cache[raw_kid], raw_kid
+        key = self._keys.get_key(
+            self._key_name, version=_version_de(raw_kid) if raw_kid else None
+        )
         client = self._CryptographyClient(key, credential=self._cred)
         self._cache[key.id] = client
         return client, key.id
@@ -104,6 +113,95 @@ def _version_de(kid: str | None) -> str | None:
         return None
     partes = kid.rstrip("/").split("/")
     return partes[-1] if len(partes) >= 2 else None
+
+
+class AwsKmsKeyWrapper(KeyWrapper):
+    """wrap/unwrap delegados a AWS KMS asimétrico (RSAES_OAEP_SHA_256)."""
+
+    def __init__(self, key_id: str, region: str = ""):
+        import boto3
+
+        self._key_id = key_id
+        kw = {"region_name": region} if region else {}
+        self._kms = boto3.client("kms", **kw)
+
+    def _validar_kid(self, kid: str) -> str:
+        target = kid[9:] if kid.startswith("awskms://") else kid
+        if not target:
+            raise CredencialError("kid AWS KMS vacío")
+        if self._key_id.startswith("arn:"):
+            if ":key/" in self._key_id:
+                if target != self._key_id:
+                    raise CredencialError("kid AWS KMS no coincide con la clave configurada")
+            else:
+                prefijo_cuenta = ":".join(self._key_id.split(":")[:5]) + ":"
+                if not target.startswith(prefijo_cuenta):
+                    raise CredencialError("kid AWS KMS fuera de la cuenta o región configurada")
+        elif target.startswith("arn:") or target != self._key_id:
+            if not target.endswith(f"/{self._key_id}") and target != self._key_id:
+                raise CredencialError("kid AWS KMS no pertenece a la clave configurada")
+        return target
+
+    def wrap(self, cek: bytes) -> tuple[bytes, str]:
+        res = self._kms.encrypt(
+            KeyId=self._key_id,
+            Plaintext=cek,
+            EncryptionAlgorithm="RSAES_OAEP_SHA_256",
+        )
+        key_arn = res.get("KeyId") or self._key_id
+        kid = key_arn if key_arn.startswith("awskms://") else f"awskms://{key_arn}"
+        return res["CiphertextBlob"], kid
+
+    def unwrap(self, wrapped: bytes, kid: str) -> bytes:
+        target = self._validar_kid(kid)
+        res = self._kms.decrypt(
+            KeyId=target,
+            CiphertextBlob=wrapped,
+            EncryptionAlgorithm="RSAES_OAEP_SHA_256",
+        )
+        return res["Plaintext"]
+
+
+class GcpKmsKeyWrapper(KeyWrapper):
+    """Envuelve en proceso con la pública de Cloud KMS y desenvuelve vía HSM."""
+
+    def __init__(self, key_name: str):
+        from google.cloud import kms_v1
+
+        self._key_name = key_name.rstrip("/")
+        self._base_key_name = self._key_name.split("/cryptoKeyVersions/")[0]
+        self._client = kms_v1.KeyManagementServiceClient()
+        self._pub_cache: dict[str, object] = {}
+
+    def _version_activa(self) -> str:
+        if "/cryptoKeyVersions/" in self._key_name:
+            return self._key_name
+        return f"{self._key_name}/cryptoKeyVersions/1"
+
+    def wrap(self, cek: bytes) -> tuple[bytes, str]:
+        ver = self._version_activa()
+        if ver not in self._pub_cache:
+            resp = self._client.get_public_key(request={"name": ver})
+            self._pub_cache[ver] = serialization.load_pem_public_key(resp.pem.encode("utf-8"))
+        pub = self._pub_cache[ver]
+        wrapped = pub.encrypt(
+            cek,
+            padding.OAEP(
+                mgf=padding.MGF1(hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+        return wrapped, f"gcpkms://{ver}"
+
+    def unwrap(self, wrapped: bytes, kid: str) -> bytes:
+        ver = kid[9:] if kid.startswith("gcpkms://") else kid
+        if not (ver == self._base_key_name or ver.startswith(self._base_key_name + "/cryptoKeyVersions/")):
+            raise CredencialError("kid Cloud KMS fuera de la clave configurada")
+        res = self._client.asymmetric_decrypt(
+            request={"name": ver, "ciphertext": wrapped}
+        )
+        return res.plaintext
 
 
 class LocalKeyWrapper(KeyWrapper):
@@ -159,13 +257,24 @@ _wrapper: KeyWrapper | None = None
 def get_wrapper() -> KeyWrapper:
     global _wrapper
     if _wrapper is None:
-        if settings.jwe_backend == "keyvault":
+        backend = settings.jwe_backend
+        if backend in ("keyvault", "azure"):
             if not settings.azure_keyvault_url:
                 raise CredencialError("AZURE_KEYVAULT_URL no configurada")
             _wrapper = AzureKeyVaultWrapper(
                 settings.azure_keyvault_url, settings.keyvault_key_name)
-        else:
+        elif backend == "aws":
+            if not settings.aws_kms_key_id:
+                raise CredencialError("AWS_KMS_KEY_ID no configurada")
+            _wrapper = AwsKmsKeyWrapper(settings.aws_kms_key_id, settings.aws_region)
+        elif backend == "gcp":
+            if not settings.gcp_kms_key_name:
+                raise CredencialError("GCP_KMS_KEY_NAME no configurada")
+            _wrapper = GcpKmsKeyWrapper(settings.gcp_kms_key_name)
+        elif backend == "local":
             _wrapper = LocalKeyWrapper(settings.keys_dir, settings.keyvault_key_name)
+        else:
+            raise CredencialError(f"JWE_BACKEND no soportado: {backend}")
     return _wrapper
 
 

@@ -37,14 +37,14 @@ router = APIRouter(prefix="/blobs", tags=["blobs"])
 
 MAX_BYTES = settings.max_upload_mb * 1024 * 1024
 
-MSG_SOLO_LOCAL = ("Este endpoint solo opera con STORAGE_BACKEND=local; con Azure "
-                  "el navegador sube y descarga directamente contra el blob")
+MSG_SOLO_LOCAL = ("Este endpoint solo opera con STORAGE_BACKEND=local; en la nube "
+                  "el navegador sube y descarga directamente contra el almacenamiento")
 
 
 def _verificar(blob_path: str, exp: int, sig: str, modo: str) -> str:
     """Comprueba la firma y devuelve la ruta. 403 si no cuadra o si caducó."""
     if settings.storage_backend != "local":
-        # Con Azure la SAS la valida el propio storage; servir el blob desde aquí
+        # En la nube la URL firmada la valida el proveedor; servir el blob aquí
         # duplicaría el control de acceso en dos sitios.
         raise err(400, "BACKEND_NO_LOCAL", MSG_SOLO_LOCAL)
     ruta = (blob_path or "").strip()

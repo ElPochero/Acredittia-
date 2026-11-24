@@ -22,12 +22,18 @@ APScheduler>=3.10
 # --- Cifrado de credenciales de plataforma (JWE) ------------------------
 cryptography>=42.0
 
-# --- Azure -------------------------------------------------------------
-# Identidad administrada para Blob Storage y Key Vault.
+# --- Cloud Providers (imports perezosos según STORAGE_BACKEND / JWE_BACKEND / SECRET_BACKEND) ---
+# Azure: identidad administrada para Blob Storage y Key Vault
 azure-identity>=1.17
 azure-storage-blob>=12.20
 azure-keyvault-keys>=4.9
 azure-keyvault-secrets>=4.8
+# AWS y S3-compatible (MinIO, Cloudflare R2, Spaces)
+boto3>=1.34
+# Google Cloud Platform (Cloud Storage, Cloud KMS, Secret Manager)
+google-cloud-storage>=2.16
+google-cloud-kms>=2.21
+google-cloud-secret-manager>=2.20
 
 # --- Generación de reportes --------------------------------------------
 openpyxl>=3.1

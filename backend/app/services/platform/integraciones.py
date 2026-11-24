@@ -111,7 +111,7 @@ class KeyVaultSecretWriter(SecretWriter):
     """Azure Key Vault con `DefaultAzureCredential` (producción).
 
     El import del SDK es perezoso para que la API arranque sin las librerías de
-    Azure cuando `JWE_BACKEND=local`, igual que en `services/crypto.py`.
+    Azure cuando `SECRET_BACKEND=local`, igual que en `services/crypto.py`.
     """
 
     def __init__(self, vault_url: str):
@@ -125,8 +125,17 @@ class KeyVaultSecretWriter(SecretWriter):
         # El valor va serializado en JSON: una integración puede necesitar
         # varias piezas (usuario, clave, api_key, refresh_token) y Key Vault
         # guarda un único string por secreto.
-        self._cliente.set_secret(nombre_secreto(ref),
-                                 json.dumps(secreto, separators=(",", ":")))
+        nombre = nombre_secreto(ref)
+        payload = json.dumps(secreto, separators=(",", ":"))
+        try:
+            self._cliente.set_secret(nombre, payload)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "deleted" in msg or "conflict" in msg:
+                self._cliente.begin_recover_deleted_secret(nombre).wait()
+                self._cliente.set_secret(nombre, payload)
+            else:
+                raise
         logger.info("secreto escrito en Key Vault (ref=%s)", ref)
 
     def delete(self, ref: str) -> None:
@@ -138,12 +147,100 @@ class KeyVaultSecretWriter(SecretWriter):
                            type(e).__name__)
 
 
+class AwsSecretsManagerWriter(SecretWriter):
+    """AWS Secrets Manager con upsert y recuperación de secretos borrados."""
+
+    def __init__(self, region: str = "", prefix: str = "acredittia"):
+        import boto3
+
+        kw = {"region_name": region} if region else {}
+        self._sm = boto3.client("secretsmanager", **kw)
+        self._prefix = (prefix or "").strip("/")
+
+    def _sid(self, ref: str) -> str:
+        base = nombre_secreto(ref)
+        return f"{self._prefix}/{base}" if self._prefix else base
+
+    def write(self, ref: str, secreto: dict) -> None:
+        sid = self._sid(ref)
+        payload = json.dumps(secreto, separators=(",", ":"))
+        try:
+            self._sm.put_secret_value(SecretId=sid, SecretString=payload)
+        except Exception as exc:
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+            msg = str(exc).lower()
+            if code == "ResourceNotFoundException" or "not found" in msg:
+                self._sm.create_secret(Name=sid, SecretString=payload)
+            elif code == "InvalidRequestException" or "scheduled for deletion" in msg:
+                self._sm.restore_secret(SecretId=sid)
+                self._sm.put_secret_value(SecretId=sid, SecretString=payload)
+            else:
+                raise
+        logger.info("secreto escrito en AWS Secrets Manager (ref=%s)", ref)
+
+    def delete(self, ref: str) -> None:
+        try:
+            self._sm.delete_secret(SecretId=self._sid(ref), RecoveryWindowInDays=7)
+            logger.info("secreto borrado de AWS Secrets Manager (ref=%s)", ref)
+        except Exception as e:      # noqa: BLE001
+            logger.warning("no se pudo borrar el secreto %s: %s", ref, type(e).__name__)
+
+
+class GcpSecretManagerWriter(SecretWriter):
+    """Google Cloud Secret Manager con limpieza de versiones previas al rotar."""
+
+    def __init__(self, project_id: str):
+        from google.cloud import secretmanager
+
+        self._project_id = project_id
+        self._client = secretmanager.SecretManagerServiceClient()
+
+    def _parent(self) -> str:
+        return f"projects/{self._project_id}"
+
+    def _secret_path(self, ref: str) -> str:
+        return f"projects/{self._project_id}/secrets/{nombre_secreto(ref)}"
+
+    def write(self, ref: str, secreto: dict) -> None:
+        sid = nombre_secreto(ref)
+        secret_path = self._secret_path(ref)
+        try:
+            self._client.get_secret(request={"name": secret_path})
+        except Exception:
+            self._client.create_secret(
+                request={
+                    "parent": self._parent(),
+                    "secret_id": sid,
+                    "secret": {"replication": {"automatic": {}}},
+                }
+            )
+        payload = json.dumps(secreto, separators=(",", ":")).encode("utf-8")
+        nueva = self._client.add_secret_version(
+            request={"parent": secret_path, "payload": {"data": payload}}
+        )
+        for ver in self._client.list_secret_versions(request={"parent": secret_path}):
+            estado = getattr(ver.state, "name", ver.state)
+            if ver.name != nueva.name and estado in ("ENABLED", 1):
+                try:
+                    self._client.destroy_secret_version(request={"name": ver.name})
+                except Exception:  # noqa: BLE001
+                    pass
+        logger.info("secreto escrito en GCP Secret Manager (ref=%s)", ref)
+
+    def delete(self, ref: str) -> None:
+        try:
+            self._client.delete_secret(request={"name": self._secret_path(ref)})
+            logger.info("secreto borrado de GCP Secret Manager (ref=%s)", ref)
+        except Exception as e:      # noqa: BLE001
+            logger.warning("no se pudo borrar el secreto %s: %s", ref, type(e).__name__)
+
+
 class LocalSecretWriter(SecretWriter):
     """Archivo JSON en `KEYS_DIR/secrets.json`.
 
     **SOLO desarrollo y tests.** Los secretos quedan en claro en el disco del
     contenedor; no hay rotación, ni auditoría, ni borrado seguro. En cualquier
-    entorno compartido hay que usar `JWE_BACKEND=keyvault`.
+    entorno compartido hay que usar un vault gestionado (`azure`, `aws`, `gcp`).
     """
 
     def __init__(self, keys_dir: str):
@@ -186,15 +283,26 @@ _writer: SecretWriter | None = None
 
 
 def get_secret_writer() -> SecretWriter:
-    """Backend de secretos según `JWE_BACKEND` (keyvault | local)."""
+    """Backend de secretos según `SECRET_BACKEND` (o `JWE_BACKEND`)."""
     global _writer
     if _writer is None:
-        if settings.jwe_backend == "keyvault":
+        backend = (settings.secret_backend or settings.jwe_backend).lower()
+        if backend in ("keyvault", "azure"):
             if not settings.azure_keyvault_url:
                 raise CredencialError("AZURE_KEYVAULT_URL no configurada")
             _writer = KeyVaultSecretWriter(settings.azure_keyvault_url)
-        else:
+        elif backend == "aws":
+            _writer = AwsSecretsManagerWriter(
+                settings.aws_region, settings.aws_secrets_prefix
+            )
+        elif backend == "gcp":
+            if not settings.gcp_project_id:
+                raise CredencialError("GCP_PROJECT_ID no configurado")
+            _writer = GcpSecretManagerWriter(settings.gcp_project_id)
+        elif backend == "local":
             _writer = LocalSecretWriter(settings.keys_dir)
+        else:
+            raise CredencialError(f"SECRET_BACKEND no soportado: {backend}")
     return _writer
 
 
