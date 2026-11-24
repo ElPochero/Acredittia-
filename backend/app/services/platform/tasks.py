@@ -1677,39 +1677,23 @@ def purgar_temporales(horas: int = 24) -> int:
     sin purga crecen indefinidamente y contienen datos personales (cédulas), que
     es justo lo que la retención del §19 obliga a acotar.
 
-    Con `STORAGE_BACKEND=azure` conviene además una regla de ciclo de vida en la
-    cuenta de almacenamiento: es más barata y no depende de que el worker corra.
+    En producción (Azure, AWS S3, GCS, MinIO) conviene además configurar una
+    regla de ciclo de vida en el bucket/contenedor sobre el prefijo `tmp/`.
     """
-    import time
+    from datetime import datetime, timedelta, timezone
 
-    from ...config import settings
-    from .storage import LocalStorage, get_storage
+    from .storage import get_storage
 
     st = get_storage()
-    limite = time.time() - horas * 3600
+    corte = datetime.now(timezone.utc) - timedelta(hours=horas)
     borrados = 0
-
-    if isinstance(st, LocalStorage):
-        base = os.path.join(st.base, "tmp")
-        if not os.path.isdir(base):
-            return 0
-        for raiz, _dirs, archivos in os.walk(base):
-            for nombre in archivos:
-                ruta = os.path.join(raiz, nombre)
-                try:
-                    if os.path.getmtime(ruta) < limite:
-                        os.remove(ruta)
-                        borrados += 1
-                except OSError:
-                    continue
-        return borrados
-
     try:
-        contenedor = st.client.get_container_client(settings.azure_blob_container)
-        for blob in contenedor.list_blobs(name_starts_with="tmp/"):
-            creado = getattr(blob, "creation_time", None) or blob.last_modified
-            if creado and creado.timestamp() < limite:
-                st.delete(blob.name)
+        for meta in st.list_prefix("tmp/"):
+            creado = meta.created_at
+            if creado.tzinfo is None:
+                creado = creado.replace(tzinfo=timezone.utc)
+            if creado < corte:
+                st.delete(meta.blob_path)
                 borrados += 1
     except Exception:  # noqa: BLE001
         logger.exception("no se pudieron purgar los blobs temporales")
