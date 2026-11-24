@@ -1,0 +1,44 @@
+{
+  "family": "acredittia-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "${AWS_ECS_EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${AWS_ECS_API_TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "acredittia-api",
+      "image": "${AWS_ECR_IMAGE}",
+      "essential": true,
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
+      "command": ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "CLOUD_PROVIDER", "value": "aws" },
+        { "name": "AWS_REGION", "value": "${AWS_REGION}" },
+        { "name": "STORAGE_BACKEND", "value": "aws" },
+        { "name": "S3_BUCKET", "value": "${S3_BUCKET}" },
+        { "name": "JWE_BACKEND", "value": "aws" },
+        { "name": "AWS_KMS_KEY_ID", "value": "${AWS_KMS_KEY_ID}" },
+        { "name": "SECRET_BACKEND", "value": "aws" },
+        { "name": "QUEUE_BACKEND", "value": "celery" },
+        { "name": "SCHEMA_DIR", "value": "/schema" },
+        { "name": "SCHEMA_VERSION_ESPERADA", "value": "20" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "${AWS_SECRET_DATABASE_URL_ARN}" },
+        { "name": "REDIS_URL", "valueFrom": "${AWS_SECRET_REDIS_URL_ARN}" },
+        { "name": "JWT_SECRET", "valueFrom": "${AWS_SECRET_JWT_ARN}" },
+        { "name": "GEMINI_API_KEY", "valueFrom": "${AWS_SECRET_GEMINI_ARN}" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 40
+      }
+    }
+  ]
+}

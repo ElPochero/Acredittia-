@@ -1,0 +1,52 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: acredittia-api
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "4"
+    spec:
+      serviceAccountName: ${GCP_API_SA_EMAIL}
+      containers:
+        - image: ${GCP_IMAGE}
+          ports:
+            - containerPort: 8000
+          args: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          env:
+            - name: APP_ENV
+              value: production
+            - name: CLOUD_PROVIDER
+              value: gcp
+            - name: GCP_PROJECT_ID
+              value: "${GCP_PROJECT_ID}"
+            - name: STORAGE_BACKEND
+              value: gcp
+            - name: GCP_STORAGE_BUCKET
+              value: "${GCP_STORAGE_BUCKET}"
+            - name: GCP_SERVICE_ACCOUNT_EMAIL
+              value: "${GCP_API_SA_EMAIL}"
+            - name: JWE_BACKEND
+              value: gcp
+            - name: GCP_KMS_KEY_NAME
+              value: "${GCP_KMS_KEY_NAME}"
+            - name: SECRET_BACKEND
+              value: gcp
+            - name: QUEUE_BACKEND
+              value: celery
+            - name: REDIS_URL
+              value: "${REDIS_URL}"
+            - name: DATABASE_URL
+              value: "${DATABASE_URL}"
+            - name: JWT_SECRET
+              value: "${JWT_SECRET}"
+            - name: SCHEMA_DIR
+              value: /schema
+            - name: SCHEMA_VERSION_ESPERADA
+              value: "20"
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: 1Gi

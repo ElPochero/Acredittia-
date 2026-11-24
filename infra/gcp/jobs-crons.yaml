@@ -1,0 +1,55 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: acredittia-migrate
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          serviceAccountName: ${GCP_MIGRATE_SA_EMAIL}
+          maxRetries: 0
+          containers:
+            - image: ${GCP_IMAGE}
+              command: ["python"]
+              args: ["-m", "migrate.run"]
+              env:
+                - name: DATABASE_URL
+                  value: "${MIGRATE_DATABASE_URL}"
+                - name: SCHEMA_DIR
+                  value: /schema
+---
+# Cloud Scheduler -> Cloud Run Jobs equivalentes a infra/azure/cron-*.yaml:
+# - acredittia-cron-diario   ("30 0 * * *"): python -c "from worker.celery_app import cron_diario; cron_diario()"
+# - acredittia-cron-reportes ("5 * * * *"):  python -c "from worker.celery_app import cron_reportes_programados; cron_reportes_programados()"
+# - acredittia-cron-purga    ("0 4 * * *"):  python -c "from worker.celery_app import cron_purga_temporales; cron_purga_temporales()"
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: acredittia-cron-purga
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          serviceAccountName: ${GCP_WORKER_SA_EMAIL}
+          maxRetries: 0
+          containers:
+            - image: ${GCP_IMAGE}
+              command: ["python"]
+              args: ["-c", "from worker.celery_app import cron_purga_temporales; cron_purga_temporales()"]
+              env:
+                - name: CLOUD_PROVIDER
+                  value: gcp
+                - name: GCP_PROJECT_ID
+                  value: "${GCP_PROJECT_ID}"
+                - name: STORAGE_BACKEND
+                  value: gcp
+                - name: GCP_STORAGE_BUCKET
+                  value: "${GCP_STORAGE_BUCKET}"
+                - name: QUEUE_BACKEND
+                  value: celery
+                - name: REDIS_URL
+                  value: "${REDIS_URL}"
+                - name: DATABASE_URL
+                  value: "${WORKER_DATABASE_URL}"

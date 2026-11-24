@@ -1,0 +1,103 @@
+# Stack productivo agnóstico (VPS / On-Prem / Dokploy / Coolify / MinIO)
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-acredittia}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
+    command: postgres -c log_error_verbosity=terse
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-acredittia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["minio"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-acredittia}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-cambialo-en-produccion}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  migrate:
+    build: ../../backend
+    command: python -m migrate.run
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ../../.env
+    volumes:
+      - ../../modelo_datos:/schema:ro
+
+  api:
+    build: ../../backend
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    env_file: ../../.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      QUEUE_BACKEND: celery
+    volumes:
+      - ../../modelo_datos:/schema:ro
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ../../backend
+    restart: unless-stopped
+    command: celery -A worker.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    env_file: ../../.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      QUEUE_BACKEND: celery
+    volumes:
+      - ../../modelo_datos:/schema:ro
+
+  beat:
+    build: ../../backend
+    restart: unless-stopped
+    command: celery -A worker.celery_app beat --loglevel=info -s /tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: ../../.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      QUEUE_BACKEND: celery
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

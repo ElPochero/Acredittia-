@@ -1,0 +1,35 @@
+{
+  "description": "Reglas EventBridge para tareas programadas y migración en AWS ECS Fargate (equivalentes a infra/azure/cron-*.yaml)",
+  "schedules": [
+    {
+      "name": "acredittia-migrate-manual",
+      "scheduleExpression": "manual",
+      "command": ["python", "-m", "migrate.run"],
+      "taskRoleArn": "${AWS_ECS_MIGRATE_TASK_ROLE_ARN}"
+    },
+    {
+      "name": "acredittia-worker-service",
+      "type": "ecs-service",
+      "command": ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=2"],
+      "taskRoleArn": "${AWS_ECS_WORKER_TASK_ROLE_ARN}"
+    },
+    {
+      "name": "acredittia-cron-diario",
+      "scheduleExpression": "cron(30 0 * * ? *)",
+      "command": ["python", "-c", "from worker.celery_app import cron_diario; cron_diario()"],
+      "taskRoleArn": "${AWS_ECS_WORKER_TASK_ROLE_ARN}"
+    },
+    {
+      "name": "acredittia-cron-reportes",
+      "scheduleExpression": "cron(5 * * * ? *)",
+      "command": ["python", "-c", "from worker.celery_app import cron_reportes_programados; cron_reportes_programados()"],
+      "taskRoleArn": "${AWS_ECS_WORKER_TASK_ROLE_ARN}"
+    },
+    {
+      "name": "acredittia-cron-purga",
+      "scheduleExpression": "cron(0 4 * * ? *)",
+      "command": ["python", "-c", "from worker.celery_app import cron_purga_temporales; cron_purga_temporales()"],
+      "taskRoleArn": "${AWS_ECS_WORKER_TASK_ROLE_ARN}"
+    }
+  ]
+}

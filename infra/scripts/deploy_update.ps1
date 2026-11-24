@@ -1,40 +1,84 @@
+﻿param(
+    [ValidateSet("", "azure", "aws", "gcp", "compose")]
+    [string]$Provider = "",
+    [string]$ImageTag = "v20"
+)
+
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $RepoRoot
 
-Write-Host "Iniciando sesión en ACR localmente..."
-az acr login --name acredittiaregistry
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló el login a ACR"; exit $LASTEXITCODE }
+if (-not $Provider) {
+    $Provider = if ($env:CLOUD_PROVIDER -and $env:CLOUD_PROVIDER -ne "local" -and $env:CLOUD_PROVIDER -ne "custom") {
+        $env:CLOUD_PROVIDER
+    } else {
+        "azure"
+    }
+}
 
-Write-Host "Iniciando build local de Docker..."
-docker build -t acredittiaregistry.azurecr.io/acredittia-backend:latest -t acredittiaregistry.azurecr.io/acredittia-backend:v18 ./backend
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló el build de Docker"; exit $LASTEXITCODE }
+switch ($Provider) {
+    "azure" {
+        $Registry = if ($env:ACR_LOGIN_SERVER) { $env:ACR_LOGIN_SERVER } else { "acredittiaregistry.azurecr.io" }
+        $AcrName = $Registry.Split('.')[0]
+        $Rg = if ($env:AZURE_RESOURCE_GROUP) { $env:AZURE_RESOURCE_GROUP } else { "rg-acredittia" }
 
-Write-Host "Subiendo imagen a Azure Container Registry..."
-docker push acredittiaregistry.azurecr.io/acredittia-backend:latest
-docker push acredittiaregistry.azurecr.io/acredittia-backend:v18
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló el push de Docker a ACR"; exit $LASTEXITCODE }
+        Write-Host "Iniciando sesión en ACR ($AcrName)..."
+        az acr login --name $AcrName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Actualizando imagen del Job de migración..."
-az containerapp job update --resource-group rg-acredittia --name acredittia-migrate --image acredittiaregistry.azurecr.io/acredittia-backend:v18
+        docker build -t "${Registry}/acredittia-backend:latest" -t "${Registry}/acredittia-backend:${ImageTag}" ./backend
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Iniciando Job de migración de base de datos..."
-az containerapp job start --resource-group rg-acredittia --name acredittia-migrate
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló el inicio del Job de migración"; exit $LASTEXITCODE }
+        docker push "${Registry}/acredittia-backend:latest"
+        docker push "${Registry}/acredittia-backend:${ImageTag}"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Esperando 30 segundos a que finalice la migración..."
-Start-Sleep -Seconds 30
+        az containerapp job update --resource-group $Rg --name acredittia-migrate --image "${Registry}/acredittia-backend:${ImageTag}"
+        az containerapp job start --resource-group $Rg --name acredittia-migrate
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Actualizando Container App: API..."
-az containerapp update --resource-group rg-acredittia --name acredittia-api --image acredittiaregistry.azurecr.io/acredittia-backend:v18 --set-env-vars SCHEMA_VERSION_ESPERADA=18
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló la actualización de la API"; exit $LASTEXITCODE }
+        Start-Sleep -Seconds 30
+        az containerapp update --resource-group $Rg --name acredittia-api --image "${Registry}/acredittia-backend:${ImageTag}" --set-env-vars SCHEMA_VERSION_ESPERADA=20
+        az containerapp update --resource-group $Rg --name acredittia-worker --image "${Registry}/acredittia-backend:${ImageTag}"
+        az containerapp job update --resource-group $Rg --name acredittia-cron-diario --image "${Registry}/acredittia-backend:${ImageTag}"
+        az containerapp job update --resource-group $Rg --name acredittia-cron-reportes --image "${Registry}/acredittia-backend:${ImageTag}"
+        az containerapp job update --resource-group $Rg --name acredittia-cron-purga --image "${Registry}/acredittia-backend:${ImageTag}"
+    }
+    "aws" {
+        $Region = if ($env:AWS_REGION) { $env:AWS_REGION } else { "us-east-1" }
+        $Registry = $env:AWS_ECR_REGISTRY
+        $Cluster = if ($env:AWS_ECS_CLUSTER) { $env:AWS_ECS_CLUSTER } else { "acredittia-cluster" }
+        if (-not $Registry) { Write-Error "Define AWS_ECR_REGISTRY para desplegar en AWS"; exit 1 }
 
-Write-Host "Actualizando Container App: Worker..."
-az containerapp update --resource-group rg-acredittia --name acredittia-worker --image acredittiaregistry.azurecr.io/acredittia-backend:v18
-if ($LASTEXITCODE -ne 0) { Write-Error "Falló la actualización del Worker"; exit $LASTEXITCODE }
+        aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin $Registry
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Actualizando Jobs: Crons..."
-az containerapp job update --resource-group rg-acredittia --name acredittia-cron-diario --image acredittiaregistry.azurecr.io/acredittia-backend:v18
-az containerapp job update --resource-group rg-acredittia --name acredittia-cron-reportes --image acredittiaregistry.azurecr.io/acredittia-backend:v18
-az containerapp job update --resource-group rg-acredittia --name acredittia-cron-purga --image acredittiaregistry.azurecr.io/acredittia-backend:v18
+        docker build -t "${Registry}/acredittia-backend:${ImageTag}" ./backend
+        docker push "${Registry}/acredittia-backend:${ImageTag}"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "¡Despliegue completo a Azure finalizado con éxito!"
+        aws ecs run-task --cluster $Cluster --launch-type FARGATE --task-definition acredittia-migrate
+        aws ecs update-service --cluster $Cluster --service acredittia-api --force-new-deployment
+        aws ecs update-service --cluster $Cluster --service acredittia-worker --force-new-deployment
+    }
+    "gcp" {
+        $Region = if ($env:GCP_REGION) { $env:GCP_REGION } else { "us-central1" }
+        $Image = $env:GCP_IMAGE
+        if (-not $Image) { Write-Error "Define GCP_IMAGE (Artifact Registry URI) para desplegar en GCP"; exit 1 }
+
+        docker build -t $Image ./backend
+        docker push $Image
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        gcloud run jobs execute acredittia-migrate --region $Region --wait
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        gcloud run services update acredittia-api --image $Image --region $Region
+        gcloud run services update acredittia-worker --image $Image --region $Region
+    }
+    "compose" {
+        docker compose -f infra/compose-prod/docker-compose.prod.yml up -d --build
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+}
+
+Write-Host "¡Despliegue ($Provider) finalizado con éxito!"
