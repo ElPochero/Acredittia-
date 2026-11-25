@@ -88,8 +88,8 @@ class Settings(BaseSettings):
     ia_backend: str = "gemini"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
-    # Verificador post-generación del chat (Critic/Guardrail de razonabilidad).
-    gemini_verifier_model: str = "gemini-3.5-flash-lite"
+    # Verificador post-generación del chat (Critic/Guardrail vía Gemini Decisions API).
+    gemini_verifier_model: str = "gemini-decision-1"
     ia_verifier_enabled: bool = True
     ia_verifier_timeout_s: float = 6.0
     # Embeddings para RAG vía Google Gemini (OpenAI-compatible endpoint).
